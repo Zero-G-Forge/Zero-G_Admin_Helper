@@ -1,0 +1,5 @@
+is_global = true
+build_property.RootNamespace = APIToolsTests
+build_property.ProjectDir = /mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ZeroGBridge/lib/.EmpyrionAPITools-0-10.0/APIToolsTests/
+build_property.EnableComHosting = 
+build_property.EnableGeneratedComInterfaceComImportInterop = 

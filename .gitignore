@@ -1,0 +1,34 @@
+cat <<EOF > .gitignore
+# Exclude Python virtual environment
+.venv/
+
+# Exclude compiled bytecode
+__pycache__/
+*.py[cod]
+
+# Exclude IDE folders
+.vscode/
+.vs/
+
+# Exclude local runtime data
+data/
+*.json
+
+# Allow Python files inside the data directory
+!data/*.py
+
+# Exclude Token Data
+git_token.txt
+
+# Exclude scratchpad
+*.scratchpad/
+
+# ==========================================
+# C# / ZeroGBridge Build & Runtime Exclusions
+# ==========================================
+ZeroGBridge/bin/
+ZeroGBridge/obj/
+*.user
+*.suo
+*.csproj.user
+EOF
