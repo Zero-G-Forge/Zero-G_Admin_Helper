@@ -24,7 +24,7 @@ git_token.txt
 *.scratchpad/
 
 # Exclude AI Instructional Files
-AI_Instructions.md
+AI_INSTRUCTIONS.md
 !.instruction/
 !.instruction/README.md
 
