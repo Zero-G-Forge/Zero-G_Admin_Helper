@@ -32,22 +32,29 @@ Primary Language: Python.
 GUI Framework: PyQt6.
 Namespace Rigor: Strict usage of scoped enum namespaces within the GUI library (such as explicitly utilizing Qt.AlignmentFlag and Qt.Orientation).
 Target Host & Integration environment: Dedicated Empyrion: Galactic Survival game server hosted via GTXGaming.
+
 🏗️ Architectural & File System Constraints
-Feature-First Pattern: All application functional logic, controllers, and sub-views are isolated cleanly within the /features/ subdirectory. Cross-dependency between distinct features is strictly prohibited.
-Fixed Entry Points & Discovery: Root paths are locked. Discovery relies explicitly on the fixed entry points ZAH.py (Master Lifecycle Orchestrator) and startup.py (Discovery Initialization Script).
-State Separation Protocol: Dynamic runtime data, persistent cache databases, configurations, and application telemetry (/data, /logs, pycache) are strictly excluded from Git tracking via .gitignore.
+        Feature-First Pattern: All application functional logic, controllers, and sub-views are isolated cleanly within the /features/ subdirectory. Cross-dependency between distinct features is strictly prohibited.
+        Fixed Entry Points & Discovery: Root paths are locked. Discovery relies explicitly on the fixed entry points ZAH.py (Master Lifecycle Orchestrator) and startup.py (Discovery Initialization Script).
+        State Separation Protocol: Dynamic runtime data, persistent cache databases, configurations, and application telemetry (/data, /logs, pycache) are strictly excluded from Git tracking via .gitignore.
+
 📡 Networking & Server Calibration Constraints
-Asynchronous Thread Execution: Multi-threaded architecture is mandatory. Dedicated asynchronous background threads handle heavy workloads—such as parsing raw stdout server console logs and broadcasting secure live in-game chat—to eliminate UI-thread latency and freeze-ups.
-GTXGaming Hardware Calibration: All outbound network command strings pushed to the server must handle explicit formatting calibrations:
-Must utilize Windows-style \r\n line terminations.
-Must include a mandatory 500ms input buffer delay between commands.
-UI Integrity: Strict reliance on QSS (Qt Style Sheets) border-image properties. This is mandated to prevent high-detail vector asset corner-brackets and custom neon glow textures from warping or stretching across variable monitor resolutions.
-Fixed Dimensions: The application orchestrator expects an initial canvas resolution layout of 1000x750 pixels, while specific configuration components like the AccountOnboardingWizard enforce a fixed structural window size of 512x512 pixels.
+        Asynchronous Thread Execution: Multi-threaded architecture is mandatory. Dedicated asynchronous background threads handle heavy workloads—such as parsing raw stdout server console logs and broadcasting secure live in-game chat—to eliminate UI-thread latency and freeze-ups.
+        GTXGaming Hardware Calibration: All outbound network command strings pushed to the server must handle explicit formatting calibrations:
+        Must utilize Windows-style \r\n line terminations.
+        Must include a mandatory 500ms input buffer delay between commands.
+        UI Integrity: Strict reliance on QSS (Qt Style Sheets) border-image properties. This is mandated to prevent high-detail vector asset corner-brackets and custom neon glow textures from warping or stretching across variable monitor resolutions.
+        Fixed Dimensions: The application orchestrator expects an initial canvas resolution layout of 1000x750 pixels, while specific configuration components like the AccountOnboardingWizard enforce a fixed structural window size of 512x512 pixels.
+
 📦 System Architecture & Directory Patterns
-This repository enforces strict Feature-First Pattern boundaries and State Separation Protocols. All code tracking is restricted by these root namespaces:
-/mnt/Zero-G_Files/Zero-G_Admin_Helper/ Root Directory
+        This repository enforces strict Feature-First Pattern boundaries and State Separation Protocols. All code tracking is restricted by these root namespaces:
+/mnt/Zero-G_Files/Zero-G_Admin_Helper/ : Root Directory
 
 ZAH.py: The main entry point for the application. It initiates the UI thread and orchestrates the startup sequence.
+.instructions/ : AI Instructions and Constraints
+
+    AI_INSTRUCTIONS.md
+    
 .gitignore
 check_milestone_30.py
 check_milestone_60.py
@@ -59,20 +66,24 @@ Zero-G Admin Helper.code-workspace: VS Code workspace save file.
 assets/ (Contains UI and visual elements required for the application.)
 
 branding/: Contains logos, icons, and visual identity assets.
+
 backgrounds/ / buttons/: Graphical components for the UI.
+
 additional_assets/: Misc media or supporting UI elements.
-ZAH.css: Stylesheet defining the visual theme, layout, and component aesthetics.
+
+    ZAH.css: Stylesheet defining the visual theme, layout, and component aesthetics.
+
 data/ (Persistent storage and configuration files.)
 
-users.json / player_profiles.json: Core databases for user accounts and player statistics.
-server_config.json / mirror_config.json: Settings for server connections and mirroring behavior.
-telemetry_cache.json / player_registry_cache.json: Temporary storage for collected data.
-mirror_config.json: ftp login credentials
-player_registry.py: Python module to interact with and manage the player database.
-playfield_registry.py: Python module to interact with and manage playfields database.
-secret.key: Encryption key used to secure sensitive data.
-server_mirror.log: Specific logs regarding server mirroring processes.
-features/ (Modular business logic organized by domain.)
+    users.json / player_profiles.json: Core databases for user accounts and player statistics.
+    server_config.json / mirror_config.json: Settings for server connections and mirroring behavior.
+    telemetry_cache.json / player_registry_cache.json: Temporary storage for collected data.
+    mirror_config.json: ftp login credentials
+    player_registry.py: Python module to interact with and manage the player database.
+    playfield_registry.py: Python module to interact with and manage playfields database.
+    secret.key: Encryption key used to secure sensitive data.
+    server_mirror.log: Specific logs regarding server mirroring processes.
+    features/ (Modular business logic organized by domain.)
 
 auth/: Manages user identity/credentials.    
 
@@ -126,6 +137,8 @@ obj/: Contains compilation files
 Properties/:
 
     AssemblyInfo.cs
+
+
 🔄 Automated Lifecycle & Sequential Flows
 1. Boot Diagnostics & Key Milestone Logic Recap
 At 30% Progress: The loader's timing loop pauses and checks if there are accounts with "keep me logged in", if there are login screen is bypassed if no then the Login Screen Overlay is activated, Progress bar is kept frozen until successful user login or account creation has been verified.
