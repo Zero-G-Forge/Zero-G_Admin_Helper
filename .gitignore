@@ -24,7 +24,9 @@ git_token.txt
 *.scratchpad/
 
 # Exclude AI Instructional Files
-*.instruction/
+AI_Instructions.md
+!.instruction/
+!.instruction/README.md
 
 # ==========================================
 # C# / ZeroGBridge Build & Runtime Exclusions
