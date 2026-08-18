@@ -23,10 +23,13 @@ git_token.txt
 # Exclude scratchpad
 *.scratchpad/
 
+# Exclude AI Instructional Files
+*.instruction/
+
 # ==========================================
 # C# / ZeroGBridge Build & Runtime Exclusions
 # ==========================================
-ZeroGBridge/bin/
+!ZeroGBridge/bin/
 ZeroGBridge/obj/
 *.user
 *.suo
