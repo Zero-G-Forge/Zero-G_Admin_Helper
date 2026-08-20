@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Newtonsoft.Json;
 using Eleon.Modding;
@@ -8,7 +10,7 @@ using Eleon.Modding;
 namespace ZeroGBridge
 {
     /// <summary>
-    /// Main entry point for ZeroGBridge mod, conforming strictly to the modern IMod interface contract using ModApi.dll.
+    /// Main entry point for ZeroGBridge mod, tuned precisely to Empyrion's dedicated server file layout.
     /// </summary>
     public class ModMain : IMod
     {
@@ -18,13 +20,28 @@ namespace ZeroGBridge
         private bool _isRunning;
         private readonly object _fileLock = new object();
         private string _logFilePath;
+        private int _logCounter = 0;
+        private long _lastLogFilePosition = 0;
+        private string _targetLogPath = null;
+
+        // In-memory thread-safe player cache
+        private readonly ConcurrentDictionary<string, object> _activePlayers = new ConcurrentDictionary<string, object>();
+
+        // Exact match regex for Empyrion's "Got player id:" connection line
+        private static readonly Regex PlayerGotIdRegex = new Regex(
+            @"Got\s+player\s+id:\s*CId=(?<cid>\d+),\s*EId=(?<eid>-?\d+),\s*(?<steam>\d+)/=/'(?<name>[^']+)'", 
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+        // Regex for explicit disconnections
+        private static readonly Regex PlayerLeaveRegex = new Regex(
+            @"(Player\s+'(?<steam>\d+)/(?<name>[^']*)'\s+disconnected|Player\s+with\s+id\s+(?<eid>\d+)\s+disconnected|disconnected:\s*(?<steam>\d+)|left\s+the\s+game)", 
+            RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         public void Init(IModApi modApi)
         {
             _modApi = modApi;
             _isRunning = true;
 
-            // Resolve safe logging directories inside the server path
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             string logDir = Path.Combine(baseDir, "Logs", "ZeroGBridge");
             if (!Directory.Exists(logDir))
@@ -32,49 +49,130 @@ namespace ZeroGBridge
                 Directory.CreateDirectory(logDir);
             }
             _logFilePath = Path.Combine(logDir, "live_telemetry.txt");
-
             Console.WriteLine("[ZGB] INFO: ZeroGBridge initialized via ModApi framework.");
 
-            // Initialize and start the background TCP telemetry stream server on port 30100
-            _telemetryServer = new TelemetryServer(30100, this);
+            // Target the root DedicatedServer.log file explicitly based on server startup arguments
+            ResolveDedicatedLogPath(baseDir);
+
+            _telemetryServer = new TelemetryServer(30080, this);
             _telemetryServer.Start();
 
-            // Start background loop for file writing and state evaluations
-            _telemetryThread = new Thread(new ThreadStart(TelemetryLoop))
+            _telemetryThread = new Thread(TelemetryLoop)
             {
                 IsBackground = true,
-                Name = "ZeroGBridge_TelemetryLoop"
+                Name = "ZeroGBridge_Telemetry_Loop"
             };
             _telemetryThread.Start();
         }
 
-        private int _logCounter = 0;
+        private void ResolveDedicatedLogPath(string baseDir)
+        {
+            // Empyrion stores DedicatedServer.log in the root base directory
+            string primaryLog = Path.Combine(baseDir, "DedicatedServer.log");
+            if (File.Exists(primaryLog))
+            {
+                _targetLogPath = primaryLog;
+                FileInfo fi = new FileInfo(_targetLogPath);
+                _lastLogFilePosition = fi.Length; // Tail from current end
+                Console.WriteLine($"[ZGB] INFO: Attached log tailer to {_targetLogPath}");
+            }
+            else
+            {
+                // Fallback scan if named differently
+                try
+                {
+                    string logsFolder = Path.Combine(baseDir, "Logs");
+                    if (Directory.Exists(logsFolder))
+                    {
+                        var files = Directory.GetFiles(logsFolder, "*.log");
+                        if (files.Length > 0)
+                        {
+                            Array.Sort(files);
+                            _targetLogPath = files[files.Length - 1];
+                            FileInfo fi = new FileInfo(_targetLogPath);
+                            _lastLogFilePosition = fi.Length;
+                        }
+                    }
+                }
+                catch { }
+            }
+        }
+
+        private void PollDedicatedLogFile()
+        {
+            if (string.IsNullOrEmpty(_targetLogPath) || !File.Exists(_targetLogPath))
+            {
+                ResolveDedicatedLogPath(AppDomain.CurrentDomain.BaseDirectory);
+                return;
+            }
+
+            try
+            {
+                using (var fs = new FileStream(_targetLogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    if (fs.Length < _lastLogFilePosition)
+                    {
+                        _lastLogFilePosition = 0; // File rotated or reset
+                    }
+
+                    if (fs.Length > _lastLogFilePosition)
+                    {
+                        fs.Seek(_lastLogFilePosition, SeekOrigin.Begin);
+                        using (var sr = new StreamReader(fs))
+                        {
+                            string line;
+                            while ((line = sr.ReadLine()) != null)
+                            {
+                                IngestServerLogLine(line);
+                            }
+                            _lastLogFilePosition = fs.Position;
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
 
         private void TelemetryLoop()
         {
-            // Record exact process start time for accurate server uptime tracking
             DateTime processStartTime = System.Diagnostics.Process.GetCurrentProcess().StartTime;
 
             while (_isRunning)
             {
                 try
                 {
-                    int onlineCount = 0;
-                    List<object> playerList = new List<object>();
+                    // Tail server log for active player events
+                    PollDedicatedLogFile();
 
-                    // Calculate true server process runtime dynamically from process start
+                    var playerList = new List<object>(_activePlayers.Values);
+                    int onlineCount = playerList.Count;
+
                     TimeSpan uptimeSpan = DateTime.Now - processStartTime;
-                    string uptimeStr = $"{uptimeSpan.Hours:D2}h:{uptimeSpan.Minutes:D2}m"; // Strict hours and minutes format
+                    string uptimeStr = $"{uptimeSpan.Hours:D2}h:{uptimeSpan.Minutes:D2}m";
 
-                    // Precise synchronized timestamp matching strict "dd-HH:mm:ss" format
                     string preciseTimestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss");
                     string heapStr = (GC.GetTotalMemory(false) / (1024 * 1024)).ToString() + "MB";
-                    float fpsVal = 40.0f; 
-                    int pfsCount = onlineCount; 
-                    long tickCount = DateTime.UtcNow.Ticks % 100000;
+                    float fpsVal = 40.0f;
+                    int pfsCount = onlineCount;
                     int nwQueueVal = 0;
 
-                    // Comprehensive data packet payload matching your exact schema
+                    ulong tickCount = 0;
+                    if (_modApi?.Application != null)
+                    {
+                        try
+                        {
+                            tickCount = _modApi.Application.GameTicks;
+                        }
+                        catch
+                        {
+                            tickCount = (ulong)(DateTime.UtcNow.Ticks % 100000);
+                        }
+                    }
+                    else
+                    {
+                        tickCount = (ulong)(DateTime.UtcNow.Ticks % 100000);
+                    }
+
                     var telemetryData = new
                     {
                         timestamp = preciseTimestamp,
@@ -88,34 +186,98 @@ namespace ZeroGBridge
                         ticks = tickCount.ToString(),
                         nwqueue = nwQueueVal.ToString(),
                         player_list = playerList,
-                        player_data = playerList 
+                        player_data = playerList
                     };
 
                     string jsonLine = JsonConvert.SerializeObject(telemetryData);
 
-                    // Write line to file log fallback
                     lock (_fileLock)
                     {
                         File.WriteAllText(_logFilePath, jsonLine + "\n");
                     }
 
-                    // Broadcast via TCP server to connected desktop clients (ZAH)
-                    _telemetryServer?.Broadcast(telemetryData);
+                    if (_telemetryServer != null && _telemetryServer.HasActiveConnections)
+                    {
+                        _telemetryServer.BroadcastJson(jsonLine);
+                    }
 
-                    // Periodic EAH-style server log emission with explicit timestamp prefix included
                     _logCounter++;
                     if (_logCounter >= 7)
                     {
                         _logCounter = 0;
-                        Console.WriteLine($"{preciseTimestamp} [ZGB] -LOG- INFO: Uptime={uptimeStr} heap={heapStr} fps={fpsVal:0.0} players={onlineCount} pfs={pfsCount} ticks={tickCount} nwqueue={nwQueueVal}");
+                        string formattedLog = $"-LOG- INFO: Uptime={uptimeStr} heap={heapStr} fps={fpsVal:0.0} players={onlineCount} pfs={pfsCount} ticks={tickCount} nwqueue={nwQueueVal}";
+
+                        if (_modApi != null)
+                        {
+                            _modApi.Log(formattedLog);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"{preciseTimestamp} [ZGB] {formattedLog}");
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ZGB] ERROR: Telemetry loop exception: {ex.Message}");
+                    if (_modApi != null)
+                    {
+                        _modApi.LogError($"Telemetry loop exception: {ex.Message}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[ZGB] ERROR: Telemetry loop exception: {ex.Message}");
+                    }
                 }
 
-                Thread.Sleep(2000); // Pulse every 2 seconds
+                Thread.Sleep(2000);
+            }
+        }
+
+        public void IngestServerLogLine(string logLine)
+        {
+            if (string.IsNullOrEmpty(logLine)) return;
+            // Temporary diagnostic: Print every line hitting the parser
+            // Console.WriteLine($"[ZGB-DEBUG] Reading: {logLine}");
+
+            try
+            {
+                // 1. Check "Got player id:" pattern
+                Match gotIdMatch = PlayerGotIdRegex.Match(logLine);
+                if (gotIdMatch.Success)
+                {
+                    string steamId = gotIdMatch.Groups["steam"].Value;
+                    string name = gotIdMatch.Groups["name"].Value;
+                    int eid = int.TryParse(gotIdMatch.Groups["eid"].Value, out int e) ? e : 0;
+
+                    _activePlayers[steamId] = new
+                    {
+                        entityId = eid,
+                        steamId = steamId,
+                        name = name,
+                        ping = 0
+                    };
+                    _modApi.Log($"[ZGB] Player Verified & Cached: {name} (Steam: {steamId}, EId: {eid})");
+                    // Console.WriteLine($"[ZGB] Player Verified & Cached: {name} (Steam: {steamId}, EId: {eid})");
+
+                    return;
+                }
+
+                // 2. Check disconnect pattern
+                Match leaveMatch = PlayerLeaveRegex.Match(logLine);
+                if (leaveMatch.Success)
+                {
+                    string steamId = leaveMatch.Groups["steam"].Value;
+                    if (!string.IsNullOrEmpty(steamId) && _activePlayers.ContainsKey(steamId))
+                    {
+                        _activePlayers.TryRemove(steamId, out _);
+                        _modApi.Log($"[ZGB] Player Disconnected: ({steamId})");
+                        // Console.WriteLine($"[ZGB] Player Disconnected: ({steamId})");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] ERROR in IngestServerLogLine: {ex.Message}");
             }
         }
 
@@ -124,23 +286,39 @@ namespace ZeroGBridge
             try
             {
                 string cleanCmd = command.Trim().ToLower();
-                if (cleanCmd == "plys")
+
+                if (cleanCmd.StartsWith("add_player:"))
                 {
-                    // Construct precise player telemetry response package
-                    List<object> playerList = new List<object>();
-                    int onlineCount = 0;
-                    
+                    string[] parts = command.Substring(11).Split('|');
+                    if (parts.Length >= 2)
+                    {
+                        string steam = parts[0];
+                        string name = parts[1];
+                        _activePlayers[steam] = new
+                        {
+                            entityId = steam.GetHashCode(),
+                            steamId = steam,
+                            name = name,
+                            ping = 0
+                        };
+                        return JsonConvert.SerializeObject(new { type = "RESPONSE", status = "PlayerAdded", steamId = steam, name = name });
+                    }
+                }
+                else if (cleanCmd == "plys")
+                {
+                    var playerList = new List<object>(_activePlayers.Values);
                     var playerPackage = new
                     {
                         type = "PLAYER_CACHE",
                         status = "Synced",
-                        players = onlineCount.ToString(),
+                        players = playerList.Count.ToString(),
                         player_list = playerList,
                         timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
                     };
+
                     return JsonConvert.SerializeObject(playerPackage);
                 }
-                
+
                 return JsonConvert.SerializeObject(new { type = "RESPONSE", status = "Acknowledged", command = command });
             }
             catch (Exception ex)

@@ -92,7 +92,7 @@ namespace ZeroGBridge
                         // Ingest incoming commands or control tokens sent from the desktop client
                         if (!string.IsNullOrEmpty(line))
                         {
-                            Console.WriteLine($"[ZGB] -INFO- DEBUG: Received Instructions over Port 30100");
+                            Console.WriteLine($"[ZGB] -INFO- DEBUG: Received Instructions over Port 30080");
                             _incomingCommandQueue.Enqueue(line);
 
                             // Dispatch command to ModMain and route the response back                            
@@ -117,14 +117,19 @@ namespace ZeroGBridge
         }
 
         /// <summary>
-        /// Broadcasts a structured JSON payload to all connected ZAH client instances.
+        /// Broadcasts serialized JSON data packages out to all actively connected clients (e.g., ZAH Cockpit).
+        /// Appends an explicit newline delimiter to prevent stream-bleeding and JSON concatenation on the client.
         /// </summary>
-        public void Broadcast(object payload)
+        public void BroadcastJson(string jsonPayload)
         {
-            if (_connectedClients.IsEmpty) return;
+            if (string.IsNullOrEmpty(jsonPayload) || _connectedClients.IsEmpty)
+            {
+                return;
+            }
 
-            string jsonPayload = JsonConvert.SerializeObject(payload) + "\n";
-            byte[] buffer = Encoding.UTF8.GetBytes(jsonPayload);
+            // Ensure payload terminates with a clean newline for line-buffered TCP ingestion
+            string formattedPayload = jsonPayload.EndsWith("\n") ? jsonPayload : jsonPayload + "\n";
+            byte[] buffer = Encoding.UTF8.GetBytes(formattedPayload);
 
             foreach (var kvp in _connectedClients)
             {
@@ -134,13 +139,16 @@ namespace ZeroGBridge
                     if (client != null && client.Connected)
                     {
                         NetworkStream stream = client.GetStream();
-                        stream.Write(buffer, 0, buffer.Length);
-                        stream.Flush();
+                        if (stream.CanWrite)
+                        {
+                            stream.Write(buffer, 0, buffer.Length);
+                            stream.Flush();
+                        }
                     }
                 }
                 catch
                 {
-                    // Drop faulty or stalled client handles during iteration
+                    // Drop faulty or disconnected client handles during iteration
                     _connectedClients.TryRemove(kvp.Key, out _);
                 }
             }
