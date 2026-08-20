@@ -19,7 +19,7 @@ This Master Operational Registry establishes the foundational protocols for the 
         Namespace Rigor: Strict usage of scoped enum namespaces within the GUI library (such as explicitly utilizing Qt.AlignmentFlag and Qt.Orientation).
         Target Host & Integration environment: Dedicated Empyrion: Galactic Survival game server hosted via GTXGaming. IP: 66.23.236.138 Ports: 30004 and 30040
             Port 30004 (Telnet Handshake):** Used strictly for the initial connection handshake, socket authentication, and validating credentials when ZAH boots up, 
-            Port 30100 (ZeroGBridge Stream & Command Injection):** Once the handshake clears, all operational traffic—including continuous JSON telemetry streaming, live player data caches, and command injections (such as plys)—shifts over the ZGB dedicated mod bridge.
+            Port 30040 (ZeroGBridge Stream & Command Injection):** Once the handshake clears, all operational traffic—including continuous JSON telemetry streaming, live player data caches, and command injections (such as plys)—shifts over the ZGB dedicated mod bridge.
 
 🏗️ Architectural & File System Constraints
         Feature-First Pattern: All application functional logic, controllers, and sub-views are isolated cleanly within the /features/ subdirectory. Cross-dependency between distinct features is strictly prohibited.
