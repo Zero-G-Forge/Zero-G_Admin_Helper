@@ -11,7 +11,7 @@ def clear_pycache(directory):
             shutil.rmtree(pycache_path)
             dirs.remove('__pycache__')
 
-root_directory = '/mnt/Zero-G_Files/Zero-G_Admin_Helper'
+root_directory = '/mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper'
 
 # Clear pycache
 clear_pycache(root_directory)
