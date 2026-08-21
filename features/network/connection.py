@@ -173,6 +173,7 @@ class NetworkWizardOverlay(QDialog):
         print(f"IP Target     : {self.input_ip.text() if self.input_ip.text() else 'BLANK'}")
         print(f"Port Target   : {self.input_port.text() if self.input_port.text() else 'BLANK'}")
         print(f"Auth Token    : {self.input_pass.text() if self.input_pass.text() else 'BLANK'}")
+        print(f"Stream Port   : 30500 (Hardcoded for Telemetry Server)")
         print("==================================================")
 
         # 1. Capture Data - Keys MUST match is_network_ready() dictionary lookup
