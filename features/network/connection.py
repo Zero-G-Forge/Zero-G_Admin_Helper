@@ -180,7 +180,7 @@ class NetworkWizardOverlay(QDialog):
             "input_ip": self.input_ip.text().strip(),
             "input_port": self.input_port.text().strip(),
             "input_pass": self.input_pass.text().strip(),
-            "stream_port": "30080"  # Hardcoded stream port for telemetry server
+            "stream_port": "30500"  # Hardcoded stream port for telemetry server
         }
         
         # 2. Persistence

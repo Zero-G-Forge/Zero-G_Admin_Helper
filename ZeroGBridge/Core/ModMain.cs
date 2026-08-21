@@ -10,7 +10,8 @@ using Eleon.Modding;
 namespace ZeroGBridge
 {
     /// <summary>
-    /// Main entry point for ZeroGBridge mod, tuned precisely to Empyrion's dedicated server file layout.
+    /// Master lifecycle orchestrator and log ingestion bridge for ZeroGBridge.
+    /// Manages IMod initialization, active player registry, and telemetry streaming on Port 30500.
     /// </summary>
     public class ModMain : IMod
     {
@@ -24,19 +25,35 @@ namespace ZeroGBridge
         private long _lastLogFilePosition = 0;
         private string _targetLogPath = null;
 
-        // In-memory thread-safe player cache
-        private readonly ConcurrentDictionary<string, object> _activePlayers = new ConcurrentDictionary<string, object>();
+        // In-memory thread-safe player cache keyed by Steam ID
+        private readonly ConcurrentDictionary<string, PlayerRecord> _activePlayers = new ConcurrentDictionary<string, PlayerRecord>();
 
-        // Exact match regex for Empyrion's "Got player id:" connection line
+        // Resilient regex pattern matching Empyrion "Got player id:" connection lines
         private static readonly Regex PlayerGotIdRegex = new Regex(
             @"Got\s+player\s+id:\s*CId=(?<cid>\d+),\s*EId=(?<eid>-?\d+),\s*(?<steam>\d+)/=/'(?<name>[^']+)'", 
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-        // Regex for explicit disconnections
+        // Regex pattern matching player disconnect occurrences
         private static readonly Regex PlayerLeaveRegex = new Regex(
             @"(Player\s+'(?<steam>\d+)/(?<name>[^']*)'\s+disconnected|Player\s+with\s+id\s+(?<eid>\d+)\s+disconnected|disconnected:\s*(?<steam>\d+)|left\s+the\s+game)", 
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        /// <summary>
+        /// Structural representation of an active connected player record.
+        /// </summary>
+        public class PlayerRecord
+        {
+            public int entityId { get; set; }
+            public string steamId { get; set; }
+            public string name { get; set; }
+            public int ping { get; set; }
+        }
+
+        #region IMod Lifecycle Handlers
+
+        /// <summary>
+        /// Entry point invoked by the dedicated server engine upon mod loading.
+        /// </summary>
         public void Init(IModApi modApi)
         {
             _modApi = modApi;
@@ -49,14 +66,16 @@ namespace ZeroGBridge
                 Directory.CreateDirectory(logDir);
             }
             _logFilePath = Path.Combine(logDir, "live_telemetry.txt");
-            Console.WriteLine("[ZGB] INFO: ZeroGBridge initialized via ModApi framework.");
+            Console.WriteLine("[ZGB] -INFO- ZeroGBridge initialized via ModApi framework.");
 
-            // Target the root DedicatedServer.log file explicitly based on server startup arguments
+            // Resolve target log file path for active stdout tailing
             ResolveDedicatedLogPath(baseDir);
 
-            _telemetryServer = new TelemetryServer(30080, this);
+            // Initialize TelemetryServer on dedicated Port 30500
+            _telemetryServer = new TelemetryServer(30500, this);
             _telemetryServer.Start();
 
+            // Spawn background telemetry loop thread
             _telemetryThread = new Thread(TelemetryLoop)
             {
                 IsBackground = true,
@@ -65,44 +84,75 @@ namespace ZeroGBridge
             _telemetryThread.Start();
         }
 
+        /// <summary>
+        /// Scans directories to locate the active server log file with the most recent write timestamp.
+        /// </summary>
         private void ResolveDedicatedLogPath(string baseDir)
         {
-            // Empyrion stores DedicatedServer.log in the root base directory
-            string primaryLog = Path.Combine(baseDir, "DedicatedServer.log");
-            if (File.Exists(primaryLog))
+            try
             {
-                _targetLogPath = primaryLog;
-                FileInfo fi = new FileInfo(_targetLogPath);
-                _lastLogFilePosition = fi.Length; // Tail from current end
-                Console.WriteLine($"[ZGB] INFO: Attached log tailer to {_targetLogPath}");
-            }
-            else
-            {
-                // Fallback scan if named differently
-                try
+                string newestLog = null;
+                DateTime newestTime = DateTime.MinValue;
+
+                // Check root DedicatedServer.log
+                string primaryLog = Path.Combine(baseDir, "DedicatedServer.log");
+                if (File.Exists(primaryLog))
                 {
-                    string logsFolder = Path.Combine(baseDir, "Logs");
-                    if (Directory.Exists(logsFolder))
+                    newestLog = primaryLog;
+                    newestTime = File.GetLastWriteTimeUtc(primaryLog);
+                }
+
+                // Check Logs directory hierarchy recursively for active subfolder logs
+                string logsFolder = Path.Combine(baseDir, "Logs");
+                if (Directory.Exists(logsFolder))
+                {
+                    var files = Directory.GetFiles(logsFolder, "*.log", SearchOption.AllDirectories);
+                    foreach (var file in files)
                     {
-                        var files = Directory.GetFiles(logsFolder, "*.log");
-                        if (files.Length > 0)
+                        // Exclude mod internal logs from tailing target
+                        if (file.IndexOf("ZeroGBridge", StringComparison.OrdinalIgnoreCase) >= 0)
                         {
-                            Array.Sort(files);
-                            _targetLogPath = files[files.Length - 1];
-                            FileInfo fi = new FileInfo(_targetLogPath);
-                            _lastLogFilePosition = fi.Length;
+                            continue;
+                        }
+
+                        DateTime writeTime = File.GetLastWriteTimeUtc(file);
+                        if (writeTime > newestTime)
+                        {
+                            newestTime = writeTime;
+                            newestLog = file;
                         }
                     }
                 }
-                catch { }
+
+                if (!string.IsNullOrEmpty(newestLog))
+                {
+                    bool isNewTarget = (_targetLogPath != newestLog);
+                    _targetLogPath = newestLog;
+
+                    // On initial attachment, start reading from position 0 to parse connected players
+                    if (isNewTarget)
+                    {
+                        _lastLogFilePosition = 0;
+                        Console.WriteLine($"[ZGB] -INFO- Attached log tailer to active log: {_targetLogPath}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -ERROR- Exception resolving log path: {ex.Message}");
             }
         }
 
+        /// <summary>
+        /// Scans and ingests newly appended lines from the active dedicated server log.
+        /// </summary>
         private void PollDedicatedLogFile()
         {
+            // Continuously verify and discover active log target if rotated
+            ResolveDedicatedLogPath(AppDomain.CurrentDomain.BaseDirectory);
+
             if (string.IsNullOrEmpty(_targetLogPath) || !File.Exists(_targetLogPath))
             {
-                ResolveDedicatedLogPath(AppDomain.CurrentDomain.BaseDirectory);
                 return;
             }
 
@@ -112,7 +162,8 @@ namespace ZeroGBridge
                 {
                     if (fs.Length < _lastLogFilePosition)
                     {
-                        _lastLogFilePosition = 0; // File rotated or reset
+                        // File reset or rotation detected
+                        _lastLogFilePosition = 0;
                     }
 
                     if (fs.Length > _lastLogFilePosition)
@@ -130,9 +181,15 @@ namespace ZeroGBridge
                     }
                 }
             }
-            catch { }
+            catch
+            {
+                // Suppress non-critical read-lock contention during server file flush
+            }
         }
 
+        /// <summary>
+        /// Background worker loop responsible for serializing telemetry and pushing to connected clients.
+        /// </summary>
         private void TelemetryLoop()
         {
             DateTime processStartTime = System.Diagnostics.Process.GetCurrentProcess().StartTime;
@@ -141,10 +198,10 @@ namespace ZeroGBridge
             {
                 try
                 {
-                    // Tail server log for active player events
+                    // Ingest newly written server log lines
                     PollDedicatedLogFile();
 
-                    var playerList = new List<object>(_activePlayers.Values);
+                    var playerList = new List<PlayerRecord>(_activePlayers.Values);
                     int onlineCount = playerList.Count;
 
                     TimeSpan uptimeSpan = DateTime.Now - processStartTime;
@@ -173,6 +230,7 @@ namespace ZeroGBridge
                         tickCount = (ulong)(DateTime.UtcNow.Ticks % 100000);
                     }
 
+                    // Structure JSON telemetry packet
                     var telemetryData = new
                     {
                         timestamp = preciseTimestamp,
@@ -191,11 +249,13 @@ namespace ZeroGBridge
 
                     string jsonLine = JsonConvert.SerializeObject(telemetryData);
 
+                    // Write live metric cache to disk
                     lock (_fileLock)
                     {
                         File.WriteAllText(_logFilePath, jsonLine + "\n");
                     }
 
+                    // Broadcast JSON packet over TCP socket (Port 30500)
                     if (_telemetryServer != null && _telemetryServer.HasActiveConnections)
                     {
                         _telemetryServer.BroadcastJson(jsonLine);
@@ -225,7 +285,7 @@ namespace ZeroGBridge
                     }
                     else
                     {
-                        Console.WriteLine($"[ZGB] ERROR: Telemetry loop exception: {ex.Message}");
+                        Console.WriteLine($"[ZGB] -ERROR- Telemetry loop exception: {ex.Message}");
                     }
                 }
 
@@ -233,15 +293,16 @@ namespace ZeroGBridge
             }
         }
 
+        /// <summary>
+        /// Ingests and processes raw server log lines to maintain the active player cache.
+        /// </summary>
         public void IngestServerLogLine(string logLine)
         {
             if (string.IsNullOrEmpty(logLine)) return;
-            // Temporary diagnostic: Print every line hitting the parser
-            // Console.WriteLine($"[ZGB-DEBUG] Reading: {logLine}");
 
             try
             {
-                // 1. Check "Got player id:" pattern
+                // Match player connection handshake line
                 Match gotIdMatch = PlayerGotIdRegex.Match(logLine);
                 if (gotIdMatch.Success)
                 {
@@ -249,20 +310,20 @@ namespace ZeroGBridge
                     string name = gotIdMatch.Groups["name"].Value;
                     int eid = int.TryParse(gotIdMatch.Groups["eid"].Value, out int e) ? e : 0;
 
-                    _activePlayers[steamId] = new
+                    var record = new PlayerRecord
                     {
                         entityId = eid,
                         steamId = steamId,
                         name = name,
                         ping = 0
                     };
-                    _modApi.Log($"[ZGB] Player Verified & Cached: {name} (Steam: {steamId}, EId: {eid})");
-                    // Console.WriteLine($"[ZGB] Player Verified & Cached: {name} (Steam: {steamId}, EId: {eid})");
 
+                    _activePlayers[steamId] = record;
+                    Console.WriteLine($"[ZGB] -INFO- Player Verified & Cached: {name} (Steam: {steamId}, EId: {eid})");
                     return;
                 }
 
-                // 2. Check disconnect pattern
+                // Match player disconnection line
                 Match leaveMatch = PlayerLeaveRegex.Match(logLine);
                 if (leaveMatch.Success)
                 {
@@ -270,17 +331,19 @@ namespace ZeroGBridge
                     if (!string.IsNullOrEmpty(steamId) && _activePlayers.ContainsKey(steamId))
                     {
                         _activePlayers.TryRemove(steamId, out _);
-                        _modApi.Log($"[ZGB] Player Disconnected: ({steamId})");
-                        // Console.WriteLine($"[ZGB] Player Disconnected: ({steamId})");
+                        Console.WriteLine($"[ZGB] -INFO- Player Disconnected: ({steamId})");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] ERROR in IngestServerLogLine: {ex.Message}");
+                Console.WriteLine($"[ZGB] -ERROR- Exception in IngestServerLogLine: {ex.Message}");
             }
         }
 
+        /// <summary>
+        /// Ingests and processes text commands received over the TCP socket connection.
+        /// </summary>
         public string ProcessIncomingCommand(string command)
         {
             try
@@ -294,7 +357,7 @@ namespace ZeroGBridge
                     {
                         string steam = parts[0];
                         string name = parts[1];
-                        _activePlayers[steam] = new
+                        _activePlayers[steam] = new PlayerRecord
                         {
                             entityId = steam.GetHashCode(),
                             steamId = steam,
@@ -306,7 +369,7 @@ namespace ZeroGBridge
                 }
                 else if (cleanCmd == "plys")
                 {
-                    var playerList = new List<object>(_activePlayers.Values);
+                    var playerList = new List<PlayerRecord>(_activePlayers.Values);
                     var playerPackage = new
                     {
                         type = "PLAYER_CACHE",
@@ -327,6 +390,9 @@ namespace ZeroGBridge
             }
         }
 
+        /// <summary>
+        /// Shuts down background workers and socket server cleanly.
+        /// </summary>
         public void Shutdown()
         {
             _isRunning = false;
@@ -337,9 +403,11 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] ERROR: Shutdown exception: {ex.Message}");
+                Console.WriteLine($"[ZGB] -ERROR- Shutdown exception: {ex.Message}");
             }
-            Console.WriteLine("[ZGB] INFO: ZeroGBridge shut down cleanly.");
+            Console.WriteLine("[ZGB] -INFO- ZeroGBridge shut down cleanly.");
         }
+
+        #endregion
     }
 }

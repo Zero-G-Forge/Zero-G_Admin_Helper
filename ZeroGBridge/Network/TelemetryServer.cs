@@ -92,7 +92,7 @@ namespace ZeroGBridge
                         // Ingest incoming commands or control tokens sent from the desktop client
                         if (!string.IsNullOrEmpty(line))
                         {
-                            Console.WriteLine($"[ZGB] -INFO- DEBUG: Received Instructions over Port 30080");
+                            Console.WriteLine($"[ZGB] -INFO- DEBUG: Received Instructions over Port {_port}");
                             _incomingCommandQueue.Enqueue(line);
 
                             // Dispatch command to ModMain and route the response back                            
