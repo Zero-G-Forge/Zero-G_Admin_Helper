@@ -4,46 +4,79 @@
 # =====================================================================
 
 import os
+import sys
+import json
+import socket 
+from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout, 
     QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QPushButton, 
-    QTableWidget, QHeaderView, QStackedWidget
+    QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QPixmap
 
+from features.dashboard.telemetry_worker import TelemetryWorker
+from features.dashboard.resource_worker import ResourcePollingWorker
+## from features.dashboard.command_pipe import CommandPipe
+## from features.dashboard.log_tee import LogTee
+from features.network.connection import is_network_ready
+from data.player_registry import PlayerRegistryPopup
+from data.playfield_registry import ActivePlayfieldsPopup
 
 class TelemetryWidget(QFrame):
     """
-    Standalone high-density sub-panel managing server health metrics layout structure.
-    Styled exclusively via assets/ZAH.css using object names.
+    Standalone high-density sub-panel managing server health metrics.
+    Abstracted component for precision placement inside header controls.
     """
+    
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("TelemetryPanel")
-        self.setFixedSize(330, 70)
 
+        self.setObjectName("TelemetryPanel")
+        self.setFixedSize(330, 70)  # Strict dimensional boundary control
+        self.setStyleSheet("""
+            QFrame#TelemetryPanel {
+                background-color: rgba(10, 15, 25, 140);
+                border: 1px solid #005577;
+                border-radius: 4px;
+            }
+            QLabel {
+                font-size: 11px;  /* Highly compressed font footprint */
+                color: #e0e0e0;
+                background: transparent;
+                border: none;
+            }
+        """)
+
+        # Micro sub-grid coordinates mapped inside the shrunk layout structure
         self.telemetry_layout = QGridLayout(self)
-        self.telemetry_layout.setObjectName("TelemetryPanelLayout")
         self.telemetry_layout.setContentsMargins(6, 4, 6, 4)
         self.telemetry_layout.setSpacing(4)
 
-        # Telemetry Labels
+        # --- Upper Telemetry Matrix Elements ---
         self.lbl_target_ip = QLabel("Target IP: Loading...", self)
-        self.lbl_target_ip.setObjectName("TelemetryLabel")
-        self.lbl_server_status = QLabel("Server Status: STANDBY", self)
-        self.lbl_server_status.setObjectName("TelemetryLabel")
-        
-        self.lbl_server_cpu = QLabel("CPU: --%", self)
-        self.lbl_server_cpu.setObjectName("TelemetryLabel")
-        self.lbl_server_ram = QLabel("RAM: --%", self)
-        self.lbl_server_ram.setObjectName("TelemetryLabel")
-
+        self.lbl_server_status = QLabel("Server Status: DETECTING....", self)
         self.telemetry_layout.addWidget(self.lbl_target_ip, 0, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self.telemetry_layout.addWidget(self.lbl_server_status, 0, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+
+        # --- Lower Telemetry Matrix Elements ---
+        self.lbl_server_cpu = QLabel("CPU: --%", self)
+        self.lbl_server_ram = QLabel("RAM: --%", self)
+        
         self.telemetry_layout.addWidget(self.lbl_server_cpu, 1, 0)
         self.telemetry_layout.addWidget(self.lbl_server_ram, 1, 1)
 
+        # --- Dynamic Log Metrics Ingestion Elements ---
+        self.lbl_fps = QLabel("FPS: --", self)
+        self.lbl_heap = QLabel("Heap: --", self)
+        self.lbl_players = QLabel("Players: --", self)
+        self.lbl_uptime = QLabel("Uptime: --", self)
+        
+        self.telemetry_layout.addWidget(self.lbl_fps, 2, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.telemetry_layout.addWidget(self.lbl_heap, 2, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.telemetry_layout.addWidget(self.lbl_players, 3, 0, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.telemetry_layout.addWidget(self.lbl_uptime, 3, 1, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
 
 class MainCockpit(QMainWindow):
     """ 
@@ -69,14 +102,20 @@ class MainCockpit(QMainWindow):
         # 3. Master Layout & Scaffolding
         self.master_layout = QHBoxLayout()
         self.master_layout.setObjectName("MasterLayout")
-        self.master_layout.setContentsMargins(90, 205, 90, 95) 
+        self.master_layout.setContentsMargins(90, 200, 90, 95) 
         self.master_layout.setSpacing(15)
         self.central_widget.setLayout(self.master_layout)
 
-        # 4. Construct Layout Zones
+        # 4. Telemetry panel integrated into the top header strip. Code located in setup_zones()
+        #    for clarity and modularity.
+        # self.telemetry_widget = TelemetryWidget(self)
+
+
+        # 5. Construct Layout Zones
+        print("[DEBUG] MainCockpit: Constructing Layout Zones...")
         self.setup_zones()
 
-        # 5. Apply External QSS Theme
+        # 6. Apply External QSS Theme
         print("[DEBUG] MainCockpit: Applying CSS Styles...")
         self.apply_theme()
         print("[SUCCESS] Main Cockpit Dashboard structure initialized.")
@@ -87,8 +126,12 @@ class MainCockpit(QMainWindow):
         # Top Header Strip Layout
         self.top_header_layout = QHBoxLayout()
         self.top_header_layout.setObjectName("TopHeaderLayout")
-        self.top_header_layout.setContentsMargins(10, 0, 10, 10)
+        self.top_header_layout.setContentsMargins(10, 10, 10, 10)
         self.top_header_layout.addStretch()
+
+        # Telemetry panel integrated into the top header strip
+        self.telemetry_widget = TelemetryWidget(self)
+        self.telemetry_widget.move(850, 110)
 
         # Left Column: Stacked Communications Engine Layout
         self.left_column = QVBoxLayout()
