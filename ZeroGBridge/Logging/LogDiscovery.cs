@@ -13,61 +13,77 @@ namespace ZeroGBridge
         private string _targetLogPath = null;
         private long _lastLogFilePosition = 0;
 
-        /// <summary>
-        /// Initializes the log discovery engine with a reference to the LogParser.
-        /// </summary>
         public LogDiscovery(LogParser logParser)
         {
             _logParser = logParser;
         }
 
         /// <summary>
-        /// Scans directories to locate the active master dedicated server log file.
+        /// Scans root, parent, and subdirectories to locate the active master DedicatedServer.log.
         /// </summary>
         public void ResolveActiveLogPath(string baseDir)
         {
             try
             {
+                // 1. Check direct BaseDirectory and Parent Directory for DedicatedServer.log
+                string[] directCandidates = new string[]
+                {
+                    Path.Combine(baseDir, "DedicatedServer.log"),
+                    Path.Combine(Directory.GetParent(baseDir)?.FullName ?? baseDir, "DedicatedServer.log")
+                };
+
+                foreach (var candidate in directCandidates)
+                {
+                    if (File.Exists(candidate))
+                    {
+                        if (_targetLogPath != candidate)
+                        {
+                            _targetLogPath = candidate;
+                            _lastLogFilePosition = 0;
+                            Console.WriteLine($"[ZGB] -INFO- Locked log tailer directly to root log: {_targetLogPath}");
+                        }
+                        return;
+                    }
+                }
+
+                // 2. Scan Logs/ in BaseDirectory and Parent Directory
+                string[] searchRoots = new string[]
+                {
+                    baseDir,
+                    Directory.GetParent(baseDir)?.FullName ?? baseDir
+                };
+
                 string newestLog = null;
                 DateTime newestTime = DateTime.MinValue;
 
-                // 1. Check root DedicatedServer.log
-                string primaryLog = Path.Combine(baseDir, "DedicatedServer.log");
-                if (File.Exists(primaryLog))
+                foreach (var root in searchRoots)
                 {
-                    newestLog = primaryLog;
-                    newestTime = File.GetLastWriteTimeUtc(primaryLog);
-                }
-
-                // 2. Recursively scan Logs/ hierarchy, targeting Dedicated master logs only
-                string logsFolder = Path.Combine(baseDir, "Logs");
-                if (Directory.Exists(logsFolder))
-                {
-                    var files = Directory.GetFiles(logsFolder, "*.log", SearchOption.AllDirectories);
-                    foreach (var file in files)
+                    string logsFolder = Path.Combine(root, "Logs");
+                    if (Directory.Exists(logsFolder))
                     {
-                        // Exclude mod logs and playfield server child logs
-                        if (file.IndexOf("ZeroGBridge", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            file.IndexOf("PfServer", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                            file.IndexOf("Playfield", StringComparison.OrdinalIgnoreCase) >= 0)
+                        var files = Directory.GetFiles(logsFolder, "*.log", SearchOption.AllDirectories);
+                        foreach (var file in files)
                         {
-                            continue;
-                        }
-
-                        // Only evaluate logs that represent the master Dedicated server instance
-                        if (file.IndexOf("Dedicated", StringComparison.OrdinalIgnoreCase) >= 0)
-                        {
-                            DateTime writeTime = File.GetLastWriteTimeUtc(file);
-                            if (writeTime > newestTime)
+                            if (file.IndexOf("ZeroGBridge", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                file.IndexOf("PfServer", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                file.IndexOf("Playfield", StringComparison.OrdinalIgnoreCase) >= 0)
                             {
-                                newestTime = writeTime;
-                                newestLog = file;
+                                continue;
+                            }
+
+                            if (file.IndexOf("Dedicated", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                DateTime writeTime = File.GetLastWriteTimeUtc(file);
+                                if (writeTime > newestTime)
+                                {
+                                    newestTime = writeTime;
+                                    newestLog = file;
+                                }
                             }
                         }
                     }
                 }
 
-                // 3. Attach to new active log and force initial seek pointer to byte 0
                 if (!string.IsNullOrEmpty(newestLog) && _targetLogPath != newestLog)
                 {
                     _targetLogPath = newestLog;
@@ -99,13 +115,11 @@ namespace ZeroGBridge
             {
                 using (var fs = new FileStream(_targetLogPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 {
-                    // Handle log rotation or file reset
                     if (fs.Length < _lastLogFilePosition)
                     {
                         _lastLogFilePosition = 0;
                     }
 
-                    // Read newly appended bytes
                     if (fs.Length > _lastLogFilePosition)
                     {
                         fs.Seek(_lastLogFilePosition, SeekOrigin.Begin);

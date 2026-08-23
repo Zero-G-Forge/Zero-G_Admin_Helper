@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace ZeroGBridge
 {
@@ -16,7 +18,7 @@ namespace ZeroGBridge
 
     /// <summary>
     /// Thread-safe in-memory cache managing connected player records.
-    /// Isolated from file streams and network sockets.
+    /// Supports multi-field lookup and eviction.
     /// </summary>
     public class PlayerCache
     {
@@ -46,12 +48,38 @@ namespace ZeroGBridge
         }
 
         /// <summary>
-        /// Removes a player record from memory by SteamID.
+        /// Removes a player record by SteamID directly.
         /// </summary>
         public bool Remove(string steamId)
         {
             if (string.IsNullOrEmpty(steamId)) return false;
             return _activePlayers.TryRemove(steamId, out _);
+        }
+
+        /// <summary>
+        /// Removes a player record by matching SteamID, Name, or Entity ID.
+        /// </summary>
+        public bool RemovePlayer(string identifier)
+        {
+            if (string.IsNullOrEmpty(identifier)) return false;
+
+            // Direct SteamID match
+            if (_activePlayers.TryRemove(identifier, out _))
+            {
+                return true;
+            }
+
+            // Fallback match by Name or Entity ID
+            var target = _activePlayers.Values.FirstOrDefault(p => 
+                string.Equals(p.name, identifier, StringComparison.OrdinalIgnoreCase) || 
+                p.entityId.ToString() == identifier);
+
+            if (target != null)
+            {
+                return _activePlayers.TryRemove(target.steamId, out _);
+            }
+
+            return false;
         }
 
         /// <summary>

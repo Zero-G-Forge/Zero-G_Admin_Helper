@@ -5,7 +5,7 @@ namespace ZeroGBridge
 {
     /// <summary>
     /// Evaluates raw server log lines against pre-compiled regex patterns
-    /// and synchronizes player states into the PlayerCache.
+    /// and synchronizes player connection and disconnection states.
     /// </summary>
     public class LogParser
     {
@@ -16,14 +16,17 @@ namespace ZeroGBridge
             @"Got\s+player\s+id:\s*CId=(?<cid>\d+),\s*EId=(?<eid>-?\d+),\s*(?<steam>\d+)/=/'(?<name>[^']+)'", 
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-        // Regex pattern matching player disconnect occurrences
+        // Regex pattern matching Empyrion "[CM] Player ... disconnected" and fallback disconnect formats
         private static readonly Regex PlayerLeaveRegex = new Regex(
-            @"(Player\s+'(?<steam>\d+)/(?<name>[^']*)'\s+disconnected|Player\s+with\s+id\s+(?<eid>\d+)\s+disconnected|disconnected:\s*(?<steam>\d+)|left\s+the\s+game)", 
+            @"(?:\[CM\]\s+Player\s+CId=(?<cid>\d+),\s*EId=(?<eid>-?\d+),\s*(?<steam>\d+)/=/'(?<name>[^']+)'\s+disconnected|" +
+            @"\[PA\]\s+Player\s+'?(?<steam>\d+)?/?(?<name>[^'\s]+)?'?\s+logout|" +
+            @"Player\s+'?(?<steam>\d+)?/?(?<name>[^'\s]+)?'?\s+disconnected|" +
+            @"Player\s+with\s+id\s+(?<eid>\d+)\s+disconnected|" +
+            @"disconnected:\s*(?<steam>\d+)|" +
+            @"left\s+the\s+game|" +
+            @"Closing\s+connection\s+for\s+CId=(?<cid>\d+))", 
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-        /// <summary>
-        /// Initializes the log parser with a shared PlayerCache reference.
-        /// </summary>
         public LogParser(PlayerCache playerCache)
         {
             _playerCache = playerCache;
@@ -55,13 +58,18 @@ namespace ZeroGBridge
                 Match leaveMatch = PlayerLeaveRegex.Match(logLine);
                 if (leaveMatch.Success)
                 {
-                    string steamId = leaveMatch.Groups["steam"].Value;
-                    if (!string.IsNullOrEmpty(steamId))
+                    string steam = leaveMatch.Groups["steam"].Value;
+                    string name = leaveMatch.Groups["name"].Value;
+                    string eid = leaveMatch.Groups["eid"].Value;
+
+                    string targetIdentifier = !string.IsNullOrEmpty(steam) ? steam : (!string.IsNullOrEmpty(name) ? name : eid);
+
+                    if (!string.IsNullOrEmpty(targetIdentifier))
                     {
-                        bool removed = _playerCache.Remove(steamId);
+                        bool removed = _playerCache.RemovePlayer(targetIdentifier);
                         if (removed)
                         {
-                            Console.WriteLine($"[ZGB] -INFO- Player Disconnected: ({steamId})");
+                            Console.WriteLine($"[ZGB] -INFO- Player Disconnected & Evicted: ({targetIdentifier})");
                         }
                     }
                 }
