@@ -5,35 +5,34 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Collections.Concurrent;
-using Eleon.Modding;
-using Newtonsoft.Json;
 
 namespace ZeroGBridge
 {
+    /// <summary>
+    /// TCP socket server bound exclusively to Port 30500 for streaming telemetry
+    /// and receiving inbound remote commands from the ZAH client.
+    /// </summary>
     public class TelemetryServer
     {
         private readonly int _port;
-        private readonly ModMain _mod;
+        private readonly CommandDispatcher _commandDispatcher;
         private TcpListener _listener;
         private Thread _listenerThread;
         private bool _isRunning;
 
-        // Thread-safe collection of active client connections (e.g., your PyQt6 client)
+        // Thread-safe collection of active client connections
         private readonly ConcurrentDictionary<string, TcpClient> _connectedClients = new ConcurrentDictionary<string, TcpClient>();
-        
-        // Incoming commands from ZAH cockpit queued for execution on the main game thread
-        private readonly ConcurrentQueue<string> _incomingCommandQueue = new ConcurrentQueue<string>();
 
         public bool HasActiveConnections => !_connectedClients.IsEmpty;
 
-        public TelemetryServer(int port, ModMain mod)
+        public TelemetryServer(int port, CommandDispatcher commandDispatcher)
         {
             _port = port;
-            _mod = mod;
+            _commandDispatcher = commandDispatcher;
         }
 
         /// <summary>
-        /// Spawns the background listener thread to prevent blocking the game loop.
+        /// Spawns the background listener thread.
         /// </summary>
         public void Start()
         {
@@ -52,7 +51,7 @@ namespace ZeroGBridge
             {
                 _listener = new TcpListener(IPAddress.Any, _port);
                 _listener.Start();
-                Console.WriteLine($"[ZGB] STATUS: TelemetryServer listening on port {_port}.");
+                Console.WriteLine($"[ZGB] -STATUS- TelemetryServer listening on port {_port}.");
 
                 while (_isRunning)
                 {
@@ -73,7 +72,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] ERROR: TelemetryServer listener exception: {ex.Message}");
+                Console.WriteLine($"[ZGB] -ERROR- TelemetryServer listener exception: {ex.Message}");
             }
         }
 
@@ -84,19 +83,16 @@ namespace ZeroGBridge
                 using (NetworkStream stream = client.GetStream())
                 using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
                 using (StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true })
-                
                 {
                     string line;
                     while (_isRunning && client.Connected && (line = reader.ReadLine()) != null)
                     {
-                        // Ingest incoming commands or control tokens sent from the desktop client
                         if (!string.IsNullOrEmpty(line))
                         {
-                            Console.WriteLine($"[ZGB] -INFO- DEBUG: Received Instructions over Port {_port}");
-                            _incomingCommandQueue.Enqueue(line);
+                            Console.WriteLine($"[ZGB] -INFO- DEBUG: Received Instruction over Port {_port}: {line}");
 
-                            // Dispatch command to ModMain and route the response back                            
-                            string response = _mod.ProcessIncomingCommand(line);
+                            // Route command directly through CommandDispatcher
+                            string response = _commandDispatcher?.ProcessCommand(line);
                             if (response != null)
                             {
                                 writer.WriteLine(response);
@@ -107,7 +103,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] TRACE: Client session {clientId} disconnected: {ex.Message}");
+                Console.WriteLine($"[ZGB] -TRACE- Client session {clientId} disconnected: {ex.Message}");
             }
             finally
             {
@@ -117,8 +113,7 @@ namespace ZeroGBridge
         }
 
         /// <summary>
-        /// Broadcasts serialized JSON data packages out to all actively connected clients (e.g., ZAH Cockpit).
-        /// Appends an explicit newline delimiter to prevent stream-bleeding and JSON concatenation on the client.
+        /// Broadcasts serialized JSON data packages out to all actively connected clients.
         /// </summary>
         public void BroadcastJson(string jsonPayload)
         {
@@ -127,7 +122,6 @@ namespace ZeroGBridge
                 return;
             }
 
-            // Ensure payload terminates with a clean newline for line-buffered TCP ingestion
             string formattedPayload = jsonPayload.EndsWith("\n") ? jsonPayload : jsonPayload + "\n";
             byte[] buffer = Encoding.UTF8.GetBytes(formattedPayload);
 
@@ -148,7 +142,6 @@ namespace ZeroGBridge
                 }
                 catch
                 {
-                    // Drop faulty or disconnected client handles during iteration
                     _connectedClients.TryRemove(kvp.Key, out _);
                 }
             }
@@ -169,9 +162,9 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] ERROR: TelemetryServer shutdown exception: {ex.Message}");
+                Console.WriteLine($"[ZGB] -ERROR- TelemetryServer shutdown exception: {ex.Message}");
             }
-            Console.WriteLine("[ZGB] INFO: TelemetryServer stopped cleanly.");
+            Console.WriteLine("[ZGB] -INFO- TelemetryServer stopped cleanly.");
         }
 
         private void CloseClientConnection(TcpClient client)
