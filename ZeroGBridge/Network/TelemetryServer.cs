@@ -5,30 +5,44 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Collections.Concurrent;
+using Newtonsoft.Json;
 
 namespace ZeroGBridge
 {
     /// <summary>
-    /// TCP socket server bound exclusively to Port 30500 for streaming telemetry
-    /// and receiving inbound remote commands from the ZAH client.
+    /// Represents an active connected client session and its authentication status.
+    /// </summary>
+    public class ClientSession
+    {
+        public string ClientId { get; set; }
+        public TcpClient Client { get; set; }
+        public bool IsAuthenticated { get; set; }
+        public DateTime ConnectedAt { get; set; }
+    }
+
+    /// <summary>
+    /// Manages the TCP socket server on Port 30500 with password authentication gating
+    /// and protected JSON telemetry broadcasting.
     /// </summary>
     public class TelemetryServer
     {
         private readonly int _port;
         private readonly CommandDispatcher _commandDispatcher;
+        private readonly string _serverPassword;
         private TcpListener _listener;
         private Thread _listenerThread;
         private bool _isRunning;
 
-        // Thread-safe collection of active client connections
-        private readonly ConcurrentDictionary<string, TcpClient> _connectedClients = new ConcurrentDictionary<string, TcpClient>();
+        // Thread-safe map of active client sessions
+        private readonly ConcurrentDictionary<string, ClientSession> _connectedSessions = new ConcurrentDictionary<string, ClientSession>();
 
-        public bool HasActiveConnections => !_connectedClients.IsEmpty;
+        public bool HasActiveConnections => !_connectedSessions.IsEmpty;
 
-        public TelemetryServer(int port, CommandDispatcher commandDispatcher)
+        public TelemetryServer(int port, CommandDispatcher commandDispatcher, string serverPassword = "ZeroGAdmin2026")
         {
             _port = port;
             _commandDispatcher = commandDispatcher;
+            _serverPassword = serverPassword;
         }
 
         /// <summary>
@@ -51,7 +65,7 @@ namespace ZeroGBridge
             {
                 _listener = new TcpListener(IPAddress.Any, _port);
                 _listener.Start();
-                Console.WriteLine($"[ZGB] -STATUS- TelemetryServer listening on port {_port}.");
+                Console.WriteLine($"[ZGB] -STATUS- TelemetryServer listening on port {_port} with password protection enabled.");
 
                 while (_isRunning)
                 {
@@ -59,10 +73,19 @@ namespace ZeroGBridge
                     {
                         TcpClient client = _listener.AcceptTcpClient();
                         string clientId = Guid.NewGuid().ToString();
-                        _connectedClients.TryAdd(clientId, client);
 
-                        // Handle client communication asynchronously via ThreadPool
-                        ThreadPool.QueueUserWorkItem(state => HandleClientSession(clientId, client), null);
+                        var session = new ClientSession
+                        {
+                            ClientId = clientId,
+                            Client = client,
+                            IsAuthenticated = false,
+                            ConnectedAt = DateTime.UtcNow
+                        };
+
+                        _connectedSessions.TryAdd(clientId, session);
+
+                        // Dispatch client session handling to ThreadPool
+                        ThreadPool.QueueUserWorkItem(state => HandleClientSession(session), null);
                     }
                     else
                     {
@@ -76,48 +99,81 @@ namespace ZeroGBridge
             }
         }
 
-        private void HandleClientSession(string clientId, TcpClient client)
+        private void HandleClientSession(ClientSession session)
         {
             try
             {
-                using (NetworkStream stream = client.GetStream())
+                using (NetworkStream stream = session.Client.GetStream())
                 using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
                 using (StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true })
                 {
                     string line;
-                    while (_isRunning && client.Connected && (line = reader.ReadLine()) != null)
+                    while (_isRunning && session.Client.Connected && (line = reader.ReadLine()) != null)
                     {
-                        if (!string.IsNullOrEmpty(line))
-                        {
-                            Console.WriteLine($"[ZGB] -INFO- DEBUG: Received Instruction over Port {_port}: {line}");
+                        if (string.IsNullOrEmpty(line)) continue;
 
-                            // Route command directly through CommandDispatcher
-                            string response = _commandDispatcher?.ProcessCommand(line);
-                            if (response != null)
+                        string trimmedLine = line.Trim();
+
+                        // 1. Evaluate Authentication Handshake if unauthenticated
+                        if (!session.IsAuthenticated)
+                        {
+                            if (trimmedLine.StartsWith("auth:", StringComparison.OrdinalIgnoreCase))
                             {
-                                writer.WriteLine(response);
+                                string submittedPassword = trimmedLine.Substring(5).Trim();
+                                if (submittedPassword == _serverPassword)
+                                {
+                                    session.IsAuthenticated = true;
+                                    Console.WriteLine($"[ZGB] -INFO- Client {session.ClientId} successfully authenticated on Port {_port}.");
+
+                                    var authSuccess = new { type = "AUTH", status = "Authenticated", message = "Access Granted" };
+                                    writer.WriteLine(JsonConvert.SerializeObject(authSuccess));
+                                    continue;
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[ZGB] -WARN- Client {session.ClientId} provided invalid password.");
+                                    var authDenied = new { type = "AUTH", status = "Denied", message = "Invalid Credentials" };
+                                    writer.WriteLine(JsonConvert.SerializeObject(authDenied));
+                                    Thread.Sleep(1000);
+                                    break;
+                                }
                             }
+                            else
+                            {
+                                // Reject unauthenticated commands
+                                var authRequired = new { type = "AUTH", status = "Required", message = "Authentication Required. Submit auth:<password>" };
+                                writer.WriteLine(JsonConvert.SerializeObject(authRequired));
+                                continue;
+                            }
+                        }
+
+                        // 2. Process authenticated commands via CommandDispatcher
+                        Console.WriteLine($"[ZGB] -INFO- Received command from {session.ClientId}: {trimmedLine}");
+                        string response = _commandDispatcher?.ProcessIncomingCommand(trimmedLine);
+                        if (response != null)
+                        {
+                            writer.WriteLine(response);
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -TRACE- Client session {clientId} disconnected: {ex.Message}");
+                Console.WriteLine($"[ZGB] -TRACE- Client session {session.ClientId} disconnected: {ex.Message}");
             }
             finally
             {
-                _connectedClients.TryRemove(clientId, out _);
-                CloseClientConnection(client);
+                _connectedSessions.TryRemove(session.ClientId, out _);
+                CloseClientConnection(session.Client);
             }
         }
 
         /// <summary>
-        /// Broadcasts serialized JSON data packages out to all actively connected clients.
+        /// Broadcasts serialized JSON data packages exclusively to authenticated clients.
         /// </summary>
         public void BroadcastJson(string jsonPayload)
         {
-            if (string.IsNullOrEmpty(jsonPayload) || _connectedClients.IsEmpty)
+            if (string.IsNullOrEmpty(jsonPayload) || _connectedSessions.IsEmpty)
             {
                 return;
             }
@@ -125,24 +181,28 @@ namespace ZeroGBridge
             string formattedPayload = jsonPayload.EndsWith("\n") ? jsonPayload : jsonPayload + "\n";
             byte[] buffer = Encoding.UTF8.GetBytes(formattedPayload);
 
-            foreach (var kvp in _connectedClients)
+            foreach (var kvp in _connectedSessions)
             {
+                ClientSession session = kvp.Value;
+                
+                // Gate telemetry push behind authentication
+                if (session == null || !session.IsAuthenticated || session.Client == null || !session.Client.Connected)
+                {
+                    continue;
+                }
+
                 try
                 {
-                    TcpClient client = kvp.Value;
-                    if (client != null && client.Connected)
+                    NetworkStream stream = session.Client.GetStream();
+                    if (stream.CanWrite)
                     {
-                        NetworkStream stream = client.GetStream();
-                        if (stream.CanWrite)
-                        {
-                            stream.Write(buffer, 0, buffer.Length);
-                            stream.Flush();
-                        }
+                        stream.Write(buffer, 0, buffer.Length);
+                        stream.Flush();
                     }
                 }
                 catch
                 {
-                    _connectedClients.TryRemove(kvp.Key, out _);
+                    _connectedSessions.TryRemove(kvp.Key, out _);
                 }
             }
         }
@@ -153,11 +213,11 @@ namespace ZeroGBridge
             try
             {
                 _listener?.Stop();
-                foreach (var kvp in _connectedClients)
+                foreach (var kvp in _connectedSessions)
                 {
-                    CloseClientConnection(kvp.Value);
+                    CloseClientConnection(kvp.Value.Client);
                 }
-                _connectedClients.Clear();
+                _connectedSessions.Clear();
                 _listenerThread?.Join(1000);
             }
             catch (Exception ex)
