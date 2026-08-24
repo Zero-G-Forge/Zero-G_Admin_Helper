@@ -2,17 +2,16 @@
 
 import json
 from features.security.security_module import SecurityModule
-
 # Your users provided in the prompt
 plaintext_users = [
     {
         "Username": "Enter username Here",
         "Password": "Enter password here",
         "Account Type": "Primary/Secondary Admin",
-        "Keep me logged in status": # True/False,
-        "Steam ID": # Enter 17 Digit SteamID here,
+        "Keep me logged in status": False,
+        "Steam ID": "Enter 17 Digit SteamID here",
         "Account Creation": "Creation Date dd/mm/yyyy at hh:mm",
-        "Account Status": "Active/Inactive",
+        "Account Status": "Active",
         "Last Accessed": "Date dd/mm/yyyy at hh:mm"
     }
 ]

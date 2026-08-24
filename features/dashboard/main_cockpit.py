@@ -16,13 +16,13 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QPixmap
 
-from features.dashboard.telemetry_worker import TelemetryWorker
-from features.dashboard.resource_worker import ResourcePollingWorker
+## from features.dashboard.telemetry_worker import TelemetryWorker
+## from features.dashboard.resource_worker import ResourcePollingWorker
 ## from features.dashboard.command_pipe import CommandPipe
 ## from features.dashboard.log_tee import LogTee
-from features.network.connection import is_network_ready
-from data.player_registry import PlayerRegistryPopup
-from data.playfield_registry import ActivePlayfieldsPopup
+## from features.network.connection import is_network_ready
+## from data.player_registry import PlayerRegistryPopup
+## from data.playfield_registry import ActivePlayfieldsPopup
 
 class TelemetryWidget(QFrame):
     """

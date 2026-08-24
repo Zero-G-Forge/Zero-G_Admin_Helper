@@ -44,7 +44,7 @@ class TelemetryWorker(QThread):
                 self._socket.connect((self.host, self.port))
 
                 self.connection_status.emit(True, "Connected")
-                print(f"[TelemetryWorker] -STATUS- Successfully connected to Port {self.port}.")
+                print(f"[TelemetryWorker] -STATUS- Successfully connected to Port {self.port}:{self.port}.")
 
                 while self._is_running:
                     try:

@@ -173,7 +173,6 @@ class NetworkWizardOverlay(QDialog):
         print(f"IP Target     : {self.input_ip.text() if self.input_ip.text() else 'BLANK'}")
         print(f"Port Target   : {self.input_port.text() if self.input_port.text() else 'BLANK'}")
         print(f"Auth Token    : {self.input_pass.text() if self.input_pass.text() else 'BLANK'}")
-        print(f"Stream Port   : 30500 (Hardcoded for Telemetry Server)")
         print("==================================================")
 
         # 1. Capture Data - Keys MUST match is_network_ready() dictionary lookup
@@ -181,14 +180,18 @@ class NetworkWizardOverlay(QDialog):
             "input_ip": self.input_ip.text().strip(),
             "input_port": self.input_port.text().strip(),
             "input_pass": self.input_pass.text().strip(),
-            "stream_port": "30500"  # Hardcoded stream port for telemetry server
         }
         
-        # 2. Persistence
+        # 2. Persistence - Force indentation and line breaks
         os.makedirs("data", exist_ok=True)
-        with open("data/server_config.json", "w") as f:
-            json.dump(config_data, f)
+        config_path = os.path.join("data", "server_config.json")
+        
+        # 3. Explicit multiline serialization
+        formatted_json = json.dumps(config_data, indent=4)
+        with open(config_path, "w", encoding="utf-8") as f:
+            f.write(formatted_json + "\n")
             
-        # 3. Handoff
-        print("[SUCCESS] Network configuration saved.")
+        # 4. Handoff
+        print(f"[SUCCESS] Network configuration saved to {config_path}:")
+        print(formatted_json)
         self.accept()
