@@ -26,7 +26,7 @@ def is_network_ready(config_path="data/server_config.json", timeout=5.0):
             
         # Ensure keys match the ones written in accept_action_callback
         raw_ip = config.get("input_ip")
-        raw_port = config.get("input_port")
+        raw_port = config.get("input_port") or 30500
         
         if not raw_ip or not raw_port:
             print("[DEBUG] Config exists but fields are empty or missing.")
@@ -35,11 +35,11 @@ def is_network_ready(config_path="data/server_config.json", timeout=5.0):
         ip = str(raw_ip)
         port = int(raw_port)
         
-        print(f"[DEBUG] Initiating network diagnostic: Ping to {ip}:{port} (Timeout: {timeout}s)...")
+        print(f"[DEBUG] Initiating network diagnostic: Pinging {ip}:{port} with a {timeout}s timeout...")
         
         # Diagnostic Ping Hook
         with socket.create_connection((ip, port), timeout=timeout) as s:
-            print(f"[SUCCESS] Ping diagnostic passed for {ip}")
+            print(f"[SUCCESS] Ping diagnostic passed for {ip}:{port}. Connection established.")
             return True
             
     except (json.JSONDecodeError, ValueError, socket.timeout, ConnectionRefusedError, OSError) as e:
@@ -163,6 +163,7 @@ class NetworkWizardOverlay(QDialog):
         self.update()
 
     def cancel_action_callback(self):
+        """Rejects modal dialog and terminates network setup loop cleanly."""
         print("[UI EVENT] Cancel clicked. Shutting down application loop cleanly...")
         self.close()
 

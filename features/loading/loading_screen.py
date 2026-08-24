@@ -76,62 +76,92 @@ class ApplicationLoader(QDialog):
         # HARD LOCK: If paused for a modal, exit immediately
         if self.is_boot_paused:
             return
-        
-        self.current_progress += 1
-        
+              
         # 1. VISUAL ANIMATION LOGIC (Persisted)
+        # Advance vector glow offset across circuit paths
         self.pulse_offset += 5.0
         if self.pulse_offset >= 200.0:
             self.pulse_offset = 0.0
 
         # 2. STATE-GATED PROGRESSION
         # --- LOGIN GATE (30%) ---
-        if 30 <= self.current_progress < 31:
+        # Verifies account persistence or launches the modal login dialog
+        if self.current_progress == 30 and not self.account_checkpoint_cleared:
             # Force loading progress to stop
             self.boot_timer.stop()
-            print(f"[DEBUG] Running Persistence Check...")
+            print("[DEBUG] Milestone 30% Hit: Running Persistence Check...")
 
+            # Scenario A: Persistent session exists, bypass interactive login
             if is_session_valid() or check_for_persistent_user():
-                print("[SUCCESS] Session/Persistence user found. Bypassing login.")
-                self.login_bypassed = True
-                self.current_progress = 60 # Jump to edge of network gate
-                self.boot_timer.start()
+                print("[SUCCESS] Active session/persistent user found. Bypassing login.")
+                self.account_checkpoint_cleared = True
+                self.current_progress = 31 # Advance past checkpoint boundary
+                self.boot_timer.start(30)
+                return
             else:
-                print("[INFO] No valid session. Triggering Login.")
-                self.boot_timer.stop()
-                self.is_boot_paused = True # Engage lock
+                # Scenario B: No persistent session detected, engage modal login dialog
+                print("[INFO] No valid session detected. Opening Login Window...")
+                self.is_boot_paused = True # Engage lock to prevent background progression
                 
-                self.login_window = LoginWindow()
-                self.login_window.setWindowModality(Qt.WindowModality.ApplicationModal)
+                # Instantiate LoginWindow modal
+                login_win = LoginWindow(self)
+                login_win.setWindowModality(Qt.WindowModality.ApplicationModal)
                 
-                # --- CORRECTED SIGNAL MAPPING ---
-                self.login_window.accepted.connect(self.resume_boot_sequence)
-                self.login_window.rejected.connect(self.handle_login_rejected) # Use rejection handler
+                # Execute modal dialog in blocking loop
+                result = login_win.exec()
                 
-                self.login_window.show()
-                return # Exit loop until window is closed
+                if result == QDialog.DialogCode.Accepted:
+                    print("[SUCCESS] Login verified. Resuming initialization sequence...")
+                    self.account_checkpoint_cleared = True
+                    self.is_boot_paused = False # Release modal lock
+                    self.current_progress = 31 # Advance progress past 30% boundary
+                    self.boot_timer.start(30) # Restart timer
+                    return
+                else:
+                    # User canceled or closed login modal, abort boot sequence cleanly
+                    print("[STATUS] Login canceled or rejected. Terminating application initialization...")
+                    self.boot_timer.stop()
+                    self.reject()
+                    return # Exit loop until window is closed
             
         # --- NETWORK GATE (60%) ---
+        # Validates server configuration profile and verifies port reachability via ping
         elif self.current_progress == 60 and not self.network_checkpoint_cleared:
+            self.boot_timer.stop() # 1. Stop timer
+            print("[DEBUG] Milestone 60% Hit: Running Network Diagnostics...")
+
+            # Scenario A: Server configuration profile is valid and port probe passes
             if is_network_ready():
-                print("[SUCCESS] Network verified.")
+                print("[SUCCESS] Network profile verified and ping passed.")
                 self.network_checkpoint_cleared = True
+                self.current_progress = 61 # Advance past checkpoint boundary
+                self.boot_timer.start(30)
+                return
             else:
-                print("[CHECKPOINT] 60% Milestone Hit. Running network diagnostics...")
-                self.boot_timer.stop() # 1. Stop timer
+                # Scenario B: Configuration profile is missing, corrupted, or unreachable
+                print("[INFO] Server configuration invalid or unreachable. Opening Network Connection Wizard...")
                 self.is_boot_paused = True # 2. Set pause flag to prevent further increments
                 
                 # 3. Use exec() for modal blocking
                 network_wizard = NetworkWizardOverlay(self)
-                if network_wizard.exec(): # This blocks and returns True if accepted
-                    print(f"[SUCCESS] Network Configuration saved.")
-                    self.network_checkpoint_cleared = True
+                result = network_wizard.exec()
                 
-                # 4. Resume
-                self.is_boot_paused = False
-                self.boot_timer.start() # 3. Restart timer
-                return 
-            pass
+                if result == QDialog.DialogCode.Accepted and is_network_ready():
+                    print("[SUCCESS] Network configuration saved and verified. Resuming initialization sequence...")
+                    self.network_checkpoint_cleared = True
+                    self.is_boot_paused = False # Release modal lock
+                    self.current_progress = 61 # Advance progress past 60% boundary
+                    self.boot_timer.start(30) # Restart timer
+                    return
+                else:
+                    # User canceled or network remained unreachable after wizard
+                    print("[STATUS] Network setup canceled or ping failed. Halting progression...")
+                    self.boot_timer.stop()
+                    self.reject()
+                    return 
+
+        # Advance regular progress counter
+        self.current_progress += 1
 
         # 3. TRIGGER REPAINT
         self.update()

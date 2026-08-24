@@ -289,3 +289,14 @@ class MainCockpit(QMainWindow):
             print(f"[SUCCESS] Main Cockpit applied stylesheet: {css_path}")
         except Exception as e:
             print(f"[ERROR] Could not load stylesheet: {e}")
+
+    def closeEvent(self, event):
+        """
+        Ensures background worker threads and socket listeners are terminated
+        before the window is destroyed.
+        """
+        print("[INFO] MainCockpit: Shutting down background network threads...")
+        if hasattr(self, 'telemetry_worker') and self.telemetry_worker:
+            self.telemetry_worker.stop()
+        
+        event.accept()

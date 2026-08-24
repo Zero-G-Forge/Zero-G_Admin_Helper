@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import QDialog, QLineEdit, QPushButton, QLabel, QCheckBox
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen
 
-# Imported features
-from features.auth.persistence import USERS_FILE
+# Imported features - Ingest centralized paths and secure cryptographic handlers
+from features.auth.persistence import USERS_FILE, load_secure_data, save_persistence_state, update_last_login
 file_path = USERS_FILE
 
 class LoginWindow(QDialog):
@@ -85,16 +85,20 @@ class LoginWindow(QDialog):
         self.onboarding_btn.clicked.connect(self.initiate_onboarding)
 
     def initiate_onboarding(self):
+        """Launches the Account Onboarding Wizard modal dialog for new profile creation."""
         print("[STATUS] Onboarding trigger detected. Handoff to wizard phase...")
         try:
             from features.auth.onboarding import AccountOnboardingWizard
             self.wizard = AccountOnboardingWizard(self)
-            self.wizard.exec()
+            # Execute modal dialog and verify if new profile was created
+            if self.wizard.exec() == QDialog.DialogCode.Accepted:
+                print("[SUCCESS] Account created via onboarding wizard. Ready for login.")
         except Exception as e:
             print(f"[ERROR] Failed to launch onboarding: {e}")
             
 
     def paintEvent(self, event):
+        """Paints background artwork and draws custom neon vector styling for remember-me toggle."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
@@ -114,6 +118,7 @@ class LoginWindow(QDialog):
             painter.drawLine(bx, by + bh, bx + bw, by)
 
     def verify_login(self):
+        """Extracts user input, decrypts user registry via persistence layer, and validates credentials."""
         # 1. Capture user inputs
         entered_id = self.username_input.text().strip()
         entered_key = self.password_input.text().strip()
@@ -126,14 +131,13 @@ class LoginWindow(QDialog):
             self.error_label.setText("CRITICAL: REGISTRY NOT FOUND")
             return
             
-        # 4. Load and iterate through user profiles
-        with open(file_path, 'r') as f:
-            try:
-                users = json.load(f)
-            except json.JSONDecodeError:
-                users = []
+        # 4. Load and decrypt user profiles through centralized security pipeline
+        # Avoids raw json.load() on encrypted data files
+        users = load_secure_data(file_path)
+        if not users:
+            print("[WARNING] User database empty or decryption returned no valid records.")
         
-        # 5. Authenticate
+        # 5. Authenticate against decrypted user objects
         auth_success = False
         for user in users:
             # Fixed: Matching capitalized keys from persistence.py
@@ -146,7 +150,6 @@ class LoginWindow(QDialog):
             print("[AUTH] Credentials verified successfully.")
             
             # --- PATCH: Update Persistence & Timestamp ---
-            from features.auth.persistence import save_persistence_state, update_last_login
             save_persistence_state(entered_id, self.remember_me_check.isChecked())
             update_last_login(entered_id)
             
@@ -157,5 +160,6 @@ class LoginWindow(QDialog):
             self.error_label.setText("ACCESS DENIED: SIGNATURE INVALID")
 
     def process_cancel_dismissal(self):
+        """Terminates modal login session and emits standard rejection code."""
         print("[STATUS] Authentication canceled. Exiting application framework cleanly...")
         self.reject()

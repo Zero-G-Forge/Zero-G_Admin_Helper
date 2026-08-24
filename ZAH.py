@@ -10,6 +10,10 @@ from PyQt6.QtCore import QEventLoop, QCoreApplication
 from features.network.connection import is_network_ready
 from features.dashboard.main_cockpit import MainCockpit
 
+import atexit
+from features.clear_pycache import clear_pycache
+atexit.register(clear_pycache)
+
 # -------------------------------------------------------------------
 # MULTI-TIER PACKAGE NAMESPACE RESOLUTION
 # -------------------------------------------------------------------
@@ -17,15 +21,15 @@ from features.dashboard.main_cockpit import MainCockpit
 # Load Screen 1 (The Application Loader Component)
 try:
     from features.loading.loading_screen import ApplicationLoader
-    print("[SUCCESS] Package Namespace: ApplicationLoader Loaded")
+    print("[SUCCESS] Package: ApplicationLoader Loaded")
 except ImportError as e:
     print(f"[WARNING] Could not load Application Loader: {e}")
     ApplicationLoader = None
 
-# Load Screen 2 'The Onboarding Wizard'
+# Load Screen 2 'The Onboarding Wizard' 
 try:
     from features.auth.onboarding import AccountOnboardingWizard
-    print("[SUCCESS] Package Namespace: AccountOnboardingWizard Loaded")
+    print("[SUCCESS] Package: AccountOnboardingWizard Loaded")
 except ImportError as e:
     print(f"[WARNING] Could not load Onboarding Wizard: {e}")
     AccountOnboardingWizard = None
@@ -33,12 +37,17 @@ except ImportError as e:
 # LOAD LOGIN WINDOW: Must be imported before use in main()
 try:
     from features.auth.login import LoginWindow
-    print("[SUCCESS] Package Namespace: LoginWindow Loaded")
+    print("[SUCCESS] Package: LoginWindow Loaded")
 except ImportError as e:
     print(f"[ERROR] Could not load LoginWindow: {e}")
     LoginWindow = None
 
 def main():
+    """
+    Primary application entry point and master lifecycle orchestrator.
+    Initializes the QApplication, applies centralized styles, executes
+    the state-gated ApplicationLoader, and hands off to MainCockpit.
+    """
     print("[DEBUG] Initializing Master Operational Registry Engine (PyQt6 Mode)...")
 
     # Initialize the core global window event loop using PyQt6
@@ -64,7 +73,8 @@ def main():
     # SEQUENTIAL BOOT LIFECYCLE MANAGEMENT LOOP
     # -------------------------------------------------------------------
 
-    # PHASE 1. Initial Environment Synchronization
+    # PHASE 1: Application Splash Loader Canvas & State-Gated Progression
+    # ApplicationLoader internally handles Milestone 30% (Auth) and Milestone 60% (Network)
     if ApplicationLoader is not None:
         print("[DEBUG] Instantiating Screen 1: Application Splash Loader Canvas...")
         loader = ApplicationLoader()
@@ -78,31 +88,25 @@ def main():
         print("[ERROR] ApplicationLoader not found. Halting.")
         sys.exit(1)
 
-    # PHASE 2: Network Verification Gate
-    from features.network.connection import NetworkWizardOverlay
-
-    if not is_network_ready():
-        print("[STATUS] Network unreachable. Launching Network Wizard...")
-        network_wizard = NetworkWizardOverlay()
-        if network_wizard.exec() != QDialog.DialogCode.Accepted:
-            sys.exit(0)  # Exit if user cancels network setup
-    else:
-        print("[SUCCESS] Network verified.")
-
-    # PHASE 3: Dashboard Handoff
+    # PHASE 2: Dashboard Handoff
     # Logic: Only proceed to MainCockpit if the previous gates (Loader/Network) 
     # concluded with an 'Accepted' signal.
     if loader_result == QDialog.DialogCode.Accepted:
         print("[SUCCESS] Loading sequence complete. Launching Main Cockpit.")
+        
         # --- LOAD CONFIGURATION ---
+        # Parse data/server_config.json to pass active credentials to the cockpit
         config_path = os.path.join(root_dir, "data/server_config.json")
-        try:
-            with open(config_path, "r") as f:
-                app_config = json.load(f)
-            print("[DEBUG] Configuration loaded successfully.")
-        except Exception as e:
-            print(f"[CRITICAL] Failed to load server_config.json: {e}")
-            sys.exit(1)
+        app_config = {}
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    app_config = json.load(f)
+                print("[DEBUG] Configuration loaded successfully.")
+            except Exception as e:
+                print(f"[WARNING] Could not parse server_config.json: {e}")
+        else:
+            print("[WARNING] server_config.json not found on disk. Passing empty profile.")
         # -------------------------------
 
         # Pass the loaded config to MainCockpit
