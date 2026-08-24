@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QPixmap
 
-## from features.dashboard.telemetry_worker import TelemetryWorker
+from features.dashboard.telemetry_worker import TelemetryWorker
 ## from features.dashboard.resource_worker import ResourcePollingWorker
 ## from features.dashboard.command_pipe import CommandPipe
 ## from features.dashboard.log_tee import LogTee
@@ -106,19 +106,17 @@ class MainCockpit(QMainWindow):
         self.master_layout.setSpacing(15)
         self.central_widget.setLayout(self.master_layout)
 
-        # 4. Telemetry panel integrated into the top header strip. Code located in setup_zones()
-        #    for clarity and modularity.
-        # self.telemetry_widget = TelemetryWidget(self)
-
-
-        # 5. Construct Layout Zones
+        # 4. Construct Layout Zones
         print("[DEBUG] MainCockpit: Constructing Layout Zones...")
         self.setup_zones()
 
-        # 6. Apply External QSS Theme
+        # 5. Apply External QSS Theme
         print("[DEBUG] MainCockpit: Applying CSS Styles...")
         self.apply_theme()
         print("[SUCCESS] Main Cockpit Dashboard structure initialized.")
+
+        # 6. Initialize Network Background Services and UI Bindings
+        self._init_network_services()
 
     def setup_zones(self):
         """Constructs layout zones across the central dashboard canvas."""
@@ -289,6 +287,175 @@ class MainCockpit(QMainWindow):
             print(f"[SUCCESS] Main Cockpit applied stylesheet: {css_path}")
         except Exception as e:
             print(f"[ERROR] Could not load stylesheet: {e}")
+
+    def _init_network_services(self):
+        """
+        Instantiates background telemetry streaming worker and wires UI control triggers.
+        Dynamically extracts host IP and Port from server_config.json.
+        """
+        target_ip = None
+        target_port = 30500
+
+        # Step 1: Attempt lookup from passed configuration dictionary
+        if self.config and isinstance(self.config, dict):
+            target_ip = self.config.get("input_ip")
+            raw_port = self.config.get("input_port")
+            if raw_port:
+                target_port = int(raw_port)
+
+        # Step 2: Fallback direct read from data/server_config.json on disk
+        if not target_ip:
+            config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'server_config.json')
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        cfg = json.load(f)
+                        target_ip = cfg.get("input_ip")
+                        raw_port = cfg.get("input_port")
+                        if raw_port:
+                            target_port = int(raw_port)
+                except Exception as e:
+                    print(f"[ERROR] MainCockpit: Failed to parse server_config.json: {e}")
+
+        # Step 3: Guard check to abort cleanly if no valid target IP was found
+        if not target_ip:
+            print("[ERROR] MainCockpit: No valid server IP found in config or on disk.")
+            self.telemetry_widget.lbl_target_ip.setText("Target IP: Not Configured")
+            return
+
+        # Step 4: Update HUD Header Label dynamically with resolved IP and Port
+        self.telemetry_widget.lbl_target_ip.setText(f"Target IP: {target_ip}:{target_port}")
+
+        # Step 5: Ingest background telemetry stream over Port 30500
+        print(f"[DEBUG] MainCockpit: Initializing TelemetryWorker target: {target_ip}:{target_port}")
+        self.telemetry_worker = TelemetryWorker(host=target_ip, port=target_port)
+        self.telemetry_worker.metrics_updated.connect(self._on_metrics_received)
+        self.telemetry_worker.players_updated.connect(self._on_players_received)
+        self.telemetry_worker.connection_status.connect(self._on_connection_status)
+        self.telemetry_worker.start()
+
+        # Step 6: Wire UI input triggers and feed selector stack
+        self.execute_btn.clicked.connect(self._handle_command_execution)
+        self.cmd_input.returnPressed.connect(self._handle_command_execution)
+        self.feed_selector.currentIndexChanged.connect(self.feed_stack.setCurrentIndex)
+
+    def _on_connection_status(self, is_connected: bool, message: str):
+        """
+        Slot receiver handling connection state changes from TelemetryWorker.
+        Updates HUD status labels and logs network link events.
+        """
+        if is_connected:
+            # Update HUD status label to ONLINE with neon cyan/green accent
+            self.telemetry_widget.lbl_server_status.setText("Server Status: ONLINE")
+            self.telemetry_widget.lbl_server_status.setStyleSheet("color: #00ff88; font-weight: bold;")
+            print(f"[STATUS] MainCockpit: Link established over Port 30500 - {message}")
+            self.system_logs_box.append(f"[NETWORK] Link established: {message}")
+        else:
+            # Update HUD status label to OFFLINE with red accent
+            self.telemetry_widget.lbl_server_status.setText("Server Status: OFFLINE")
+            self.telemetry_widget.lbl_server_status.setStyleSheet("color: #ff3355; font-weight: bold;")
+            print(f"[WARN] MainCockpit: Link dropped over Port 30500 - {message}")
+            self.system_logs_box.append(f"[NETWORK WARNING] Link dropped: {message}")
+
+    def _on_metrics_received(self, metric: dict):
+        """
+        Slot receiver handling live engine telemetry updates emitted by TelemetryWorker.
+        Extracts performance metrics and updates the upper HUD telemetry panel.
+        """
+        if not metric or not isinstance(metric, dict):
+            return
+
+        # Step 1: Safely extract telemetry fields with fallbacks
+        fps = metric.get("fps", 0.0)
+        heap = metric.get("heap", "--")
+        players = metric.get("players", 0)
+        uptime = metric.get("uptime", "--")
+
+        # Step 2: Dynamically update HUD Telemetry labels
+        try:
+            self.telemetry_widget.lbl_fps.setText(f"FPS: {float(fps):.1f}")
+        except (ValueError, TypeError):
+            self.telemetry_widget.lbl_fps.setText(f"FPS: {fps}")
+
+        self.telemetry_widget.lbl_heap.setText(f"Heap: {heap}")
+        self.telemetry_widget.lbl_players.setText(f"Players: {players}")
+        self.telemetry_widget.lbl_uptime.setText(f"Uptime: {uptime}")
+
+        # Step 3: Diagnostic terminal trace for ingestion verification
+        print(f"[METRIC INGEST] FPS: {fps} | Heap: {heap} | Players: {players} | Uptime: {uptime}")
+
+    def _on_players_received(self, player_list: list):
+        """
+        Slot receiver handling active player roster packets from TelemetryWorker.
+        Re-renders the 5-column QTableWidget with current server player states.
+        """
+        if player_list is None or not isinstance(player_list, list):
+            return
+
+        # Step 1: Temporarily disable sorting/updates during batch population
+        self.player_table.setSortingEnabled(False)
+        self.player_table.setRowCount(len(player_list))
+
+        # Step 2: Update HUD Header text with active roster count
+        self.lbl_players_header.setText(f"Players on Server: ({len(player_list)} Active)")
+
+        # Step 3: Iterate and populate the 5-column table structure
+        for row_idx, player in enumerate(player_list):
+            # Normalize dictionary or raw object lookups safely
+            if isinstance(player, dict):
+                p_name = player.get("name") or player.get("steamId", "Unknown Player")
+                p_status = player.get("status", "Active")
+                p_faction = player.get("faction", "--")
+                p_system = player.get("system", "SolarSystem")
+                p_playfield = player.get("playfield", "--")
+            else:
+                p_name = str(player)
+                p_status = "Active"
+                p_faction = "--"
+                p_system = "SolarSystem"
+                p_playfield = "--"
+
+            # Column mapping: [Player, Status, Faction, System, Playfield]
+            col_values = [p_name, p_status, p_faction, p_system, p_playfield]
+
+            for col_idx, text_val in enumerate(col_values):
+                item = QTableWidgetItem(str(text_val))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                # Keep table items read-only
+                item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                self.player_table.setItem(row_idx, col_idx, item)
+
+        # Step 4: Re-enable sorting and trigger table redraw
+        self.player_table.setSortingEnabled(True)
+        print(f"[ROSTER INGEST] Populated {len(player_list)} active player record(s) into table.")
+
+    def _handle_command_execution(self):
+        """
+        Slot handler triggered by Return key or the Execute button.
+        Routes outbound admin console commands and broadcasts to TelemetryWorker.
+        """
+        raw_command = self.cmd_input.text().strip()
+        if not raw_command:
+            return
+
+        # Step 1: Echo outbound command to the console/chat feed
+        echo_line = f"[ADMIN >>] {raw_command}"
+        self.console.append(echo_line)
+
+        # Mirror to global chat box if chat feed is active
+        if self.feed_selector.currentIndex() == 0:
+            self.global_chat_box.append(echo_line)
+
+        # Step 2: Transmit outbound command over Port 30500 via TelemetryWorker
+        if hasattr(self, 'telemetry_worker') and self.telemetry_worker:
+            self.telemetry_worker.send_command(raw_command)
+            print(f"[DISPATCH] MainCockpit: Transmitted console command: '{raw_command}'")
+        else:
+            print("[WARN] MainCockpit: Cannot dispatch command - TelemetryWorker offline.")
+
+        # Step 3: Reset input field and maintain active keyboard focus
+        self.cmd_input.clear()
+        self.cmd_input.setFocus()
 
     def closeEvent(self, event):
         """
