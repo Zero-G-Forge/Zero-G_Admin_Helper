@@ -366,12 +366,26 @@ class MainCockpit(QMainWindow):
             return
 
         # Step 1: Safely extract telemetry fields with fallbacks
+        cpu = metric.get("cpu", 0.0)
+        ram = metric.get("ram", "--")
         fps = metric.get("fps", 0.0)
         heap = metric.get("heap", "--")
         players = metric.get("players", 0)
         uptime = metric.get("uptime", "--")
 
-        # Step 2: Dynamically update HUD Telemetry labels
+        # Step 2: Dynamically update host hardware labels (CPU & RAM)
+        try:
+            self.telemetry_widget.lbl_server_cpu.setText(f"CPU: {float(cpu):.1f}%")
+        except (ValueError, TypeError):
+            self.telemetry_widget.lbl_server_cpu.setText(f"CPU: {cpu}%")
+
+        # Format RAM display string cleanly
+        if isinstance(ram, str) and (ram.endswith("MB") or ram.endswith("GB") or ram.endswith("%") or ram == "--"):
+            self.telemetry_widget.lbl_server_ram.setText(f"RAM: {ram}")
+        else:
+            self.telemetry_widget.lbl_server_ram.setText(f"RAM: {ram}%")
+
+        # Step 3: Dynamically update HUD Telemetry labels
         try:
             self.telemetry_widget.lbl_fps.setText(f"FPS: {float(fps):.1f}")
         except (ValueError, TypeError):
@@ -381,8 +395,8 @@ class MainCockpit(QMainWindow):
         self.telemetry_widget.lbl_players.setText(f"Players: {players}")
         self.telemetry_widget.lbl_uptime.setText(f"Uptime: {uptime}")
 
-        # Step 3: Diagnostic terminal trace for ingestion verification
-        print(f"[METRIC INGEST] FPS: {fps} | Heap: {heap} | Players: {players} | Uptime: {uptime}")
+        # Step 4: Diagnostic terminal trace for ingestion verification
+        print(f"[METRIC INGEST] CPU: {cpu} | RAM: {ram} | FPS: {fps} | Heap: {heap} | Players: {players} | Uptime: {uptime}")
 
     def _on_players_received(self, player_list: list):
         """

@@ -36,11 +36,23 @@ class TelemetryParser:
     def extract_metric(cls, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Extracts and normalizes live server metrics from a METRIC packet.
+        Parses cpu, ram, fps, heap, players, and uptime with defensive fallbacks.
         """
         if data.get("type") != "METRIC":
             return None
 
         try:
+            # Normalize CPU extraction (float or formatted percentage string)
+            raw_cpu = data.get("cpu", data.get("server_cpu", 0.0))
+            try:
+                cpu_val = float(str(raw_cpu).replace("%", "").strip())
+            except (ValueError, TypeError):
+                cpu_val = 0.0
+
+            # Normalize RAM extraction (e.g., "2180MB", "45%", or formatted string)
+            raw_ram = data.get("ram", data.get("server_ram", "--"))
+            ram_val = str(raw_ram).strip()
+
             return {
                 "timestamp": data.get("timestamp", ""),
                 "status": data.get("status", "Active"),
@@ -51,6 +63,8 @@ class TelemetryParser:
                 "pfs": int(data.get("pfs", 0)),
                 "ticks": int(data.get("ticks", 0)),
                 "nwqueue": int(data.get("nwqueue", 0)),
+                "cpu": cpu_val,
+                "ram": ram_val,
                 "player_list": data.get("player_list", []),
             }
         except (ValueError, TypeError) as err:
