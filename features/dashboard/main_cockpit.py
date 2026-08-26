@@ -348,14 +348,14 @@ class MainCockpit(QMainWindow):
             # Update HUD status label to ONLINE with neon cyan/green accent
             self.telemetry_widget.lbl_server_status.setText("Server Status: ONLINE")
             self.telemetry_widget.lbl_server_status.setStyleSheet("color: #00ff88; font-weight: bold;")
-            print(f"[STATUS] MainCockpit: Link established over Port 30500 - {message}")
+            print(f"[STATUS] MainCockpit: Link established over Port 30500 - Connected")
             self.system_logs_box.append(f"[NETWORK] Link established: {message}")
         else:
             # Update HUD status label to OFFLINE with red accent
             self.telemetry_widget.lbl_server_status.setText("Server Status: OFFLINE")
             self.telemetry_widget.lbl_server_status.setStyleSheet("color: #ff3355; font-weight: bold;")
-            print(f"[WARN] MainCockpit: Link dropped over Port 30500 - {message}")
-            self.system_logs_box.append(f"[NETWORK WARNING] Link dropped: {message}")
+            print(f"[WARN] MainCockpit: Link closed over Port 30500 - Disconnected")
+            self.system_logs_box.append(f"[NETWORK WARNING] Link closed: {message}")
 
     def _on_metrics_received(self, metric: dict):
         """
