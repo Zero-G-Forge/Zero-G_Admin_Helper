@@ -72,10 +72,16 @@ namespace ZeroGBridge
 
         /// <summary>
         /// Worker loop executed every 2000ms.
+        /// Samples process CPU usage and physical working set memory.
         /// </summary>
         private void TelemetryLoop()
         {
-            DateTime processStartTime = System.Diagnostics.Process.GetCurrentProcess().StartTime;
+            var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
+            DateTime processStartTime = currentProcess.StartTime;
+
+            // Baseline metrics for differential CPU percentage calculation
+            TimeSpan lastCpuTime = currentProcess.TotalProcessorTime;
+            DateTime lastSampleTime = DateTime.UtcNow;
 
             while (_isRunning)
             {
@@ -87,8 +93,31 @@ namespace ZeroGBridge
                     var playerList = _playerCache != null ? _playerCache.GetAllPlayers() : new List<PlayerRecord>();
                     int onlineCount = playerList.Count;
 
+                    // Calculate Server Uptime
                     TimeSpan uptimeSpan = DateTime.Now - processStartTime;
                     string uptimeStr = $"{uptimeSpan.Hours:D2}h:{uptimeSpan.Minutes:D2}m";
+
+                    // 1. Calculate Real-Time CPU% across the iteration interval
+                    DateTime currentSampleTime = DateTime.UtcNow;
+                    currentProcess.Refresh();
+                    TimeSpan currentCpuTime = currentProcess.TotalProcessorTime;
+
+                    double elapsedMs = (currentSampleTime - lastSampleTime).TotalMilliseconds;
+                    double cpuUsedMs = (currentCpuTime - lastCpuTime).TotalMilliseconds;
+
+                    double cpuPercent = 0.0;
+                    if (elapsedMs > 0)
+                    {
+                        cpuPercent = (cpuUsedMs / (elapsedMs * Environment.ProcessorCount)) * 100.0;
+                        cpuPercent = Math.Round(Math.Max(0.0, Math.Min(100.0, cpuPercent)), 1);
+                    }
+
+                    lastCpuTime = currentCpuTime;
+                    lastSampleTime = currentSampleTime;
+
+                    // 2. Sample Dedicated Server Physical RAM (WorkingSet64)
+                    long ramBytes = currentProcess.WorkingSet64;
+                    string ramFormatted = $"{ramBytes / (1024 * 1024)}MB";
 
                     string preciseTimestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss");
                     string heapStr = (GC.GetTotalMemory(false) / (1024 * 1024)).ToString() + "MB";
@@ -113,7 +142,7 @@ namespace ZeroGBridge
                         tickCount = (ulong)(DateTime.UtcNow.Ticks % 100000);
                     }
 
-                    // Structure JSON telemetry packet
+                    // Structure JSON telemetry packet with CPU and RAM keys
                     var telemetryData = new
                     {
                         timestamp = preciseTimestamp,
@@ -126,6 +155,8 @@ namespace ZeroGBridge
                         pfs = pfsCount.ToString(),
                         ticks = tickCount.ToString(),
                         nwqueue = nwQueueVal.ToString(),
+                        cpu = cpuPercent,
+                        ram = ramFormatted,
                         player_list = playerList,
                         player_data = playerList
                     };
@@ -148,7 +179,7 @@ namespace ZeroGBridge
                     if (_logCounter >= 7)
                     {
                         _logCounter = 0;
-                        string formattedLog = $"-LOG- INFO: Uptime={uptimeStr} heap={heapStr} fps={fpsVal:0.0} players={onlineCount} pfs={pfsCount} ticks={tickCount} nwqueue={nwQueueVal}";
+                        string formattedLog = $"-LOG- INFO: Uptime={uptimeStr} heap={heapStr} fps={fpsVal:0.0} cpu={cpuPercent}% ram={ramFormatted} players={onlineCount} pfs={pfsCount} ticks={tickCount} nwqueue={nwQueueVal}";
 
                         if (_modApi != null)
                         {

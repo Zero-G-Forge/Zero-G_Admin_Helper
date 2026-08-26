@@ -7,6 +7,25 @@
     <OutputType>Library</OutputType>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
+
+    <!-- Assembly Metadata Attributes -->
+    <Title>ZeroGBridge</Title>
+    <Description>Dedicated Telemetry &amp; Administration Bridge for Empyrion</Description>
+    <Company>Zero-G Forge</Company>
+    <Product>ZeroGBridge</Product>
+    <Copyright>Copyright © 2026 Zero-G Forge</Copyright>
+    <AssemblyTrademark>ZGB</AssemblyTrademark>
+
+    <!-- Dynamic 16-bit Valid UTC-5 (CDT) Version Generation -->
+    <MajorVersion>1</MajorVersion>
+    <MinorVersion>0</MinorVersion>
+    <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
+    <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
+
+    <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>
+    <AssemblyVersion>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</AssemblyVersion>
+    <FileVersion>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</FileVersion>
+    <InformationalVersion>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</InformationalVersion>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -29,5 +48,16 @@
       <Private>False</Private>
     </Reference>
   </ItemGroup>
+
+  <!-- Auto-generate matching ModInfo.yaml on build -->
+  <Target Name="GenerateModInfoYaml" AfterTargets="Build">
+    <PropertyGroup>
+      <ModInfoContent>Name: ZeroGBridge%0ADisplayName: ZeroGBridge%0AVersion: $(Version)%0AAuthor: Zero-G Forge%0ADescription: Dedicated Telemetry &amp; Administration Bridge for Empyrion</ModInfoContent>
+    </PropertyGroup>
+    <WriteLinesToFile 
+      File="$(TargetDir)ModInfo.yaml" 
+      Lines="$(ModInfoContent)" 
+      Overwrite="true" />
+  </Target>
 
 </Project>

@@ -17,9 +17,8 @@ This Master Operational Registry establishes the foundational protocols for the 
         Primary Language: Python.
         GUI Framework: PyQt6.
         Namespace Rigor: Strict usage of scoped enum namespaces within the GUI library (such as explicitly utilizing Qt.AlignmentFlag and Qt.Orientation).
-        Target Host & Integration environment: Dedicated Empyrion: Galactic Survival game server hosted via GTXGaming. IP: 66.23.236.138 Ports: 30004 and 30080
-            Port 30004 (Telnet Handshake):** Used strictly for the initial connection handshake, socket authentication, and validating credentials when ZAH boots up, 
-            Port 30080 (ZeroGBridge Stream & Command Injection):** Once the handshake clears, all operational traffic—including continuous JSON telemetry streaming, live player data caches, and command injections (such as plys)—shifts over the ZGB dedicated mod bridge.
+        Target Host & Integration environment: Dedicated Empyrion: Galactic Survival game server hosted via GTXGaming. IP: 66.23.236.138 Port: 30500
+            Port 30500 (ZeroGBridge Stream & Command Injection):** Used for the initial connection handshake, socket authentication, and validating credentials when ZAH boots up, once the handshake clears, all operational traffic—including continuous JSON telemetry streaming, live player data caches, and command injections (such as plys) are run over the ZGB dedicated mod bridge.
 
 🏗️ Architectural & File System Constraints
         Feature-First Pattern: All application functional logic, controllers, and sub-views are isolated cleanly within the /features/ subdirectory. Cross-dependency between distinct features is strictly prohibited.
@@ -55,9 +54,9 @@ This Master Operational Registry establishes the foundational protocols for the 
 
         assets/ (Contains UI and visual elements required for the application.)
 
-        branding/: Contains logos, icons, and visual identity assets.
-
-        backgrounds/ / buttons/: Graphical components for the UI.
+            branding/: Contains logos, icons, and visual identity assets.
+            backgrounds/   
+            buttons/: Graphical components for the UI.
 
         additional_assets/: Misc media or supporting UI elements.
 
@@ -105,28 +104,40 @@ This Master Operational Registry establishes the foundational protocols for the 
             sFTP.py
             test_telemetry.py
 
-        clear_pycache.py: Maintenance utility that clears all __pycache__ bytecode files from folders nested in main root file.
+        clear_pycache.py: Maintenance utility that clears all __pycache__ bytecode files from 
+            folders nested in main root file.
+        
         ZeroGBridge (Mod Program files)
 
-        bin/: Contains compiled .dll file and .pdb files
+            bin/: Contains compiled .dll file and .pdb files
 
-        Core/:
+            Core/:
 
-            ModMain.cs
+                ModMain.cs (Mod lifecycle entry point (Init and Shutdown).)
 
-        Handlers/:
+            Handlers/:
 
-        lib/: Contains all possible needed EGS library .dll files for modding
+                CommandDispatcher.cs (Ingests and routes incoming console commands (e.g., plys).)
 
-        Network/:
+            lib/: Contains all possible needed EGS library .dll files for modding
 
-            TelemetryServer.cs
+            logging/: Contains all active logging files
 
-        obj/: Contains compilation files
+                LogParser.cs (Regex evaluation of raw log lines for player join/leave events.)
 
-        Properties/:
+                LogDiscovery.cs (Scans directories to lock onto the active master)
 
-            AssemblyInfo.cs
+            Network/:
+
+                TelemetryServer.cs (Handles TCP client sockets and password authentication gating on Port 30500.)
+
+                TelemetryBroadcaster.cs (Contains TelemetryLoop() where all metrics are calculated and structured into the METRIC JSON packet.)
+
+            obj/: Contains compilation files
+
+            Properties/:
+
+                AssemblyInfo.cs
 
 
 🔄 Automated Lifecycle & Sequential Flows
@@ -146,11 +157,7 @@ Target Host: Dedicated Empyrion Server hosted via GTX Gaming
 
 Active Destination IP: 66.23.236.138
 
-Active Routing Port: 30004 (Dedicated text-based Telnet console log stream)
-
-    Authentication Token: ******
-
-ZeroGBridge Routing Port: 30080
+ZeroGBridge Routing Port: 30500
 
     Authentication Token: None as of yet
 
