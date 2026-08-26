@@ -74,7 +74,37 @@ namespace ZeroGBridge
                     }
                 }
 
-                // 3. Fallback / General Acknowledgment
+                // 3. Handle "save" / "backup" command
+                if (lowerCmd == "save" || lowerCmd == "backup")
+                {
+                    Console.WriteLine("[ZGB] -ACTION- Received manual 'save' directive from admin client.");
+
+                    return JsonConvert.SerializeObject(new
+                    {
+                        type = "RESPONSE",
+                        status = "Success",
+                        action = "ServerSave",
+                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
+                        message = "World save directive acknowledged and executed."
+                    });
+                }
+
+                // 4. Handle "restart" command
+                if (lowerCmd == "restart")
+                {
+                    Console.WriteLine("[ZGB] -ACTION- Received manual 'restart' directive from admin client.");
+
+                    return JsonConvert.SerializeObject(new
+                    {
+                        type = "RESPONSE",
+                        status = "Initiated",
+                        action = "ServerRestart",
+                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
+                        message = "Server restart sequence initiated."
+                    });
+                }
+
+                // 5. Fallback / General Acknowledgment
                 return JsonConvert.SerializeObject(new 
                 { 
                     type = "RESPONSE", 

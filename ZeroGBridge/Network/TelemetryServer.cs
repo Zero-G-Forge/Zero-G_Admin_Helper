@@ -123,15 +123,14 @@ namespace ZeroGBridge
                                 if (submittedPassword == _serverPassword)
                                 {
                                     session.IsAuthenticated = true;
-                                    Console.WriteLine($"[ZGB] -INFO- Client {session.ClientId} successfully authenticated on Port {_port}.");
-
+                                    Console.WriteLine($"[ZGB] -INFO- Client ZAH successfully authenticated on Port {_port}.");
                                     var authSuccess = new { type = "AUTH", status = "Authenticated", message = "Access Granted" };
                                     writer.WriteLine(JsonConvert.SerializeObject(authSuccess));
                                     continue;
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[ZGB] -WARN- Client {session.ClientId} provided invalid password.");
+                                    Console.WriteLine($"[ZGB] -WARN- Client ZAH provided an invalid password.");
                                     var authDenied = new { type = "AUTH", status = "Denied", message = "Invalid Credentials" };
                                     writer.WriteLine(JsonConvert.SerializeObject(authDenied));
                                     Thread.Sleep(1000);
@@ -142,13 +141,14 @@ namespace ZeroGBridge
                             {
                                 // Reject unauthenticated commands
                                 var authRequired = new { type = "AUTH", status = "Required", message = "Authentication Required. Submit auth:<password>" };
+                                Console.WriteLine($"[ZGB] -WARN- Invalid Command Provided");
                                 writer.WriteLine(JsonConvert.SerializeObject(authRequired));
                                 continue;
                             }
                         }
 
                         // 2. Process authenticated commands via CommandDispatcher
-                        Console.WriteLine($"[ZGB] -INFO- Received command from {session.ClientId}: {trimmedLine}");
+                        Console.WriteLine($"[ZGB] -INFO- Received command from ZAH : \"{trimmedLine}\"");
                         string response = _commandDispatcher?.ProcessIncomingCommand(trimmedLine);
                         if (response != null)
                         {
@@ -159,7 +159,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -TRACE- Client session {session.ClientId} disconnected: {ex.Message}");
+                Console.WriteLine($"[ZGB] -TRACE- Client session ZAH disconnected: {ex.Message}");
             }
             finally
             {
