@@ -212,7 +212,7 @@ class MainCockpit(QMainWindow):
         self.players_layout.addWidget(self.lbl_players_header)
         self.players_layout.addWidget(self.player_table)
 
-        # Button Matrix Control Panel Frame
+       # Button Matrix Control Panel Frame
         self.control_panel = QFrame()
         self.control_panel.setObjectName("ControlPanel")
         self.button_grid = QGridLayout(self.control_panel)
@@ -221,13 +221,71 @@ class MainCockpit(QMainWindow):
         
         for row in range(4):
             for col in range(4):
+                ## ===============
+                ## Row 1 (Index 0)
+                ## ===============
                 if row == 0 and col == 0:
                     btn_text = "Player\nRegistry"
+                    btn = QPushButton(btn_text)
+                    btn.setObjectName("MatrixButton")
+                    self.btn_player_registry = btn
+                    self.btn_player_registry.clicked.connect(self._on_player_registry_clicked)
+                elif row == 0 and col == 1:
+                    btn_text = "Active\nPlayfields"
+                    btn = QPushButton(btn_text)
+                    btn.setObjectName("MatrixButton")
+                    self.btn_active_playfields = btn
+                    self.btn_active_playfields.clicked.connect(self._on_active_playfield_clicked)
+                # elif row == 0 and col == 2:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 0 and col == 3:
+                    # btn_text = f"[{row},{col}]"
+                ## ===============
+                ## Row 2 (Index 1)
+                ## ===============
+                # elif row == 1 and col == 0:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 1 and col == 1:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 1 and col == 2:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 1 and col == 3:
+                    # btn_text = f"[{row},{col}]"
+                ## ===============
+                ## Row 3 (Index 2)
+                ## ===============
+                # elif row == 2 and col == 0:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 2 and col == 1:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 2 and col == 2:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 2 and col == 3:
+                    # btn_text = f"[{row},{col}]"
+                ## ===============
+                ## Row 4 (Index 3)
+                ## ===============
+                # elif row == 3 and col == 0:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 3 and col == 1:
+                    # btn_text = f"[{row},{col}]"
+                elif row == 3 and col == 2:
+                    btn_text = "Backup\nServer"
+                    btn = QPushButton(btn_text)
+                    btn.setObjectName("MatrixButton")
+                    self.btn_backup_server = btn
+                    self.btn_backup_server.clicked.connect(self._on_backup_clicked)
+                elif row == 3 and col == 3:
+                    btn_text = "Restart\nServer"
+                    btn = QPushButton(btn_text)
+                    btn.setObjectName("MatrixButton")
+                    self.btn_restart_server = btn
+                    self.btn_restart_server.clicked.connect(self._on_restart_clicked)
                 else:
-                    btn_text = f"[{row+1},{col+1}]"
+                    btn_text = f"[{row},{col}]"
+                    btn = QPushButton(btn_text)
+                    btn.setObjectName("MatrixButton")
 
-                btn = QPushButton(btn_text)
-                btn.setObjectName("MatrixButton")
                 btn.setSizePolicy(btn.sizePolicy().Policy.Expanding, btn.sizePolicy().Policy.Expanding)
                 self.button_grid.addWidget(btn, row, col)
       
@@ -270,6 +328,10 @@ class MainCockpit(QMainWindow):
 
         self.master_layout.addLayout(self.master_vertical_layout)
 
+    # -------------------------------------------------------------------------
+    # Loads Visualization Programming
+    # -------------------------------------------------------------------------
+
     def paintEvent(self, event):
         """Force background canvas visualization mapping."""
         painter = QPainter(self)
@@ -287,6 +349,10 @@ class MainCockpit(QMainWindow):
             print(f"[SUCCESS] Main Cockpit applied stylesheet: {css_path}")
         except Exception as e:
             print(f"[ERROR] Could not load stylesheet: {e}")
+
+    # -------------------------------------------------------------------------
+    # Initating Network Connection
+    # -------------------------------------------------------------------------
 
     def _init_network_services(self):
         """
@@ -339,6 +405,10 @@ class MainCockpit(QMainWindow):
         self.cmd_input.returnPressed.connect(self._handle_command_execution)
         self.feed_selector.currentIndexChanged.connect(self.feed_stack.setCurrentIndex)
 
+    # -------------------------------------------------------------------------
+    # Determines if Server is ONLINE/OFFLINE
+    # -------------------------------------------------------------------------
+
     def _on_connection_status(self, is_connected: bool, message: str):
         """
         Slot receiver handling connection state changes from TelemetryWorker.
@@ -356,6 +426,10 @@ class MainCockpit(QMainWindow):
             self.telemetry_widget.lbl_server_status.setStyleSheet("color: #ff3355; font-weight: bold;")
             print(f"[WARN] MainCockpit: Link closed over Port 30500 - Disconnected")
             self.system_logs_box.append(f"[NETWORK WARNING] Link closed: {message}")
+
+    # -------------------------------------------------------------------------
+    # Receiving Telemetry UI Metrics
+    # -------------------------------------------------------------------------
 
     def _on_metrics_received(self, metric: dict):
         """
@@ -397,6 +471,10 @@ class MainCockpit(QMainWindow):
 
         # Step 4: Diagnostic terminal trace for ingestion verification
         print(f"[METRIC INGEST] CPU: {cpu} | RAM: {ram} | FPS: {fps} | Heap: {heap} | Players: {players} | Uptime: {uptime}")
+
+    # -------------------------------------------------------------------------
+    # Populates Active Player Table
+    # -------------------------------------------------------------------------
 
     def _on_players_received(self, player_list: list):
         """
@@ -443,6 +521,10 @@ class MainCockpit(QMainWindow):
         self.player_table.setSortingEnabled(True)
         print(f"[ROSTER INGEST] Populated {len(player_list)} active player record(s) into table.")
 
+    # -------------------------------------------------------------------------
+    # Feed Stack Execute Action Controller
+    # -------------------------------------------------------------------------
+
     def _handle_command_execution(self):
         """
         Slot handler triggered by Return key or the Execute button.
@@ -471,6 +553,46 @@ class MainCockpit(QMainWindow):
         self.cmd_input.clear()
         self.cmd_input.setFocus()
 
+    # -------------------------------------------------------------------------
+    # Button Matrix Action Controllers
+    # -------------------------------------------------------------------------
+
+    def _on_player_registry_clicked(self):
+        """
+        Queries the current connected player cache from ZeroGBridge.
+        """
+        print("[MainCockpit] -ACTION- 'Player Registry' invoked. Requesting player roster...")
+        if hasattr(self, "telemetry_worker") and self.telemetry_worker:
+            self.telemetry_worker.send_command("plys")
+
+    def _on_active_playfield_clicked(self):
+        """
+        Placeholder slot for the Active Playfields matrix action.
+        """
+        print("[MainCockpit] -ACTION- 'Active Playfields' clicked.")
+        if hasattr(self, "telemetry_worker") and self.telemetry_worker:
+            self.telemetry_worker.send_command("gents")
+
+    def _on_backup_clicked(self):
+        """
+        Issues dedicated world backup and save directives to the server.
+        """
+        print("[MainCockpit] -ACTION- 'Backup Server' triggered. Dispatching backup token...")
+        if hasattr(self, "telemetry_worker") and self.telemetry_worker:
+            self.telemetry_worker.send_command("save")
+
+    def _on_restart_clicked(self):
+        """
+        Issues a server restart instruction sequence across Port 30500.
+        """
+        print("[MainCockpit] -ACTION- 'Restart Server' triggered. Dispatching restart token...")
+        if hasattr(self, "telemetry_worker") and self.telemetry_worker:
+            self.telemetry_worker.send_command("restart")
+
+    # -------------------------------------------------------------------------
+    # Program Close Action Handler
+    # -------------------------------------------------------------------------
+
     def closeEvent(self, event):
         """
         Ensures background worker threads and socket listeners are terminated
@@ -481,3 +603,8 @@ class MainCockpit(QMainWindow):
             self.telemetry_worker.stop()
         
         event.accept()
+
+    # -------------------------------------------------------------------------
+    # 
+    # -------------------------------------------------------------------------
+

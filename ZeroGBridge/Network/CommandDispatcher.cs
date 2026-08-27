@@ -77,7 +77,7 @@ namespace ZeroGBridge
                 // 3. Handle "save" / "backup" command
                 if (lowerCmd == "save" || lowerCmd == "backup")
                 {
-                    Console.WriteLine("[ZGB] -ACTION- Received manual 'save' directive from admin client.");
+                    Console.WriteLine("[ZGB] -ACTION- Received manual 'save' directive from ZAH.");
 
                     return JsonConvert.SerializeObject(new
                     {
@@ -92,7 +92,7 @@ namespace ZeroGBridge
                 // 4. Handle "restart" command
                 if (lowerCmd == "restart")
                 {
-                    Console.WriteLine("[ZGB] -ACTION- Received manual 'restart' directive from admin client.");
+                    Console.WriteLine("[ZGB] -ACTION- Received manual 'restart' directive from ZAH.");
 
                     return JsonConvert.SerializeObject(new
                     {
@@ -104,7 +104,23 @@ namespace ZeroGBridge
                     });
                 }
 
-                // 5. Fallback / General Acknowledgment
+                // 5. Handle "gents" (Get Global Entities)
+                if (lowerCmd == "gents")
+                {
+                    Console.WriteLine("[ZGB] -ACTION- Received 'gents' entity query directive from ZAH.");
+
+                    // Return entity payload or acknowledgment package
+                    return JsonConvert.SerializeObject(new
+                    {
+                        type = "ENTITY_LIST",
+                        status = "Synced",
+                        action = "GetEntities",
+                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
+                        entities = new List<object>() // Populated via entity cache or API hook
+                    });
+                }
+
+                // Fallback / General Acknowledgment
                 return JsonConvert.SerializeObject(new 
                 { 
                     type = "RESPONSE", 
