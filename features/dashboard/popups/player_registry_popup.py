@@ -69,10 +69,10 @@ class PlayerRegistryPopup(QDialog):
         self.master_layout.addWidget(self.search_input)
 
         # --- Player Table Widget (6 Columns) ---
-        self.player_table = QTableWidget(0, 6, self)
+        self.player_table = QTableWidget(0, 7, self)
         self.player_table.setObjectName("PlayerRegistryTable")
         self.player_table.setHorizontalHeaderLabels([
-            "Entity ID", "Player Name", "Steam ID", "Faction", "Playfield", "Ping"
+            "Status","Entity ID", "Player Name", "Steam ID", "Faction", "Playfield", "Ping"
         ])
         self.player_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.player_table.verticalHeader().setVisible(False)
@@ -121,7 +121,7 @@ class PlayerRegistryPopup(QDialog):
 
     def populate_players(self, player_list: list):
         """
-        Populates the 6-column QTableWidget from an incoming player roster array.
+        Populates both online and offline players into the registry table.
         """
         if player_list is None or not isinstance(player_list, list):
             return
@@ -129,23 +129,31 @@ class PlayerRegistryPopup(QDialog):
         self.player_table.setSortingEnabled(False)
         self.player_table.setRowCount(len(player_list))
 
+        online_count = 0
+
         for row_idx, p in enumerate(player_list):
             if isinstance(p, dict):
-                p_id = str(p.get("entityId", p.get("id", "--")))
-                p_name = str(p.get("name", "Unknown Player"))
+                p_name = str(p.get("name", "Unknown"))
                 p_steam = str(p.get("steamId", "--"))
+                p_id = str(p.get("entityId", p.get("id", "--")))
+                p_status = str(p.get("status", "Offline"))
                 p_fac = str(p.get("faction", "--"))
                 p_pf = str(p.get("playfield", "--"))
-                p_ping = f"{p.get('ping', 0)}ms" if "ping" in p else "--"
+                p_last = str(p.get("lastSeen", "--"))
             else:
-                p_id = "--"
                 p_name = str(p)
                 p_steam = "--"
+                p_id = "--"
+                p_status = "Offline"
                 p_fac = "--"
                 p_pf = "--"
-                p_ping = "--"
+                p_last = "--"
 
-            cols = [p_id, p_name, p_steam, p_fac, p_pf, p_ping]
+            if p_status.lower() == "online":
+                online_count += 1
+
+            cols = [p_status, p_name, p_steam, p_id, p_fac, p_pf, p_last]
+
             for col_idx, val in enumerate(cols):
                 item = QTableWidgetItem(val)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -153,8 +161,8 @@ class PlayerRegistryPopup(QDialog):
                 self.player_table.setItem(row_idx, col_idx, item)
 
         self.player_table.setSortingEnabled(True)
-        self.lbl_status.setText(f"Displaying {len(player_list)} active player record(s).")
-        print(f"[PlayerRegistryPopup] -SYNC- Populated {len(player_list)} player records.")
+        self.lbl_status.setText(f"Total Registered: {len(player_list)} | Online: {online_count} | Offline: {len(player_list) - online_count}")
+        self.lbl_title.setText(f"Server Player Registry ({len(player_list)} Total Players)")
 
     def _filter_players(self, text: str):
         """Filters table rows based on user input in the search field."""

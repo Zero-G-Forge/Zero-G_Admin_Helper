@@ -22,6 +22,8 @@ class TelemetryWorker(QThread):
     # Qt Signal Definitions
     metrics_updated = pyqtSignal(dict)
     players_updated = pyqtSignal(list)
+    player_cache_received = pyqtSignal(dict)
+    command_response = pyqtSignal(dict)
     response_received = pyqtSignal(dict)
     connection_status = pyqtSignal(bool, str)
 
@@ -119,23 +121,34 @@ class TelemetryWorker(QThread):
 
         pkt_type = payload.get("type")
 
-        # 1. Route METRIC packets
+        # 1. Route METRIC packets (2-second heartbeat stream)
         if pkt_type == "METRIC":
             metric = TelemetryParser.extract_metric(payload)
             if metric:
                 self.metrics_updated.emit(metric)
-                # If player roster is included, update player cache signal
+                # Auto-update player list from live telemetry stream
                 if "player_list" in metric:
                     self.players_updated.emit(metric["player_list"])
 
-        # 2. Route PLAYER_CACHE responses
+        # 2. Route PLAYER_CACHE responses (from 'plys' command)
         elif pkt_type == "PLAYER_CACHE":
             cache_data = TelemetryParser.extract_player_cache(payload)
             if cache_data:
-                self.players_updated.emit(cache_data.get("player_list", []))
+                player_roster = cache_data.get("player_list", [])
+                self.players_updated.emit(player_roster)
+            
+            # Emit raw cache package for PlayerRegistryPopup
+            self.player_cache_received.emit(payload)
+            self.command_response.emit(payload)
 
-        # 3. Route generic command responses
-        elif pkt_type == "RESPONSE":
+        # 3. Route ENTITY_LIST responses (from 'gents' command)
+        elif pkt_type == "ENTITY_LIST":
+            self.command_response.emit(payload)
+            self.response_received.emit(payload)
+
+        # 4. Route generic command responses and playfield data
+        elif pkt_type in ("RESPONSE", "PLAYFIELD_LIST", "PLAYFIELD_STATS", "PLAYER_INVENTORY"):
+            self.command_response.emit(payload)
             self.response_received.emit(payload)
 
     def send_command(self, command_str: str):
