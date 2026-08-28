@@ -64,7 +64,7 @@ class TelemetryWorker(QThread):
                 print(f"[TelemetryWorker] -STATUS- Successfully connected to Port {self.port}:{self.port}...")
 
                 # Step 2: Request initial player cache to populate the dashboard
-                self.send_command("plys")
+                ## self.send_command("plys")
 
                 while self._is_running:
                     try:

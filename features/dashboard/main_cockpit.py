@@ -519,8 +519,12 @@ class MainCockpit(QMainWindow):
 
         # Step 4: Re-enable sorting and trigger table redraw
         self.player_table.setSortingEnabled(True)
-        print(f"[ROSTER INGEST] Populated {len(player_list)} active player record(s) into table.")
 
+        # Step 5: Throttled diagnostic log - only prints when player count changes
+        if not hasattr(self, "_last_roster_count") or self._last_roster_count != len(player_list):
+            self._last_roster_count = len(player_list)
+            print(f"[ROSTER INGEST] Online player count changed: {len(player_list)} active player(s).")
+            
     # -------------------------------------------------------------------------
     # Feed Stack Execute Action Controller
     # -------------------------------------------------------------------------
