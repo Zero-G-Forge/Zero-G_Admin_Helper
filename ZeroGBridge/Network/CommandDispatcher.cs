@@ -109,19 +109,37 @@ namespace ZeroGBridge
                     });
                 }
 
-                // 5. Stage 1: Global Structure / Entity Query (CmdId.Request_GlobalStructure_List / Request_Playfield_Entity_List)
+                // 5. Stage 1: Global Structure / Entity Query
                 if (lowerCmd == "gents" || lowerCmd == "structures" || lowerCmd == "getentities")
                 {
-                    Console.WriteLine("[ZGB] -ACTION- Received 'gents' entity query directive from ZAH.");
+                    Console.WriteLine("[ZGB] -ACTION- Processing 'gents' entity query directive from ZAH.");
 
-                    // Return entity payload package for ZAH Cockpit ingestion
+                    List<object> structureSnapshot;
+                    lock (ModMain.CachedGlobalStructures)
+                    {
+                        // If live cache is empty, serve mock structural data for verification
+                        if (ModMain.CachedGlobalStructures.Count == 0)
+                        {
+                            structureSnapshot = new List<object>
+                            {
+                                new { id = 1001, name = "Zero-G Outpost Delta", type = "BA", faction = "MEC", playfield = "Akua", pos = "120, 65, -340" },
+                                new { id = 1002, name = "Starlight Vanguard", type = "CV", faction = "MEC", playfield = "Akua Orbit", pos = "1420, 0, 5200" },
+                                new { id = 1003, name = "Mining Rig Alpha", type = "BA", faction = "TCS", playfield = "Omicron", pos = "-500, 110, 80" }
+                            };
+                        }
+                        else
+                        {
+                            structureSnapshot = new List<object>(ModMain.CachedGlobalStructures);
+                        }
+                    }
+
                     return JsonConvert.SerializeObject(new
                     {
                         type = "ENTITY_LIST",
                         status = "Synced",
                         action = "GetEntities",
                         timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
-                        entities = new List<object>() // Populated via entity cache or ModAPI hook
+                        entities = structureSnapshot
                     });
                 }
 

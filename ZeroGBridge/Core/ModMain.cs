@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Collections.Generic;
 using Eleon.Modding;
 
 namespace ZeroGBridge
@@ -15,6 +16,8 @@ namespace ZeroGBridge
         private LogParser _logParser;
         private LogDiscovery _logDiscovery;
         private CommandDispatcher _commandDispatcher;
+        // Static thread-safe list of active structures cached for CommandDispatcher
+        public static readonly List<object> CachedGlobalStructures = new List<object>();
         private TelemetryServer _telemetryServer;
         private TelemetryBroadcaster _telemetryBroadcaster;
 
