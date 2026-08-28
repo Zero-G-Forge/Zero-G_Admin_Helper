@@ -17,12 +17,8 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QPixmap
 
 from features.dashboard.telemetry_worker import TelemetryWorker
-## from features.dashboard.resource_worker import ResourcePollingWorker
-## from features.dashboard.command_pipe import CommandPipe
-## from features.dashboard.log_tee import LogTee
-## from features.network.connection import is_network_ready
-## from data.player_registry import PlayerRegistryPopup
-## from data.playfield_registry import ActivePlayfieldsPopup
+from features.dashboard.popups.active_entities_popup import ActiveEntitiesPopup
+from features.dashboard.popups.player_registry_popup import PlayerRegistryPopup
 
 class TelemetryWidget(QFrame):
     """
@@ -524,7 +520,7 @@ class MainCockpit(QMainWindow):
         if not hasattr(self, "_last_roster_count") or self._last_roster_count != len(player_list):
             self._last_roster_count = len(player_list)
             print(f"[ROSTER INGEST] Online player count changed: {len(player_list)} active player(s).")
-            
+
     # -------------------------------------------------------------------------
     # Feed Stack Execute Action Controller
     # -------------------------------------------------------------------------
@@ -563,11 +559,15 @@ class MainCockpit(QMainWindow):
 
     def _on_player_registry_clicked(self):
         """
-        Queries the current connected player cache from ZeroGBridge.
+        Spawns the PlayerRegistryPopup modal dialog and issues the 'plys' query.
         """
-        print("[MainCockpit] -ACTION- 'Player Registry' invoked. Requesting player roster...")
-        if hasattr(self, "telemetry_worker") and self.telemetry_worker:
-            self.telemetry_worker.send_command("plys")
+        print("[MainCockpit] -ACTION- 'Player Registry' invoked.")
+        try:
+            from features.dashboard.popups.player_registry_popup import PlayerRegistryPopup
+            popup = PlayerRegistryPopup(telemetry_worker=getattr(self, 'telemetry_worker', None), parent=self)
+            popup.exec()
+        except ImportError as e:
+            print(f"[ERROR] MainCockpit: Could not load PlayerRegistryPopup: {e}")
 
     def _on_active_playfield_clicked(self):
         """

@@ -66,10 +66,10 @@ namespace ZeroGBridge
 
                     if (!string.IsNullOrEmpty(targetIdentifier))
                     {
-                        bool removed = _playerCache.RemovePlayer(targetIdentifier);
-                        if (removed)
+                        bool updated = _playerCache.MarkOffline(targetIdentifier);
+                        if (updated)
                         {
-                            Console.WriteLine($"[ZGB] -INFO- Player Disconnected & Evicted: ({targetIdentifier})");
+                            Console.WriteLine($"[ZGB] -INFO- Player marked Offline: ({targetIdentifier})");
                         }
                     }
                 }
