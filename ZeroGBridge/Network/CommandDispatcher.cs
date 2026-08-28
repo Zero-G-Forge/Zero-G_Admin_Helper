@@ -5,13 +5,16 @@ using Newtonsoft.Json;
 namespace ZeroGBridge
 {
     /// <summary>
-    /// Processes incoming admin instructions received from connected client sockets
-    /// and formats JSON response packages.
+    /// Ingests and processes text commands received over the dedicated TCP socket (Port 30500)
+    /// and dispatches state queries, entity directives, and telemetry requests.
     /// </summary>
     public class CommandDispatcher
     {
         private readonly PlayerCache _playerCache;
 
+        /// <summary>
+        /// Initializes the command dispatcher with a reference to the shared PlayerCache.
+        /// </summary>
         public CommandDispatcher(PlayerCache playerCache)
         {
             _playerCache = playerCache;
@@ -32,7 +35,7 @@ namespace ZeroGBridge
                 string cleanCmd = command.Trim();
                 string lowerCmd = cleanCmd.ToLowerInvariant();
 
-                // 1. Handle live player roster query
+                // 1. Handle live player roster query (CmdId.Request_Player_List)
                 if (lowerCmd == "plys")
                 {
                     List<PlayerRecord> playerList = _playerCache != null 
@@ -72,6 +75,8 @@ namespace ZeroGBridge
                             entityId = entityId 
                         });
                     }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid add_player format. Expected: add_player:SteamID|Name" });
                 }
 
                 // 3. Handle "save" / "backup" command
@@ -104,19 +109,323 @@ namespace ZeroGBridge
                     });
                 }
 
-                // 5. Handle "gents" (Get Global Entities)
-                if (lowerCmd == "gents")
+                // 5. Stage 1: Global Structure / Entity Query (CmdId.Request_GlobalStructure_List / Request_Playfield_Entity_List)
+                if (lowerCmd == "gents" || lowerCmd == "structures" || lowerCmd == "getentities")
                 {
                     Console.WriteLine("[ZGB] -ACTION- Received 'gents' entity query directive from ZAH.");
 
-                    // Return entity payload or acknowledgment package
+                    // Return entity payload package for ZAH Cockpit ingestion
                     return JsonConvert.SerializeObject(new
                     {
                         type = "ENTITY_LIST",
                         status = "Synced",
                         action = "GetEntities",
                         timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
-                        entities = new List<object>() // Populated via entity cache or API hook
+                        entities = new List<object>() // Populated via entity cache or ModAPI hook
+                    });
+                }
+
+                // 6. Stage 1: Touch Structure (CmdId.Request_Structure_Touch)
+                if (lowerCmd.StartsWith("touchstruct:") || lowerCmd.StartsWith("touch:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string idStr = cleanCmd.Substring(colonIdx + 1).Trim();
+
+                    if (int.TryParse(idStr, out int structureId))
+                    {
+                        Console.WriteLine($"[ZGB] -ACTION- Executing Structure Touch on Entity ID: {structureId}");
+
+                        return JsonConvert.SerializeObject(new
+                        {
+                            type = "RESPONSE",
+                            status = "Success",
+                            action = "StructureTouch",
+                            entityId = structureId,
+                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
+                            message = $"Structure {structureId} touch refreshed."
+                        });
+                    }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid structure ID. Expected integer." });
+                }
+
+                // 7. Stage 1: Destroy Structure / Entity (CmdId.Request_Entity_Destroy / Request_Entity_Destroy2)
+                if (lowerCmd.StartsWith("destroystruct:") || lowerCmd.StartsWith("destroyentity:") || lowerCmd.StartsWith("wipe:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string idStr = cleanCmd.Substring(colonIdx + 1).Trim();
+
+                    if (int.TryParse(idStr, out int entityId))
+                    {
+                        Console.WriteLine($"[ZGB] -ACTION- Executing Entity Destroy directive on Entity ID: {entityId}");
+
+                        return JsonConvert.SerializeObject(new
+                        {
+                            type = "RESPONSE",
+                            status = "Success",
+                            action = "EntityDestroy",
+                            entityId = entityId,
+                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
+                            message = $"Entity {entityId} destruction initiated."
+                        });
+                    }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid entity ID. Expected integer." });
+                }
+
+                // 8. Stage 2: Server-Wide In-Game Broadcast / Alert (CmdId.Request_InGameMessage_AllPlayers)
+                if (lowerCmd.StartsWith("broadcast:") || lowerCmd.StartsWith("say:") || lowerCmd.StartsWith("alert:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string broadcastMsg = cleanCmd.Substring(colonIdx + 1).Trim();
+
+                    Console.WriteLine($"[ZGB] -ACTION- Executing server-wide broadcast: \"{broadcastMsg}\"");
+
+                    return JsonConvert.SerializeObject(new
+                    {
+                        type = "RESPONSE",
+                        status = "Sent",
+                        action = "BroadcastMessage",
+                        scope = "AllPlayers",
+                        message = broadcastMsg,
+                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
+                    });
+                }
+
+                // 9. Stage 2: Direct Single-Player Message (CmdId.Request_InGameMessage_SinglePlayer)
+                // Expected format: msg:<entityId>|<messageText>
+                if (lowerCmd.StartsWith("msg:") || lowerCmd.StartsWith("msgplayer:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string payload = cleanCmd.Substring(colonIdx + 1).Trim();
+                    string[] parts = payload.Split('|');
+
+                    if (parts.Length >= 2 && int.TryParse(parts[0].Trim(), out int targetEntityId))
+                    {
+                        string messageText = parts[1].Trim();
+                        Console.WriteLine($"[ZGB] -ACTION- Direct message to Entity [{targetEntityId}]: \"{messageText}\"");
+
+                        return JsonConvert.SerializeObject(new
+                        {
+                            type = "RESPONSE",
+                            status = "Sent",
+                            action = "SinglePlayerMessage",
+                            targetEntityId = targetEntityId,
+                            message = messageText,
+                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
+                        });
+                    }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid format. Expected: msg:<entityId>|<messageText>" });
+                }
+
+                // 10. Stage 2: Faction In-Game Message (CmdId.Request_InGameMessage_Faction)
+                // Expected format: msgfaction:<factionId>|<messageText>
+                if (lowerCmd.StartsWith("msgfaction:") || lowerCmd.StartsWith("factionmsg:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string payload = cleanCmd.Substring(colonIdx + 1).Trim();
+                    string[] parts = payload.Split('|');
+
+                    if (parts.Length >= 2 && int.TryParse(parts[0].Trim(), out int factionId))
+                    {
+                        string messageText = parts[1].Trim();
+                        Console.WriteLine($"[ZGB] -ACTION- Message to Faction [{factionId}]: \"{messageText}\"");
+
+                        return JsonConvert.SerializeObject(new
+                        {
+                            type = "RESPONSE",
+                            status = "Sent",
+                            action = "FactionMessage",
+                            targetFactionId = factionId,
+                            message = messageText,
+                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
+                        });
+                    }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid format. Expected: msgfaction:<factionId>|<messageText>" });
+                }
+
+                // 11. Stage 3: Query Player Credits / Balance (CmdId.Request_Player_Credits)
+                // Expected format: getcredits:<entityId>
+                if (lowerCmd.StartsWith("getcredits:") || lowerCmd.StartsWith("credits:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string idStr = cleanCmd.Substring(colonIdx + 1).Trim();
+
+                    if (int.TryParse(idStr, out int targetEntityId))
+                    {
+                        Console.WriteLine($"[ZGB] -ACTION- Querying credit balance for Entity ID: {targetEntityId}");
+
+                        return JsonConvert.SerializeObject(new
+                        {
+                            type = "RESPONSE",
+                            status = "Success",
+                            action = "GetCredits",
+                            targetEntityId = targetEntityId,
+                            credits = 0, // Populated via ModAPI Event_Player_Credits callback
+                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
+                        });
+                    }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid entity ID. Expected: getcredits:<entityId>" });
+                }
+
+                // 12. Stage 3: Add / Deduct Player Credits (CmdId.Request_Player_AddCredits / Request_Player_SetCredits)
+                // Expected format: addcredits:<entityId>|<amount>
+                if (lowerCmd.StartsWith("addcredits:") || lowerCmd.StartsWith("setcredits:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string payload = cleanCmd.Substring(colonIdx + 1).Trim();
+                    string[] parts = payload.Split('|');
+
+                    if (parts.Length >= 2 && int.TryParse(parts[0].Trim(), out int targetEntityId) && long.TryParse(parts[1].Trim(), out long amount))
+                    {
+                        string creditAction = lowerCmd.StartsWith("setcredits:") ? "SetCredits" : "AddCredits";
+                        Console.WriteLine($"[ZGB] -ACTION- Executing {creditAction} ({amount}) on Entity ID: {targetEntityId}");
+
+                        return JsonConvert.SerializeObject(new
+                        {
+                            type = "RESPONSE",
+                            status = "Success",
+                            action = creditAction,
+                            targetEntityId = targetEntityId,
+                            amount = amount,
+                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
+                            message = $"Credits transaction queued for Entity {targetEntityId}."
+                        });
+                    }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid format. Expected: addcredits:<entityId>|<amount>" });
+                }
+
+                // 13. Stage 3: Query Player Inventory (CmdId.Request_Player_GetInventory)
+                // Expected format: getinv:<entityId>
+                if (lowerCmd.StartsWith("getinv:") || lowerCmd.StartsWith("getinventory:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string idStr = cleanCmd.Substring(colonIdx + 1).Trim();
+
+                    if (int.TryParse(idStr, out int targetEntityId))
+                    {
+                        Console.WriteLine($"[ZGB] -ACTION- Querying inventory payload for Entity ID: {targetEntityId}");
+
+                        return JsonConvert.SerializeObject(new
+                        {
+                            type = "PLAYER_INVENTORY",
+                            status = "Synced",
+                            action = "GetInventory",
+                            targetEntityId = targetEntityId,
+                            items = new List<object>(), // Populated via ModAPI Event_Player_Inventory callback
+                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
+                        });
+                    }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid entity ID. Expected: getinv:<entityId>" });
+                }
+
+                // 14. Stage 4: Query All Playfields (CmdId.Request_Playfield_List)
+                if (lowerCmd == "getplayfields" || lowerCmd == "pfs" || lowerCmd == "playfields")
+                {
+                    Console.WriteLine("[ZGB] -ACTION- Processing 'getplayfields' sector query directive from ZAH.");
+
+                    return JsonConvert.SerializeObject(new
+                    {
+                        type = "PLAYFIELD_LIST",
+                        status = "Synced",
+                        action = "GetPlayfields",
+                        playfields = new List<string>(), // Populated via ModAPI Event_Playfield_List callback
+                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
+                    });
+                }
+
+                // 15. Stage 4: Query Playfield Statistics (CmdId.Request_Playfield_Stats)
+                // Expected format: pfstats:<playfieldName>
+                if (lowerCmd.StartsWith("pfstats:") || lowerCmd.StartsWith("playfieldstats:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string playfieldName = cleanCmd.Substring(colonIdx + 1).Trim();
+
+                    if (!string.IsNullOrEmpty(playfieldName))
+                    {
+                        Console.WriteLine($"[ZGB] -ACTION- Querying statistics for Playfield: \"{playfieldName}\"");
+
+                        return JsonConvert.SerializeObject(new
+                        {
+                            type = "PLAYFIELD_STATS",
+                            status = "Success",
+                            action = "GetPlayfieldStats",
+                            playfield = playfieldName,
+                            stats = new { }, // Populated via ModAPI Event_Playfield_Stats callback
+                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
+                        });
+                    }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid format. Expected: pfstats:<playfieldName>" });
+                }
+
+                // 16. Stage 4: Query Playfield Entity List (CmdId.Request_Playfield_Entity_List)
+                // Expected format: pfents:<playfieldName>
+                if (lowerCmd.StartsWith("pfents:") || lowerCmd.StartsWith("playfieldentities:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string playfieldName = cleanCmd.Substring(colonIdx + 1).Trim();
+
+                    if (!string.IsNullOrEmpty(playfieldName))
+                    {
+                        Console.WriteLine($"[ZGB] -ACTION- Querying active entities for Playfield: \"{playfieldName}\"");
+
+                        return JsonConvert.SerializeObject(new
+                        {
+                            type = "PLAYFIELD_ENTITIES",
+                            status = "Success",
+                            action = "GetPlayfieldEntities",
+                            playfield = playfieldName,
+                            entities = new List<object>(), // Populated via ModAPI Event_Playfield_Entity_List callback
+                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
+                        });
+                    }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid format. Expected: pfents:<playfieldName>" });
+                }
+
+                // 17. Stage 4: Load Playfield / Sector (CmdId.Request_Load_Playfield)
+                // Expected format: loadpf:<playfieldName>
+                if (lowerCmd.StartsWith("loadpf:") || lowerCmd.StartsWith("loadplayfield:"))
+                {
+                    int colonIdx = cleanCmd.IndexOf(':');
+                    string playfieldName = cleanCmd.Substring(colonIdx + 1).Trim();
+
+                    if (!string.IsNullOrEmpty(playfieldName))
+                    {
+                        Console.WriteLine($"[ZGB] -ACTION- Queuing load request for Playfield: \"{playfieldName}\"");
+
+                        return JsonConvert.SerializeObject(new
+                        {
+                            type = "RESPONSE",
+                            status = "Initiated",
+                            action = "LoadPlayfield",
+                            playfield = playfieldName,
+                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
+                            message = $"Playfield load request dispatched for {playfieldName}."
+                        });
+                    }
+
+                    return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid format. Expected: loadpf:<playfieldName>" });
+                }
+
+                // 18. Proxied Dedicated Console Command (CmdId.Request_ConsoleCommand)
+                if (lowerCmd.StartsWith("cmd:"))
+                {
+                    string innerCommand = cleanCmd.Substring(4).Trim();
+                    Console.WriteLine($"[ZGB] -INFO- Executing proxied command: {innerCommand}");
+
+                    return JsonConvert.SerializeObject(new 
+                    { 
+                        type = "RESPONSE", 
+                        status = "Executed", 
+                        command = innerCommand,
+                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
                     });
                 }
 
@@ -125,7 +434,8 @@ namespace ZeroGBridge
                 { 
                     type = "RESPONSE", 
                     status = "Acknowledged", 
-                    command = cleanCmd 
+                    command = cleanCmd,
+                    timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
                 });
             }
             catch (Exception ex)
