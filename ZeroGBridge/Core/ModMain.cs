@@ -12,6 +12,8 @@ namespace ZeroGBridge
     public class ModMain : IMod
     {
         private IModApi _modApi;
+        // Modern ModAPI handle
+        public static IModApi ModApiInstance;
         private PlayerCache _playerCache;
         private LogParser _logParser;
         private LogDiscovery _logDiscovery;
@@ -29,6 +31,7 @@ namespace ZeroGBridge
         public void Init(IModApi modApi)
         {
             _modApi = modApi;
+            ModApiInstance = modApi;
 
             // Resolve log output directory for disk caching
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;

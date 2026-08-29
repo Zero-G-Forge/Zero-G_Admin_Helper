@@ -109,17 +109,24 @@ namespace ZeroGBridge
                     });
                 }
 
-                // 5. Stage 1: Global Structure / Entity Query
+                // 5. Global Structure / Entity Query with NPC Blacklist Filter
                 if (lowerCmd == "gents" || lowerCmd == "structures" || lowerCmd == "getentities")
                 {
                     Console.WriteLine("[ZGB] -ACTION- Processing 'gents' entity query directive from ZAH.");
 
+                    // NPC blacklist for filtering out non-player entities
+                    var npcBlacklist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "NoFaction", "Talon", "Zirax", "Zrx", "Polaris", "Pol", 
+                        "Kriel", "Trader", "Traders", "Uch", "UCH", "Warlord", "Alien"
+                    };
+
                     List<object> structureSnapshot;
                     lock (ModMain.CachedGlobalStructures)
                     {
-                        // If live cache is empty, serve mock structural data for verification
                         if (ModMain.CachedGlobalStructures.Count == 0)
                         {
+                            // Fallback mock data containing only player/player-faction entities
                             structureSnapshot = new List<object>
                             {
                                 new { id = 1001, name = "Zero-G Outpost Delta", type = "BA", faction = "MEC", playfield = "Akua", pos = "120, 65, -340" },
@@ -129,7 +136,30 @@ namespace ZeroGBridge
                         }
                         else
                         {
-                            structureSnapshot = new List<object>(ModMain.CachedGlobalStructures);
+                            structureSnapshot = new List<object>();
+
+                            foreach (var item in ModMain.CachedGlobalStructures)
+                            {
+                                string factionStr = null;
+                                try
+                                {
+                                    var prop = item.GetType().GetProperty("faction") ?? item.GetType().GetProperty("Faction");
+                                    if (prop != null)
+                                    {
+                                        factionStr = prop.GetValue(item)?.ToString();
+                                    }
+                                }
+                                catch
+                                {
+                                    factionStr = null;
+                                }
+
+                                // Strictly include if unassigned or not in the NPC blacklist
+                                if (string.IsNullOrEmpty(factionStr) || !npcBlacklist.Contains(factionStr.Trim('[', ']', ' ')))
+                                {
+                                    structureSnapshot.Add(item);
+                                }
+                            }
                         }
                     }
 
@@ -142,7 +172,7 @@ namespace ZeroGBridge
                         entities = structureSnapshot
                     });
                 }
-
+                
                 // 6. Stage 1: Touch Structure (CmdId.Request_Structure_Touch)
                 if (lowerCmd.StartsWith("touchstruct:") || lowerCmd.StartsWith("touch:"))
                 {
