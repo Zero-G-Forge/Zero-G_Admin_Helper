@@ -14,11 +14,25 @@ This Master Operational Registry establishes the foundational protocols for the 
         Fixed Dimensions: The application orchestrator expects an initial canvas resolution layout of 1000x750 pixels, while specific configuration components like the AccountOnboardingWizard enforce a fixed structural window size of 512x512 pixels.
 
 🛠️ Technical Stack & Core Framework
-        Primary Language: Python.
-        GUI Framework: PyQt6.
-        Namespace Rigor: Strict usage of scoped enum namespaces within the GUI library (such as explicitly utilizing Qt.AlignmentFlag and Qt.Orientation).
-        Target Host & Integration environment: Dedicated Empyrion: Galactic Survival game server hosted via GTXGaming. IP: 66.23.236.138 Port: 30500
-            Port 30500 (ZeroGBridge Stream & Command Injection):** Used for the initial connection handshake, socket authentication, and validating credentials when ZAH boots up, once the handshake clears, all operational traffic—including continuous JSON telemetry streaming, live player data caches, and command injections (such as plys) are run over the ZGB dedicated mod bridge.
+        -Primary Language: Python.
+            -GUI Framework: PyQt6.
+            -Namespace Rigor: Strict usage of scoped enum namespaces within the GUI library (such as explicitly utilizing Qt.AlignmentFlag and Qt.Orientation).
+            -Target Host & Integration environment: Dedicated Empyrion: Galactic Survival game server hosted via GTXGaming. IP: 66.23.236.138 Port: 30500
+                -Port 30500 (ZeroGBridge Stream & Command Injection):** Used for the initial connection handshake, socket authentication, and validating credentials when ZAH boots up, once the handshake clears, all operational traffic—including continuous JSON telemetry streaming, live player data caches, and command injections (such as plys) are run over the ZGB dedicated mod bridge.
+        -ZeroGBridge (ZGB) Language: C#.
+            -ZeroGBridge (ZGB) is a custom, high-performance C# server-side mod deployed directly into the Empyrion Dedicated Server (Content/Mods/ZeroGBridge/). It serves as the dedicated backend communication and telemetry pipeline for the Zero-G Admin Helper (ZAH) desktop suite.
+            Core Capabilities & Technical Specifications
+                -Runtime Framework: C# (.NET Framework 4.8) integrating STRICTLY with Eleon Game Studios' IMod / ModApi lifecycle interfaces.
+                -Dedicated Network Gateway: Binds to Port 30500 via an asynchronous TcpListener.
+                -Challenge-Response Security: Enforces password-gated client authentication (auth:<password>\r\n) before exposing telemetry broadcasts or command execution.
+                -Live Telemetry Stream: Samples and broadcasts 2-second line-delimited JSON METRIC packets over TCP, providing real-time metrics for:
+                    -Server Tick/FPS, Dynamic Heap Memory, Process CPU%, Physical RAM usage (WorkingSet64), and Server Uptime.
+                    -Real-time connected player caches (PlayerRecord: Steam ID, Entity ID, Ping).
+                -Command Dispatch Engine: Routes administrative and querying directives received from ZAH directly to the dedicated engine, returning structured JSON responses:
+                    -plys $\rightarrow$ Live player cache snapshot (PLAYER_CACHE).
+                    -gents $\rightarrow$ Global structure and entity querying (ENTITY_LIST) via CmdId.-Request_GlobalStructure_List.
+                    -save / backup $\rightarrow$ Immediate world state disk flush.
+                    -restart $\rightarrow$ Graceful server restart notification and shutdown.-cmd:<command> $\rightarrow$ Dedicated engine console command execution proxy.
 
 🏗️ Architectural & File System Constraints
         Feature-First Pattern: All application functional logic, controllers, and sub-views are isolated cleanly within the /features/ subdirectory. Cross-dependency between distinct features is strictly prohibited.
@@ -33,15 +47,17 @@ This Master Operational Registry establishes the foundational protocols for the 
         UI Integrity: Strict reliance on QSS (Qt Style Sheets) border-image properties. This is mandated to prevent high-detail vector asset corner-brackets and custom neon glow textures from warping or stretching across variable monitor resolutions.
         Fixed Dimensions: The application orchestrator expects an initial canvas resolution layout of 1000x750 pixels, while specific configuration components like the AccountOnboardingWizard enforce a fixed structural window size of 512x512 pixels.
 
+ZeroGBridge Constraints
+
+
 📦 System Architecture & Directory Patterns
         This repository enforces strict Feature-First Pattern boundaries and State Separation Protocols. All code tracking is restricted by these root namespaces:
-    /mnt/Zero-G_Files/Zero-G_Admin_Helper/ : Root Directory
+    /mnt/Zero-G_Files/Zero-G_Forge/Zero-G_Admin_Helper/ : Root Directory
 
         ZAH.py: The main entry point for the application. It initiates the UI thread and orchestrates the startup sequence.
         .instructions/ : AI Instructions and Constraints
 
             AI_INSTRUCTIONS.md
-
             README
 
         .gitignore
@@ -159,6 +175,6 @@ Active Destination IP: 66.23.236.138
 
 ZeroGBridge Routing Port: 30500
 
-    Authentication Token: None as of yet
+    Authentication Token: ZeroGAdmin2026
 
 sFTP Connection: Needed for .log file to be read and parsed.
