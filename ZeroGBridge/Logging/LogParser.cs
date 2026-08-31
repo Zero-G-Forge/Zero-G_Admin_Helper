@@ -34,6 +34,7 @@ namespace ZeroGBridge
 
         /// <summary>
         /// Ingests and processes a single log line to update active player records.
+        /// Synchronizes player connections and disconnections into the PlayerCache.
         /// </summary>
         public void IngestLine(string logLine)
         {
@@ -62,15 +63,14 @@ namespace ZeroGBridge
                     string name = leaveMatch.Groups["name"].Value;
                     string eid = leaveMatch.Groups["eid"].Value;
 
-                    string targetIdentifier = !string.IsNullOrEmpty(steam) ? steam : (!string.IsNullOrEmpty(name) ? name : eid);
+                    string targetIdentifier = !string.IsNullOrEmpty(steam) 
+                        ? steam 
+                        : (!string.IsNullOrEmpty(name) ? name : eid);
 
                     if (!string.IsNullOrEmpty(targetIdentifier))
                     {
-                        bool updated = _playerCache.MarkOffline(targetIdentifier);
-                        if (updated)
-                        {
-                            Console.WriteLine($"[ZGB] -INFO- Player marked Offline: ({targetIdentifier})");
-                        }
+                        _playerCache.MarkOffline(targetIdentifier);
+                        Console.WriteLine($"[ZGB] -INFO- Player Disconnected & Marked Offline: ({targetIdentifier})");
                     }
                 }
             }

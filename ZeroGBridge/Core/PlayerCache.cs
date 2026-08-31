@@ -1,7 +1,9 @@
 using System;
+using System.IO;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using Newtonsoft.Json;
 
 namespace ZeroGBridge
 {
@@ -26,26 +28,31 @@ namespace ZeroGBridge
     public class PlayerCache
     {
         private readonly ConcurrentDictionary<string, PlayerRecord> _allPlayers = new ConcurrentDictionary<string, PlayerRecord>();
+        private readonly string _cacheFilePath;
+        private readonly object _diskLock = new object();
 
-        /// <summary>
-        /// Total count of all known registered players.
-        /// </summary>
+        public PlayerCache()
+        {
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string storageDir = Path.Combine(baseDir, "Logs", "ZeroGBridge");
+            if (!Directory.Exists(storageDir))
+            {
+                Directory.CreateDirectory(storageDir);
+            }
+            _cacheFilePath = Path.Combine(storageDir, "players.json");
+            LoadFromDisk();
+        }
+
         public int TotalCount => _allPlayers.Count;
-
-        /// <summary>
-        /// Count of currently online players.
-        /// </summary>
         public int OnlineCount => _allPlayers.Values.Count(p => p.status == "Online");
 
-        /// <summary>
-        /// Marks a player as Online and updates their metadata.
-        /// </summary>
         public void AddOrUpdate(string steamId, string name, int entityId, int ping = 0, string faction = "--", string playfield = "--")
         {
             if (string.IsNullOrEmpty(steamId)) return;
 
+            string nowStr = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+
             _allPlayers.AddOrUpdate(steamId,
-                // If brand new player record:
                 new PlayerRecord
                 {
                     entityId = entityId,
@@ -55,68 +62,92 @@ namespace ZeroGBridge
                     faction = faction,
                     playfield = playfield,
                     ping = ping,
-                    lastSeen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
+                    lastSeen = nowStr
                 },
-                // If existing player record:
                 (key, existing) =>
                 {
-                    existing.name = !string.IsNullOrEmpty(name) ? name : existing.name;
+                    existing.name = string.IsNullOrEmpty(name) ? existing.name : name;
                     existing.entityId = entityId != 0 ? entityId : existing.entityId;
                     existing.status = "Online";
-                    existing.ping = ping;
                     if (faction != "--") existing.faction = faction;
                     if (playfield != "--") existing.playfield = playfield;
-                    existing.lastSeen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+                    existing.ping = ping;
+                    existing.lastSeen = nowStr;
                     return existing;
                 });
+
+            SaveToDisk();
         }
 
-        /// <summary>
-        /// Marks a player as Offline without deleting their record from the roster.
-        /// </summary>
-        public bool MarkOffline(string identifier)
+        public void MarkOffline(string identifier)
         {
-            if (string.IsNullOrEmpty(identifier)) return false;
+            if (string.IsNullOrEmpty(identifier)) return;
 
-            // 1. Direct SteamID match
-            if (_allPlayers.TryGetValue(identifier, out PlayerRecord record))
-            {
-                record.status = "Offline";
-                record.ping = 0;
-                record.lastSeen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-                return true;
-            }
-
-            // 2. Fallback match by Name or Entity ID
             var target = _allPlayers.Values.FirstOrDefault(p =>
+                p.steamId == identifier ||
                 string.Equals(p.name, identifier, StringComparison.OrdinalIgnoreCase) ||
                 p.entityId.ToString() == identifier);
 
             if (target != null)
             {
                 target.status = "Offline";
-                target.ping = 0;
                 target.lastSeen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-                return true;
+                SaveToDisk();
             }
-
-            return false;
         }
 
-        /// <summary>
-        /// Returns all tracked players (both online and offline).
-        /// </summary>
         public List<PlayerRecord> GetAllPlayers()
         {
             return new List<PlayerRecord>(_allPlayers.Values);
         }
 
-        /// <summary>
-        /// Returns only active online players.
-        /// </summary>
         public List<PlayerRecord> GetOnlinePlayers()
         {
             return _allPlayers.Values.Where(p => p.status == "Online").ToList();
+        }
+
+        private void LoadFromDisk()
+        {
+            try
+            {
+                lock (_diskLock)
+                {
+                    if (File.Exists(_cacheFilePath))
+                    {
+                        string json = File.ReadAllText(_cacheFilePath);
+                        var loaded = JsonConvert.DeserializeObject<List<PlayerRecord>>(json);
+                        if (loaded != null)
+                        {
+                            foreach (var p in loaded)
+                            {
+                                p.status = "Offline"; // Default to offline on server startup
+                                _allPlayers[p.steamId] = p;
+                            }
+                            Console.WriteLine($"[ZGB] -INFO- Restored {_allPlayers.Count} historical player record(s) from players.json.");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Could not load players.json: {ex.Message}");
+            }
+        }
+
+        private void SaveToDisk()
+        {
+            try
+            {
+                lock (_diskLock)
+                {
+                    string json = JsonConvert.SerializeObject(_allPlayers.Values.ToList(), Formatting.Indented);
+                    File.WriteAllText(_cacheFilePath, json);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Could not write players.json: {ex.Message}");
+            }
         }
     }
 }

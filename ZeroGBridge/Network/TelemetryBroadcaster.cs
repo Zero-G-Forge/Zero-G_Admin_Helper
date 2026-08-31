@@ -71,15 +71,16 @@ namespace ZeroGBridge
         }
 
         /// <summary>
-        /// Worker loop executed every 2000ms.
-        /// Samples process CPU usage and physical working set memory.
+        /// Background worker loop executed every 2000ms.
+        /// Samples host CPU, physical RAM (WorkingSet64), engine ticks, and active online players,
+        /// serializing and broadcasting the METRIC packet over Port 30500.
         /// </summary>
         private void TelemetryLoop()
         {
             var currentProcess = System.Diagnostics.Process.GetCurrentProcess();
             DateTime processStartTime = currentProcess.StartTime;
 
-            // Baseline metrics for differential CPU percentage calculation
+            // Baseline values for differential CPU percentage calculation
             TimeSpan lastCpuTime = currentProcess.TotalProcessorTime;
             DateTime lastSampleTime = DateTime.UtcNow;
 
@@ -87,17 +88,20 @@ namespace ZeroGBridge
             {
                 try
                 {
-                    // Ingest newly appended server log lines
+                    // 1. Ingest newly appended server log lines from the active log stream
                     _logDiscovery?.PollActiveLog();
 
-                    var playerList = _playerCache != null ? _playerCache.GetAllPlayers() : new List<PlayerRecord>();
-                    int onlineCount = playerList.Count;
+                    // 2. Fetch ONLY active online players for the live telemetry broadcast
+                    var onlinePlayers = _playerCache != null 
+                        ? _playerCache.GetOnlinePlayers() 
+                        : new List<PlayerRecord>();
+                    int onlineCount = onlinePlayers.Count;
 
-                    // Calculate Server Uptime
+                    // 3. Calculate Server Process Uptime
                     TimeSpan uptimeSpan = DateTime.Now - processStartTime;
                     string uptimeStr = $"{uptimeSpan.Hours:D2}h:{uptimeSpan.Minutes:D2}m";
 
-                    // 1. Calculate Real-Time CPU% across the iteration interval
+                    // 4. Calculate Real-Time Host CPU% across the iteration interval
                     DateTime currentSampleTime = DateTime.UtcNow;
                     currentProcess.Refresh();
                     TimeSpan currentCpuTime = currentProcess.TotalProcessorTime;
@@ -115,7 +119,7 @@ namespace ZeroGBridge
                     lastCpuTime = currentCpuTime;
                     lastSampleTime = currentSampleTime;
 
-                    // 2. Sample Dedicated Server Physical RAM (WorkingSet64)
+                    // 5. Sample Dedicated Server Physical Working Set RAM
                     long ramBytes = currentProcess.WorkingSet64;
                     string ramFormatted = $"{ramBytes / (1024 * 1024)}MB";
 
@@ -125,6 +129,7 @@ namespace ZeroGBridge
                     int pfsCount = onlineCount;
                     int nwQueueVal = 0;
 
+                    // 6. Safe Engine GameTick Extraction via ModAPI
                     ulong tickCount = 0;
                     if (_modApi?.Application != null)
                     {
@@ -142,7 +147,7 @@ namespace ZeroGBridge
                         tickCount = (ulong)(DateTime.UtcNow.Ticks % 100000);
                     }
 
-                    // Structure JSON telemetry packet with CPU and RAM keys
+                    // 7. Structure JSON Telemetry Payload
                     var telemetryData = new
                     {
                         timestamp = preciseTimestamp,
@@ -157,24 +162,25 @@ namespace ZeroGBridge
                         nwqueue = nwQueueVal.ToString(),
                         cpu = cpuPercent,
                         ram = ramFormatted,
-                        player_list = playerList,
-                        player_data = playerList
+                        player_list = onlinePlayers,
+                        player_data = onlinePlayers
                     };
 
                     string jsonLine = JsonConvert.SerializeObject(telemetryData);
 
-                    // Write live metric cache to disk
+                    // 8. Write live metric cache to disk
                     lock (_fileLock)
                     {
                         File.WriteAllText(_logFilePath, jsonLine + "\n");
                     }
 
-                    // Broadcast JSON packet over TCP socket (Port 30500)
+                    // 9. Broadcast JSON packet over TCP socket (Port 30500)
                     if (_telemetryServer != null && _telemetryServer.HasActiveConnections)
                     {
                         _telemetryServer.BroadcastJson(jsonLine);
                     }
 
+                    // 10. Periodic Server Log Trace (Every ~14 seconds)
                     _logCounter++;
                     if (_logCounter >= 7)
                     {
