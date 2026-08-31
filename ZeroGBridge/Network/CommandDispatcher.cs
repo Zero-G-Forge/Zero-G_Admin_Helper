@@ -35,6 +35,9 @@ namespace ZeroGBridge
                 string cleanCmd = command.Trim();
                 string lowerCmd = cleanCmd.ToLowerInvariant();
 
+                // Live server console trace
+                Console.WriteLine($"[ZGB] -INFO- Received command from ZAH: \"{cleanCmd}\"");
+
                 // 1. Handle live player roster query (CmdId.Request_Player_List)
                 if (lowerCmd == "plys")
                 {
@@ -51,7 +54,9 @@ namespace ZeroGBridge
                         timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
                     };
 
-                    return JsonConvert.SerializeObject(playerPackage);
+                    string jsonResponse = JsonConvert.SerializeObject(playerPackage);
+                    Console.WriteLine($"[ZGB] -DEBUG- Dispatching plys payload: {jsonResponse}");
+                    return jsonResponse;
                 }
 
                 // 2. Handle manual player injection (Diagnostic / Testing)
