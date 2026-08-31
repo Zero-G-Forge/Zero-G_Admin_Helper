@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLineEdit
 )
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QBrush, QFont
 
 
 class PlayerRegistryPopup(QDialog):
@@ -72,7 +73,7 @@ class PlayerRegistryPopup(QDialog):
         self.player_table = QTableWidget(0, 7, self)
         self.player_table.setObjectName("PlayerRegistryTable")
         self.player_table.setHorizontalHeaderLabels([
-            "Status","Entity ID", "Player Name", "Steam ID", "Faction", "Playfield", "Ping"
+            "Status", "Player Name", "Steam ID", "Entity ID", "Faction", "Playfield", "Last Logged Online"
         ])
         self.player_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.player_table.verticalHeader().setVisible(False)
@@ -149,7 +150,8 @@ class PlayerRegistryPopup(QDialog):
                 p_pf = "--"
                 p_last = "--"
 
-            if p_status.lower() == "online":
+            is_online = p_status.lower() == "online"
+            if is_online:
                 online_count += 1
 
             cols = [p_status, p_name, p_steam, p_id, p_fac, p_pf, p_last]
@@ -158,6 +160,20 @@ class PlayerRegistryPopup(QDialog):
                 item = QTableWidgetItem(val)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                
+                # --- Apply Color and Bold to the Status Column Only ---
+                if col_idx == 0:
+                    # Set font style to bold
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+
+                    # Apply distinctive colors based on connection state
+                    if is_online:
+                        item.setForeground(QBrush(QColor("#2ecc71")))  # Bright flat Green
+                    else:
+                        item.setForeground(QBrush(QColor("#e74c3c")))  # Bright flat Red
+                
                 self.player_table.setItem(row_idx, col_idx, item)
 
         self.player_table.setSortingEnabled(True)

@@ -157,7 +157,7 @@ class TelemetryWorker(QThread):
         """
         if self._socket and self._is_running:
             try:
-                # Ensure \r\n line termination matching GTX Gaming calibrations
+                # Ensure "\r\n" line termination matching GTX Gaming calibrations
                 formatted_cmd = command_str.strip() + "\r\n"
                 self._socket.sendall(formatted_cmd.encode("utf-8"))
                 print(f"[TelemetryWorker] -INFO- Transmitted outbound command: {command_str.strip()}")

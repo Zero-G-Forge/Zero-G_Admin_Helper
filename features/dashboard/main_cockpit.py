@@ -7,14 +7,15 @@ import os
 import sys
 import json
 import socket 
+from datetime import datetime, timedelta
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout, 
+    QMainWindow, QMenuBar, QMenu, QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout, 
     QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QPushButton, 
     QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QPainter, QPixmap
+from PyQt6.QtGui import QPainter, QPixmap, QAction, QKeySequence
 
 from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.popups.active_entities_popup import ActiveEntitiesPopup
@@ -81,6 +82,8 @@ class MainCockpit(QMainWindow):
     """
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
+        # Master in-memory dictionary keyed by Steam ID for synchronized state management
+        self._master_roster = {}
         self.config = config
 
         # 1. Base UI Setup
@@ -109,10 +112,44 @@ class MainCockpit(QMainWindow):
         # 5. Apply External QSS Theme
         print("[DEBUG] MainCockpit: Applying CSS Styles...")
         self.apply_theme()
+
+        # --- Initialize the File Menu ---
+        print("[DEBUG] MainCockpit: Initializing File Menu...")
+        self.setup_menu_bar()
+
         print("[SUCCESS] Main Cockpit Dashboard structure initialized.")
 
         # 6. Initialize Network Background Services and UI Bindings
         self._init_network_services()
+
+    def setup_menu_bar(self):
+        """Constructs the native File Menu at the top of the QMainWindow."""
+        # 1. Access the window's top-level menu bar container
+        menu_bar = self.menuBar()
+
+        # 2. Create the primary drop-down menu header
+        file_menu = menu_bar.addMenu("&File")
+
+        # 3. Define actionable drop-down line items
+        refresh_action = QAction("&Refresh Tables", self)
+        refresh_action.setShortcut("Ctrl+R")
+        refresh_action.setStatusTip("Force a database sync refresh with the server mod bridge")
+        refresh_action.triggered.connect(lambda: self.telemetry_worker.send_command("plys") if hasattr(self, 'telemetry_worker') and self.telemetry_worker else None)
+
+        logout_action = QAction("&Log Out of ZAH", self)
+        logout_action.setShortcut("Ctrl+Shift+L")
+        logout_action.setStatusTip("Logs you out and back to main login screen")
+
+        exit_action = QAction("&Exit ZAH", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self.close)
+
+        # 4. Pack items cleanly into the layout
+        file_menu.addAction(refresh_action)
+        file_menu.addSeparator()  # Native visual divider line
+        file_menu.addAction(logout_action)
+        file_menu.addSeparator()  # Native visual divider line
+        file_menu.addAction(exit_action)
 
     def setup_zones(self):
         """Constructs layout zones across the central dashboard canvas."""
@@ -147,23 +184,27 @@ class MainCockpit(QMainWindow):
         self.global_chat_box = QTextEdit()
         self.global_chat_box.setObjectName("GlobalChatBox")
         self.global_chat_box.setReadOnly(True)
+        self.global_chat_box.setPlaceholderText("Global communication feeds stand by...")
 
         self.faction_chat_box = QTextEdit()
         self.faction_chat_box.setObjectName("FactionChatBox")
         self.faction_chat_box.setReadOnly(True)
+        self.faction_chat_box.setPlaceholderText("Faction communication feeds stand by...")
 
         self.console = QTextEdit()
         self.console.setObjectName("ConsoleDisplay")
         self.console.setReadOnly(True)
+        self.console.setPlaceholderText("Data stream initialized, now listening...")
 
         self.system_logs_box = QTextEdit()
         self.system_logs_box.setObjectName("SystemLogsBox")
         self.system_logs_box.setReadOnly(True)
+        self.system_logs_box.setPlaceholderText("System diagnostic records stand by...")
 
-        self.feed_stack.addWidget(self.global_chat_box)
-        self.feed_stack.addWidget(self.faction_chat_box)
-        self.feed_stack.addWidget(self.console)
-        self.feed_stack.addWidget(self.system_logs_box)
+        self.feed_stack.addWidget(self.global_chat_box)  # Index 0
+        self.feed_stack.addWidget(self.faction_chat_box) # Index 1
+        self.feed_stack.addWidget(self.console)          # Index 2
+        self.feed_stack.addWidget(self.system_logs_box)  # Index 3
 
         self.left_column.addWidget(self.feed_stack, stretch=1)
 
@@ -208,7 +249,7 @@ class MainCockpit(QMainWindow):
         self.players_layout.addWidget(self.lbl_players_header)
         self.players_layout.addWidget(self.player_table)
 
-       # Button Matrix Control Panel Frame
+        # Button Matrix Control Panel Frame
         self.control_panel = QFrame()
         self.control_panel.setObjectName("ControlPanel")
         self.button_grid = QGridLayout(self.control_panel)
@@ -232,39 +273,9 @@ class MainCockpit(QMainWindow):
                     btn.setObjectName("MatrixButton")
                     self.btn_active_playfields = btn
                     self.btn_active_playfields.clicked.connect(self._on_active_playfield_clicked)
-                # elif row == 0 and col == 2:
-                    # btn_text = f"[{row},{col}]"
-                # elif row == 0 and col == 3:
-                    # btn_text = f"[{row},{col}]"
-                ## ===============
-                ## Row 2 (Index 1)
-                ## ===============
-                # elif row == 1 and col == 0:
-                    # btn_text = f"[{row},{col}]"
-                # elif row == 1 and col == 1:
-                    # btn_text = f"[{row},{col}]"
-                # elif row == 1 and col == 2:
-                    # btn_text = f"[{row},{col}]"
-                # elif row == 1 and col == 3:
-                    # btn_text = f"[{row},{col}]"
-                ## ===============
-                ## Row 3 (Index 2)
-                ## ===============
-                # elif row == 2 and col == 0:
-                    # btn_text = f"[{row},{col}]"
-                # elif row == 2 and col == 1:
-                    # btn_text = f"[{row},{col}]"
-                # elif row == 2 and col == 2:
-                    # btn_text = f"[{row},{col}]"
-                # elif row == 2 and col == 3:
-                    # btn_text = f"[{row},{col}]"
                 ## ===============
                 ## Row 4 (Index 3)
                 ## ===============
-                # elif row == 3 and col == 0:
-                    # btn_text = f"[{row},{col}]"
-                # elif row == 3 and col == 1:
-                    # btn_text = f"[{row},{col}]"
                 elif row == 3 and col == 2:
                     btn_text = "Backup\nServer"
                     btn = QPushButton(btn_text)
@@ -392,11 +403,15 @@ class MainCockpit(QMainWindow):
         print(f"[DEBUG] MainCockpit: Initializing TelemetryWorker target: {target_ip}:{target_port}")
         self.telemetry_worker = TelemetryWorker(host=target_ip, port=target_port)
         self.telemetry_worker.metrics_updated.connect(self._on_metrics_received)
-        self.telemetry_worker.players_updated.connect(self._on_players_received)
+        self.telemetry_worker.players_updated.connect(self._on_live_stream_received)
+        self.telemetry_worker.player_cache_received.connect(self._on_full_cache_received)
         self.telemetry_worker.connection_status.connect(self._on_connection_status)
         self.telemetry_worker.start()
 
-        # Step 6: Wire UI input triggers and feed selector stack
+        # Step 6: Dispatch immediate query on app launch to populate initial roster database
+        self.telemetry_worker.send_command("plys")
+
+        # Step 7: Wire UI input triggers and feed selector stack
         self.execute_btn.clicked.connect(self._handle_command_execution)
         self.cmd_input.returnPressed.connect(self._handle_command_execution)
         self.feed_selector.currentIndexChanged.connect(self.feed_stack.setCurrentIndex)
@@ -469,57 +484,120 @@ class MainCockpit(QMainWindow):
         print(f"[METRIC INGEST] CPU: {cpu} | RAM: {ram} | FPS: {fps} | Heap: {heap} | Players: {players} | Uptime: {uptime}")
 
     # -------------------------------------------------------------------------
-    # Populates Active Player Table
+    # Ingests Master Server Roster (From 'plys')
     # -------------------------------------------------------------------------
 
-    def _on_players_received(self, player_list: list):
+    def _on_full_cache_received(self, cache_pkg: dict):
         """
-        Slot receiver handling active player roster packets from TelemetryWorker.
-        Re-renders the 5-column QTableWidget with current server player states.
+        Slot receiver handling the full server roster package returned from 'plys'.
+        Synchronizes historical records into the master in-memory cache.
         """
-        if player_list is None or not isinstance(player_list, list):
+        if not cache_pkg or not isinstance(cache_pkg, dict):
             return
 
-        # Step 1: Temporarily disable sorting/updates during batch population
+        roster_list = cache_pkg.get("player_list", [])
+        for p in roster_list:
+            if isinstance(p, dict):
+                sid = str(p.get("steamId", p.get("id", "")))
+                if sid:
+                    self._master_roster[sid] = p
+
+        print(f"[ROSTER SYNC] Master roster updated: {len(self._master_roster)} total player record(s) loaded.")
+        self._refresh_dashboard_table()
+
+    # -------------------------------------------------------------------------
+    # Ingests 2-Second Live Telemetry Stream
+    # -------------------------------------------------------------------------
+
+    def _on_live_stream_received(self, online_list: list):
+        """
+        Receives the 2-second live active player stream from METRIC broadcasts.
+        Updates active player states to Online and sets absent players to Offline.
+        """
+        if not isinstance(online_list, list):
+            return
+
+        active_sids = set()
+        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Step 1: Update or insert actively connected players
+        for p in online_list:
+            if isinstance(p, dict):
+                sid = str(p.get("steamId", p.get("id", "")))
+                if sid:
+                    active_sids.add(sid)
+                    p["status"] = "Online"
+                    p["lastSeen"] = p.get("lastSeen", now_str)
+                    self._master_roster[sid] = p
+
+        # Step 2: Mark cached players absent from the live stream as Offline
+        for sid, p in self._master_roster.items():
+            if sid not in active_sids:
+                p["status"] = "Offline"
+
+        # Step 3: Refresh the dashboard table with 14-day cutoff filter
+        self._refresh_dashboard_table()
+
+    # -------------------------------------------------------------------------
+    # Renders 14-Day Dashboard Table
+    # -------------------------------------------------------------------------
+
+    def _refresh_dashboard_table(self):
+        """
+        Filters the master player roster for records active within the past 14 days
+        and repopulates the 5-column QTableWidget on the main cockpit.
+        """
+        cutoff_date = datetime.utcnow() - timedelta(days=14)
+        filtered_players = []
+
+        # Step 1: Filter entries by lastSeen timestamp
+        for p in self._master_roster.values():
+            if not isinstance(p, dict):
+                continue
+
+            last_seen_str = p.get("lastSeen", "")
+            try:
+                last_seen_dt = datetime.strptime(last_seen_str, "%Y-%m-%d %H:%M:%S")
+                if last_seen_dt >= cutoff_date:
+                    filtered_players.append(p)
+            except Exception:
+                # Include record if timestamp parsing is unformatted or unavailable
+                filtered_players.append(p)
+
+        # Step 2: Populate the dashboard QTableWidget
         self.player_table.setSortingEnabled(False)
-        self.player_table.setRowCount(len(player_list))
+        self.player_table.setRowCount(len(filtered_players))
 
-        # Step 2: Update HUD Header text with active roster count
-        self.lbl_players_header.setText(f"Players on Server: ({len(player_list)} Active)")
+        for row_pos, p in enumerate(filtered_players):
+            name = str(p.get("name", "Unknown"))
+            status = str(p.get("status", "Offline"))
+            faction = str(p.get("faction", "--"))
+            system = str(p.get("playfield", "--"))
+            playfield = str(p.get("playfield", "--"))
 
-        # Step 3: Iterate and populate the 5-column table structure
-        for row_idx, player in enumerate(player_list):
-            # Normalize dictionary or raw object lookups safely
-            if isinstance(player, dict):
-                p_name = player.get("name") or player.get("steamId", "Unknown Player")
-                p_status = player.get("status", "Active")
-                p_faction = player.get("faction", "--")
-                p_system = player.get("system", "SolarSystem")
-                p_playfield = player.get("playfield", "--")
-            else:
-                p_name = str(player)
-                p_status = "Active"
-                p_faction = "--"
-                p_system = "SolarSystem"
-                p_playfield = "--"
-
-            # Column mapping: [Player, Status, Faction, System, Playfield]
-            col_values = [p_name, p_status, p_faction, p_system, p_playfield]
-
+            col_values = [name, status, faction, system, playfield]
             for col_idx, text_val in enumerate(col_values):
                 item = QTableWidgetItem(str(text_val))
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                # Keep table items read-only
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                self.player_table.setItem(row_idx, col_idx, item)
+                self.player_table.setItem(row_pos, col_idx, item)
 
-        # Step 4: Re-enable sorting and trigger table redraw
         self.player_table.setSortingEnabled(True)
 
-        # Step 5: Throttled diagnostic log - only prints when player count changes
-        if not hasattr(self, "_last_roster_count") or self._last_roster_count != len(player_list):
-            self._last_roster_count = len(player_list)
-            print(f"[ROSTER INGEST] Online player count changed: {len(player_list)} active player(s).")
+        # Step 3: Update Header Label with 14-day player count
+        self.lbl_players_header.setText(f"Players on Server (Past 2 Weeks: {len(filtered_players)})")
+
+    # -------------------------------------------------------------------------
+    # Legacy Signal Pass-Through
+    # -------------------------------------------------------------------------
+
+    def _on_players_received(self, player_list: list):
+        """Direct pass-through slot routing to live stream handler."""
+        self._on_live_stream_received(player_list)
+
+    def _on_player_cache_received(self, cache_pkg: dict):
+        """Direct pass-through slot routing to full cache handler."""
+        self._on_full_cache_received(cache_pkg)
 
     # -------------------------------------------------------------------------
     # Feed Stack Execute Action Controller
@@ -559,23 +637,30 @@ class MainCockpit(QMainWindow):
 
     def _on_player_registry_clicked(self):
         """
-        Spawns the PlayerRegistryPopup modal dialog and issues the 'plys' query.
+        Spawns the PlayerRegistryPopup modal and requests the complete player roster.
         """
         print("[MainCockpit] -ACTION- 'Player Registry' invoked.")
+        if hasattr(self, 'telemetry_worker') and self.telemetry_worker:
+            self.telemetry_worker.send_command("plys")
+
         try:
             from features.dashboard.popups.player_registry_popup import PlayerRegistryPopup
             popup = PlayerRegistryPopup(telemetry_worker=getattr(self, 'telemetry_worker', None), parent=self)
             popup.exec()
-        except ImportError as e:
-            print(f"[ERROR] MainCockpit: Could not load PlayerRegistryPopup: {e}")
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Could not launch PlayerRegistryPopup: {e}")
 
     def _on_active_playfield_clicked(self):
         """
-        Placeholder slot for the Active Playfields matrix action.
+        Spawns the ActiveEntitiesPopup modal dialog and issues the 'gents' query.
         """
-        print("[MainCockpit] -ACTION- 'Active Playfields' clicked.")
-        if hasattr(self, "telemetry_worker") and self.telemetry_worker:
-            self.telemetry_worker.send_command("gents")
+        print("[MainCockpit] -ACTION- 'Active Entities / Playfields' invoked.")
+        try:
+            from features.dashboard.popups.active_entities_popup import ActiveEntitiesPopup
+            popup = ActiveEntitiesPopup(telemetry_worker=getattr(self, 'telemetry_worker', None), parent=self)
+            popup.exec()
+        except Exception as ex:
+            print(f"[ERROR] MainCockpit: Failed to launch ActiveEntitiesPopup: {ex}")
 
     def _on_backup_clicked(self):
         """
@@ -611,4 +696,3 @@ class MainCockpit(QMainWindow):
     # -------------------------------------------------------------------------
     # 
     # -------------------------------------------------------------------------
-
