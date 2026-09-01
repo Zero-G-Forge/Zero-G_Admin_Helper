@@ -150,9 +150,14 @@ namespace ZeroGBridge
                         // 2. Process authenticated commands via CommandDispatcher
                         Console.WriteLine($"[ZGB] -INFO- Received command from ZAH : \"{trimmedLine}\"");
                         string response = _commandDispatcher?.ProcessIncomingCommand(trimmedLine);
-                        if (response != null)
+                        if (!string.IsNullOrEmpty(response))
                         {
+                            // Send directly to the requesting socket
                             writer.WriteLine(response);
+                            writer.Flush();
+
+                            // Also broadcast to ensure all listening GUI workers receive the packet
+                            BroadcastJson(response);
                         }
                     }
                 }

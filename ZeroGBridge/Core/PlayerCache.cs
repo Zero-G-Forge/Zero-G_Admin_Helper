@@ -35,10 +35,10 @@ namespace ZeroGBridge
             }
             _cacheFilePath = Path.Combine(storageDir, "players.json");
 
-            // 1. Load cached records from players.json
+            // 1. Load any saved JSON database
             LoadFromDisk();
 
-            // 2. Scan Empyrion Save directory for any registered player save files
+            // 2. Scan Empyrion Savegame directory for all historical .ply / .plr player files
             ScanSaveGamePlayers(baseDir);
         }
 
@@ -105,39 +105,10 @@ namespace ZeroGBridge
             return _allPlayers.Values.Where(p => p.status == "Online").ToList();
         }
 
-        private void LoadFromDisk()
-        {
-            try
-            {
-                lock (_diskLock)
-                {
-                    if (File.Exists(_cacheFilePath))
-                    {
-                        string json = File.ReadAllText(_cacheFilePath);
-                        var loaded = JsonConvert.DeserializeObject<List<PlayerRecord>>(json);
-                        if (loaded != null)
-                        {
-                            foreach (var p in loaded)
-                            {
-                                p.status = "Offline";
-                                _allPlayers[p.steamId] = p;
-                            }
-                            Console.WriteLine($"[ZGB] -INFO- Restored {_allPlayers.Count} historical player record(s) from players.json.");
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ZGB] -WARN- Could not load players.json: {ex.Message}");
-            }
-        }
-
         private void ScanSaveGamePlayers(string baseDir)
         {
             try
             {
-                // Searches for Saves/Games/<GameName>/Players or Shared/Players
                 string savesPath = Path.Combine(baseDir, "Saves", "Games");
                 if (!Directory.Exists(savesPath)) return;
 
@@ -147,8 +118,8 @@ namespace ZeroGBridge
                 foreach (var file in playerFiles)
                 {
                     string filename = Path.GetFileNameWithoutExtension(file);
-                    // Match numeric SteamID or EntityID filename conventions
-                    if (filename.Length >= 7 && (filename.StartsWith("7656") || long.TryParse(filename, out _)))
+                    // Match numeric SteamID or entity files
+                    if (filename.Length >= 6 && long.TryParse(filename, out _))
                     {
                         if (!_allPlayers.ContainsKey(filename))
                         {
@@ -170,6 +141,33 @@ namespace ZeroGBridge
             catch (Exception ex)
             {
                 Console.WriteLine($"[ZGB] -WARN- Savegame player scan exception: {ex.Message}");
+            }
+        }
+
+        private void LoadFromDisk()
+        {
+            try
+            {
+                lock (_diskLock)
+                {
+                    if (File.Exists(_cacheFilePath))
+                    {
+                        string json = File.ReadAllText(_cacheFilePath);
+                        var loaded = JsonConvert.DeserializeObject<List<PlayerRecord>>(json);
+                        if (loaded != null)
+                        {
+                            foreach (var p in loaded)
+                            {
+                                p.status = "Offline";
+                                _allPlayers[p.steamId] = p;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Could not load players.json: {ex.Message}");
             }
         }
 
