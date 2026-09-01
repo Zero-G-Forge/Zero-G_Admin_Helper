@@ -23,7 +23,8 @@ class TelemetryWorker(QThread):
     metrics_updated = pyqtSignal(dict)
     players_updated = pyqtSignal(list)
     player_cache_received = pyqtSignal(dict)
-    command_response = pyqtSignal(dict)
+    command_response_received = pyqtSignal(dict)  # Admin console command response channel
+    command_response = pyqtSignal(dict)           # Legacy signal alias
     response_received = pyqtSignal(dict)
     connection_status = pyqtSignal(bool, str)
 
@@ -59,14 +60,14 @@ class TelemetryWorker(QThread):
                 self._socket.settimeout(5.0)
                 self._socket.connect((self.host, self.port))
 
-                # Step 1: Submit Authentication token to open the socket gate.
+                # Step 1: Submit Authentication token to open the socket gate
                 self._send_auth_handshake()
 
                 self.connection_status.emit(True, "Connected")
-                print(f"[TelemetryWorker] -STATUS- Successfully connected to Port {self.port}:{self.port}...")
+                print(f"[TelemetryWorker] -STATUS- Successfully connected and authenticated on Port {self.port}...")
 
-                # Step 2: Request initial player cache to populate the dashboard
-                ## self.send_command("plys")
+                # Step 2: Request initial player cache to populate the dashboard and master database
+                self.send_command("plys")
 
                 while self._is_running:
                     try:
@@ -115,6 +116,9 @@ class TelemetryWorker(QThread):
         if not line:
             return
 
+        # Live debug print of raw incoming server stream packets
+        print(f"[TelemetryWorker << RAW] {line}")
+
         payload = TelemetryParser.parse_raw_line(line)
         if not payload:
             return
@@ -137,17 +141,20 @@ class TelemetryWorker(QThread):
                 player_roster = cache_data.get("player_list", [])
                 self.players_updated.emit(player_roster)
             
-            # Emit raw cache package for PlayerRegistryPopup
+            # Emit raw cache package for PlayerRegistryPopup and Admin Console
             self.player_cache_received.emit(payload)
+            self.command_response_received.emit(payload)
             self.command_response.emit(payload)
 
         # 3. Route ENTITY_LIST responses (from 'gents' command)
         elif pkt_type == "ENTITY_LIST":
+            self.command_response_received.emit(payload)
             self.command_response.emit(payload)
             self.response_received.emit(payload)
 
         # 4. Route generic command responses and playfield data
-        elif pkt_type in ("RESPONSE", "PLAYFIELD_LIST", "PLAYFIELD_STATS", "PLAYER_INVENTORY"):
+        elif pkt_type in ("RESPONSE", "PLAYFIELD_LIST", "PLAYFIELD_STATS", "PLAYER_INVENTORY", "ERROR", "AUTH"):
+            self.command_response_received.emit(payload)
             self.command_response.emit(payload)
             self.response_received.emit(payload)
 
@@ -157,7 +164,7 @@ class TelemetryWorker(QThread):
         """
         if self._socket and self._is_running:
             try:
-                # Ensure "\r\n" line termination matching GTX Gaming calibrations
+                # Ensure \r\n line termination matching server-side StreamReader expectations
                 formatted_cmd = command_str.strip() + "\r\n"
                 self._socket.sendall(formatted_cmd.encode("utf-8"))
                 print(f"[TelemetryWorker] -INFO- Transmitted outbound command: {command_str.strip()}")

@@ -1,55 +1,60 @@
 # =====================================================================
 # MODULE: features/dashboard/popups/player_registry_popup.py
-# DESCRIPTION: Modal HUD Sub-Panel displaying the Comprehensive Player Registry
+# DESCRIPTION: Full Master Player Registry Popup Dialog
 # =====================================================================
 
 import os
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QTableWidget, QTableWidgetItem, QHeaderView,
-    QPushButton, QLineEdit
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
+    QTableWidget, QTableWidgetItem, QHeaderView, 
+    QPushButton, QLineEdit, QFrame
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QBrush, QFont
-
 
 class PlayerRegistryPopup(QDialog):
     """
-    Modal HUD Sub-Panel displaying detailed player registry information.
-    Connects to TelemetryWorker to ingest 'plys' queries and live player arrays.
+    Modal dialog rendering the entire historical server player database.
+    Integrates directly with PlayerManager to read player_registry_cache.json.
     """
 
-    def __init__(self, telemetry_worker=None, parent=None):
+    def __init__(self, telemetry_worker=None, player_manager=None, parent=None):
         super().__init__(parent)
         self.telemetry_worker = telemetry_worker
+        self.player_manager = player_manager
 
         # 1. Dialog Canvas Configuration
         self.setObjectName("PlayerRegistryPopupCanvas")
-        self.setWindowTitle("Zero-G Admin Helper - Player Registry")
-        self.setFixedSize(880, 540)
+        self.setWindowTitle("Zero-G Admin Helper - Master Player Registry")
+        self.setFixedSize(920, 560)
         self.setModal(True)
 
-        # 2. Construct Visual Layout
+        # 2. Build UI Layout
         self._init_ui()
 
-        # 3. Apply External Stylesheet
+        # 3. Apply CSS Theme
         self._apply_theme()
 
-        # 4. Wire Telemetry Worker Signals (if connected)
+        # 4. Wire Telemetry Worker Signals
         self._wire_signals()
 
-        # 5. Request initial player roster over Port 30500
+        # 5. Populate immediately from local cache
+        if self.player_manager:
+            players = self.player_manager.get_all_players()
+            print(f"[PlayerRegistryPopup] -INFO- Populating modal with {len(players)} player records.")
+            self.populate_players(players)
+
+        # 6. Request server refresh
         self._request_player_refresh()
 
     def _init_ui(self):
-        """Constructs the internal table, filter bar, and action buttons."""
+        """Constructs table, search bar, and control headers."""
         self.master_layout = QVBoxLayout(self)
         self.master_layout.setContentsMargins(15, 15, 15, 15)
         self.master_layout.setSpacing(10)
 
-        # --- Header Section ---
+        # --- Top Header Section ---
         self.header_layout = QHBoxLayout()
-        self.lbl_title = QLabel("Server Player Registry", self)
+        self.lbl_title = QLabel("Server Player Registry (Loading...)", self)
         self.lbl_title.setObjectName("PopupHeaderLabel")
         self.header_layout.addWidget(self.lbl_title)
         self.header_layout.addStretch()
@@ -62,27 +67,28 @@ class PlayerRegistryPopup(QDialog):
 
         self.master_layout.addLayout(self.header_layout)
 
-        # --- Search / Filter Bar ---
+        # --- Search / Filter Input Bar ---
         self.search_input = QLineEdit(self)
         self.search_input.setObjectName("CommandInput")
         self.search_input.setPlaceholderText("Filter by Player Name, Steam ID, Entity ID, Faction, or Playfield...")
         self.search_input.textChanged.connect(self._filter_players)
         self.master_layout.addWidget(self.search_input)
 
-        # --- Player Table Widget (6 Columns) ---
+        # --- Master Player Table Widget ---
         self.player_table = QTableWidget(0, 7, self)
         self.player_table.setObjectName("PlayerRegistryTable")
         self.player_table.setHorizontalHeaderLabels([
-            "Status", "Player Name", "Steam ID", "Entity ID", "Faction", "Playfield", "Last Logged Online"
+            "Status", "Player Name", "Steam ID", "Entity ID", "Faction", "Playfield", "Last Seen (UTC)"
         ])
         self.player_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.player_table.verticalHeader().setVisible(False)
         self.master_layout.addWidget(self.player_table)
 
-        # --- Footer Status Bar ---
-        self.lbl_status = QLabel("Ready.", self)
-        self.lbl_status.setObjectName("TelemetryLabel")
-        self.master_layout.addWidget(self.lbl_status)
+        # --- Bottom Status Summary Strip ---
+        self.lbl_summary = QLabel("Total Registered: 0 | Online: 0 | Offline: 0", self)
+        self.lbl_summary.setObjectName("PopupFooterLabel")
+        self.lbl_summary.setStyleSheet("color: #00ffff; font-family: monospace; font-size: 11px;")
+        self.master_layout.addWidget(self.lbl_summary)
 
     def _apply_theme(self):
         """Loads external CSS styling from assets/ZAH.css."""
@@ -95,35 +101,29 @@ class PlayerRegistryPopup(QDialog):
             print(f"[ERROR] PlayerRegistryPopup: Failed to load stylesheet: {e}")
 
     def _wire_signals(self):
-        """Connects TelemetryWorker signals to populate table."""
+        """Wires live stream signals to auto-update the table."""
         if self.telemetry_worker:
             if hasattr(self.telemetry_worker, 'players_updated'):
-                self.telemetry_worker.players_updated.connect(self.populate_players)
+                self.telemetry_worker.players_updated.connect(self._on_live_stream_tick)
             if hasattr(self.telemetry_worker, 'player_cache_received'):
                 self.telemetry_worker.player_cache_received.connect(self._on_player_cache_received)
 
     def _request_player_refresh(self):
-        """Dispatches the 'plys' command across the active telemetry connection."""
+        """Dispatches 'plys' command to ZeroGBridge."""
         print("[PlayerRegistryPopup] -ACTION- Requesting player registry via 'plys'...")
-        self.lbl_status.setText("Querying server for player roster...")
         if self.telemetry_worker:
             self.telemetry_worker.send_command("plys")
-        else:
-            print("[WARN] PlayerRegistryPopup: Telemetry worker unavailable.")
-            self.lbl_status.setText("Telemetry worker offline.")
+
+    def _on_live_stream_tick(self, online_list: list):
+        if self.player_manager:
+            self.populate_players(self.player_manager.get_all_players())
 
     def _on_player_cache_received(self, cache_pkg: dict):
-        """Slot receiver for PLAYER_CACHE response packets."""
-        if not cache_pkg or not isinstance(cache_pkg, dict):
-            return
-
-        players = cache_pkg.get("player_list", [])
-        self.populate_players(players)
+        if self.player_manager:
+            self.populate_players(self.player_manager.get_all_players())
 
     def populate_players(self, player_list: list):
-        """
-        Populates both online and offline players into the registry table.
-        """
+        """Populates the 7-column registry table and updates summary counters."""
         if player_list is None or not isinstance(player_list, list):
             return
 
@@ -131,57 +131,54 @@ class PlayerRegistryPopup(QDialog):
         self.player_table.setRowCount(len(player_list))
 
         online_count = 0
+        offline_count = 0
 
         for row_idx, p in enumerate(player_list):
             if isinstance(p, dict):
-                p_name = str(p.get("name", "Unknown"))
-                p_steam = str(p.get("steamId", "--"))
-                p_id = str(p.get("entityId", p.get("id", "--")))
-                p_status = str(p.get("status", "Offline"))
-                p_fac = str(p.get("faction", "--"))
-                p_pf = str(p.get("playfield", "--"))
-                p_last = str(p.get("lastSeen", "--"))
+                p_name = str(p.get("name") or p.get("player_name", "Unknown"))
+                status = str(p.get("status") or p.get("active", "Offline"))
+                steam_id = str(p.get("steamId", "--"))
+                entity_id = str(p.get("entityId") or p.get("private_id", "--"))
+                faction = str(p.get("faction") or "--")
+                playfield = str(p.get("playfield") or "--")
+                last_seen = str(p.get("last_seen") or p.get("lastSeen", "--")).replace("T", " ")
             else:
                 p_name = str(p)
-                p_steam = "--"
-                p_id = "--"
-                p_status = "Offline"
-                p_fac = "--"
-                p_pf = "--"
-                p_last = "--"
+                status = "Offline"
+                steam_id = "--"
+                entity_id = "--"
+                faction = "--"
+                playfield = "--"
+                last_seen = "--"
 
-            is_online = p_status.lower() == "online"
-            if is_online:
+            if status == "Online":
                 online_count += 1
+            else:
+                offline_count += 1
 
-            cols = [p_status, p_name, p_steam, p_id, p_fac, p_pf, p_last]
-
+            cols = [status, p_name, steam_id, entity_id, faction, playfield, last_seen]
             for col_idx, val in enumerate(cols):
                 item = QTableWidgetItem(val)
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
-                
-                # --- Apply Color and Bold to the Status Column Only ---
-                if col_idx == 0:
-                    # Set font style to bold
-                    font = item.font()
-                    font.setBold(True)
-                    item.setFont(font)
 
-                    # Apply distinctive colors based on connection state
-                    if is_online:
-                        item.setForeground(QBrush(QColor("#2ecc71")))  # Bright flat Green
+                # Status coloring
+                if col_idx == 0:
+                    if status == "Online":
+                        item.setForeground(Qt.GlobalColor.green)
                     else:
-                        item.setForeground(QBrush(QColor("#e74c3c")))  # Bright flat Red
-                
+                        item.setForeground(Qt.GlobalColor.red)
+
                 self.player_table.setItem(row_idx, col_idx, item)
 
         self.player_table.setSortingEnabled(True)
-        self.lbl_status.setText(f"Total Registered: {len(player_list)} | Online: {online_count} | Offline: {len(player_list) - online_count}")
-        self.lbl_title.setText(f"Server Player Registry ({len(player_list)} Total Players)")
+
+        total_players = len(player_list)
+        self.lbl_title.setText(f"Server Player Registry ({total_players} Total Players)")
+        self.lbl_summary.setText(f"Total Registered: {total_players} | Online: {online_count} | Offline: {offline_count}")
 
     def _filter_players(self, text: str):
-        """Filters table rows based on user input in the search field."""
+        """Filters table rows in real-time as the user types into the search box."""
         search_query = text.strip().lower()
         for row in range(self.player_table.rowCount()):
             match_found = False
@@ -191,18 +188,3 @@ class PlayerRegistryPopup(QDialog):
                     match_found = True
                     break
             self.player_table.setRowHidden(row, not match_found)
-
-    def closeEvent(self, event):
-        """Disconnect signal listeners on close to prevent dangling callbacks."""
-        if self.telemetry_worker:
-            if hasattr(self.telemetry_worker, 'players_updated'):
-                try:
-                    self.telemetry_worker.players_updated.disconnect(self.populate_players)
-                except (TypeError, RuntimeError):
-                    pass
-            if hasattr(self.telemetry_worker, 'player_cache_received'):
-                try:
-                    self.telemetry_worker.player_cache_received.disconnect(self._on_player_cache_received)
-                except (TypeError, RuntimeError):
-                    pass
-        event.accept()

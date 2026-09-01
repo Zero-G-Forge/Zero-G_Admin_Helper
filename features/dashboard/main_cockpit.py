@@ -6,8 +6,8 @@
 import os
 import sys
 import json
-import socket 
-from datetime import datetime, timedelta
+import socket
+from datetime import datetime, timezone
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QMainWindow, QMenuBar, QMenu, QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout, 
@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QPixmap, QAction, QKeySequence
 
+# Core background workers, database manager, and popup modal imports
+from features.dashboard.player_manager import PlayerManager
 from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.popups.active_entities_popup import ActiveEntitiesPopup
 from features.dashboard.popups.player_registry_popup import PlayerRegistryPopup
@@ -82,8 +84,9 @@ class MainCockpit(QMainWindow):
     """
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
-        # Master in-memory dictionary keyed by Steam ID for synchronized state management
-        self._master_roster = {}
+        
+        # Instantiate local database manager backed by data/player_registry_cache.json
+        self.player_manager = PlayerManager()
         self.config = config
 
         # 1. Base UI Setup
@@ -273,9 +276,39 @@ class MainCockpit(QMainWindow):
                     btn.setObjectName("MatrixButton")
                     self.btn_active_playfields = btn
                     self.btn_active_playfields.clicked.connect(self._on_active_playfield_clicked)
+                # elif row == 0 and col == 2:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 0 and col == 3:
+                    # btn_text = f"[{row},{col}]"
+                ## ===============
+                ## Row 2 (Index 1)
+                ## ===============
+                # elif row == 1 and col == 0:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 1 and col == 1:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 1 and col == 2:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 1 and col == 3:
+                    # btn_text = f"[{row},{col}]"
+                ## ===============
+                ## Row 3 (Index 2)
+                ## ===============
+                # elif row == 2 and col == 0:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 2 and col == 1:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 2 and col == 2:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 2 and col == 3:
+                    # btn_text = f"[{row},{col}]"
                 ## ===============
                 ## Row 4 (Index 3)
                 ## ===============
+                # elif row == 3 and col == 0:
+                    # btn_text = f"[{row},{col}]"
+                # elif row == 3 and col == 1:
+                    # btn_text = f"[{row},{col}]"
                 elif row == 3 and col == 2:
                     btn_text = "Backup\nServer"
                     btn = QPushButton(btn_text)
@@ -358,7 +391,7 @@ class MainCockpit(QMainWindow):
             print(f"[ERROR] Could not load stylesheet: {e}")
 
     # -------------------------------------------------------------------------
-    # Initating Network Connection
+    # Initiating Network Connection
     # -------------------------------------------------------------------------
 
     def _init_network_services(self):
@@ -399,17 +432,18 @@ class MainCockpit(QMainWindow):
         # Step 4: Update HUD Header Label dynamically with resolved IP and Port
         self.telemetry_widget.lbl_target_ip.setText(f"Target IP: {target_ip}:{target_port}")
 
-        # Step 5: Ingest background telemetry stream over Port 30500
+        # Step 5: # Ingest background telemetry stream over Port 30500
         print(f"[DEBUG] MainCockpit: Initializing TelemetryWorker target: {target_ip}:{target_port}")
         self.telemetry_worker = TelemetryWorker(host=target_ip, port=target_port)
         self.telemetry_worker.metrics_updated.connect(self._on_metrics_received)
         self.telemetry_worker.players_updated.connect(self._on_live_stream_received)
         self.telemetry_worker.player_cache_received.connect(self._on_full_cache_received)
+        self.telemetry_worker.command_response_received.connect(self._on_command_response_received)
         self.telemetry_worker.connection_status.connect(self._on_connection_status)
         self.telemetry_worker.start()
 
-        # Step 6: Dispatch immediate query on app launch to populate initial roster database
-        self.telemetry_worker.send_command("plys")
+        # Step 6: Render immediately from local database on startup
+        self._refresh_dashboard_table()
 
         # Step 7: Wire UI input triggers and feed selector stack
         self.execute_btn.clicked.connect(self._handle_command_execution)
@@ -490,19 +524,13 @@ class MainCockpit(QMainWindow):
     def _on_full_cache_received(self, cache_pkg: dict):
         """
         Slot receiver handling the full server roster package returned from 'plys'.
-        Synchronizes historical records into the master in-memory cache.
+        Updates the persistent PlayerManager database and refreshes the table.
         """
         if not cache_pkg or not isinstance(cache_pkg, dict):
             return
 
-        roster_list = cache_pkg.get("player_list", [])
-        for p in roster_list:
-            if isinstance(p, dict):
-                sid = str(p.get("steamId", p.get("id", "")))
-                if sid:
-                    self._master_roster[sid] = p
-
-        print(f"[ROSTER SYNC] Master roster updated: {len(self._master_roster)} total player record(s) loaded.")
+        roster = cache_pkg.get("player_list", [])
+        self.player_manager.update_from_roster_cache(roster)
         self._refresh_dashboard_table()
 
     # -------------------------------------------------------------------------
@@ -512,30 +540,12 @@ class MainCockpit(QMainWindow):
     def _on_live_stream_received(self, online_list: list):
         """
         Receives the 2-second live active player stream from METRIC broadcasts.
-        Updates active player states to Online and sets absent players to Offline.
+        Passes live states to PlayerManager and triggers a table redraw.
         """
         if not isinstance(online_list, list):
             return
 
-        active_sids = set()
-        now_str = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-
-        # Step 1: Update or insert actively connected players
-        for p in online_list:
-            if isinstance(p, dict):
-                sid = str(p.get("steamId", p.get("id", "")))
-                if sid:
-                    active_sids.add(sid)
-                    p["status"] = "Online"
-                    p["lastSeen"] = p.get("lastSeen", now_str)
-                    self._master_roster[sid] = p
-
-        # Step 2: Mark cached players absent from the live stream as Offline
-        for sid, p in self._master_roster.items():
-            if sid not in active_sids:
-                p["status"] = "Offline"
-
-        # Step 3: Refresh the dashboard table with 14-day cutoff filter
+        self.player_manager.update_from_live_stream(online_list)
         self._refresh_dashboard_table()
 
     # -------------------------------------------------------------------------
@@ -544,36 +554,22 @@ class MainCockpit(QMainWindow):
 
     def _refresh_dashboard_table(self):
         """
-        Filters the master player roster for records active within the past 14 days
+        Filters the local database for players active within the past 14 days
         and repopulates the 5-column QTableWidget on the main cockpit.
         """
-        cutoff_date = datetime.utcnow() - timedelta(days=14)
-        filtered_players = []
+        recent_players = self.player_manager.get_recent_players(days=14)
 
-        # Step 1: Filter entries by lastSeen timestamp
-        for p in self._master_roster.values():
-            if not isinstance(p, dict):
-                continue
-
-            last_seen_str = p.get("lastSeen", "")
-            try:
-                last_seen_dt = datetime.strptime(last_seen_str, "%Y-%m-%d %H:%M:%S")
-                if last_seen_dt >= cutoff_date:
-                    filtered_players.append(p)
-            except Exception:
-                # Include record if timestamp parsing is unformatted or unavailable
-                filtered_players.append(p)
-
-        # Step 2: Populate the dashboard QTableWidget
+        # Step 1: Temporarily disable sorting during batch population
         self.player_table.setSortingEnabled(False)
-        self.player_table.setRowCount(len(filtered_players))
+        self.player_table.setRowCount(len(recent_players))
 
-        for row_pos, p in enumerate(filtered_players):
-            name = str(p.get("name", "Unknown"))
-            status = str(p.get("status", "Offline"))
-            faction = str(p.get("faction", "--"))
-            system = str(p.get("playfield", "--"))
-            playfield = str(p.get("playfield", "--"))
+        # Step 2: Iterate and populate the 5-column table structure
+        for row_pos, p in enumerate(recent_players):
+            name = str(p.get("name") or p.get("player_name", "Unknown"))
+            status = str(p.get("status") or p.get("active", "Offline"))
+            faction = str(p.get("faction") or "--")
+            system = str(p.get("solar_system") or p.get("system", "--"))
+            playfield = str(p.get("playfield") or "--")
 
             col_values = [name, status, faction, system, playfield]
             for col_idx, text_val in enumerate(col_values):
@@ -582,13 +578,42 @@ class MainCockpit(QMainWindow):
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 self.player_table.setItem(row_pos, col_idx, item)
 
+        # Step 3: Re-enable sorting and update header counter
         self.player_table.setSortingEnabled(True)
-
-        # Step 3: Update Header Label with 14-day player count
-        self.lbl_players_header.setText(f"Players on Server (Past 2 Weeks: {len(filtered_players)})")
+        self.lbl_players_header.setText(f"Players on Server (Past 2 Weeks: {len(recent_players)})")
 
     # -------------------------------------------------------------------------
-    # Legacy Signal Pass-Through
+    # Command Response Handler
+    # -------------------------------------------------------------------------
+    
+    def _on_command_response_received(self, response_data: dict):
+        """
+        Slot receiver displaying raw JSON and structured feedback in the Admin Command Console.
+        """
+        if not response_data or not isinstance(response_data, dict):
+            return
+
+        timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        res_type = response_data.get("type", "RESPONSE")
+        status = response_data.get("status", "")
+        message = response_data.get("message", "")
+
+        # Format output for the console text display
+        if res_type == "ERROR":
+            display_line = f"[{timestamp}] [SERVER ERROR] {message}"
+        elif res_type == "PLAYER_CACHE":
+            total = response_data.get("players", 0)
+            display_line = f"[{timestamp}] [SERVER <<] PLAYER_CACHE: {total} player(s) returned."
+        elif res_type == "ENTITY_LIST":
+            ents = len(response_data.get("entities", []))
+            display_line = f"[{timestamp}] [SERVER <<] ENTITY_LIST: {ents} structure(s) returned."
+        else:
+            display_line = f"[{timestamp}] [SERVER <<] ({status}) {message if message else json.dumps(response_data)}"
+
+        self.console.append(display_line)
+
+    # -------------------------------------------------------------------------
+    # Legacy Signal Pass-Through Slots
     # -------------------------------------------------------------------------
 
     def _on_players_received(self, player_list: list):
@@ -613,7 +638,8 @@ class MainCockpit(QMainWindow):
             return
 
         # Step 1: Echo outbound command to the console/chat feed
-        echo_line = f"[ADMIN >>] {raw_command}"
+        timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        echo_line = f"[{timestamp}] [ADMIN >>] {raw_command}"
         self.console.append(echo_line)
 
         # Mirror to global chat box if chat feed is active
@@ -637,26 +663,28 @@ class MainCockpit(QMainWindow):
 
     def _on_player_registry_clicked(self):
         """
-        Spawns the PlayerRegistryPopup modal and requests the complete player roster.
+        Spawns the PlayerRegistryPopup modal passing the persistent PlayerManager.
         """
         print("[MainCockpit] -ACTION- 'Player Registry' invoked.")
         if hasattr(self, 'telemetry_worker') and self.telemetry_worker:
             self.telemetry_worker.send_command("plys")
 
         try:
-            from features.dashboard.popups.player_registry_popup import PlayerRegistryPopup
-            popup = PlayerRegistryPopup(telemetry_worker=getattr(self, 'telemetry_worker', None), parent=self)
+            popup = PlayerRegistryPopup(
+                telemetry_worker=getattr(self, 'telemetry_worker', None),
+                player_manager=self.player_manager,
+                parent=self
+            )
             popup.exec()
         except Exception as e:
             print(f"[ERROR] MainCockpit: Could not launch PlayerRegistryPopup: {e}")
 
     def _on_active_playfield_clicked(self):
         """
-        Spawns the ActiveEntitiesPopup modal dialog and issues the 'gents' query.
+        Spawns the ActiveEntitiesPopup modal dialog.
         """
         print("[MainCockpit] -ACTION- 'Active Entities / Playfields' invoked.")
         try:
-            from features.dashboard.popups.active_entities_popup import ActiveEntitiesPopup
             popup = ActiveEntitiesPopup(telemetry_worker=getattr(self, 'telemetry_worker', None), parent=self)
             popup.exec()
         except Exception as ex:
