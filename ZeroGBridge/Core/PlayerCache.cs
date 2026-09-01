@@ -7,9 +7,6 @@ using Newtonsoft.Json;
 
 namespace ZeroGBridge
 {
-    /// <summary>
-    /// Structural representation of a player record supporting online and offline tracking.
-    /// </summary>
     public class PlayerRecord
     {
         public int entityId { get; set; }
@@ -18,13 +15,10 @@ namespace ZeroGBridge
         public string status { get; set; } = "Offline";
         public string faction { get; set; } = "--";
         public string playfield { get; set; } = "--";
-        public int ping { get; set; } = 0;
+        public int ping { get; set; }
         public string lastSeen { get; set; }
     }
 
-    /// <summary>
-    /// Thread-safe in-memory cache retaining all known server players across sessions.
-    /// </summary>
     public class PlayerCache
     {
         private readonly ConcurrentDictionary<string, PlayerRecord> _allPlayers = new ConcurrentDictionary<string, PlayerRecord>();
@@ -40,7 +34,12 @@ namespace ZeroGBridge
                 Directory.CreateDirectory(storageDir);
             }
             _cacheFilePath = Path.Combine(storageDir, "players.json");
+
+            // 1. Load cached records from players.json
             LoadFromDisk();
+
+            // 2. Scan Empyrion Save directory for any registered player save files
+            ScanSaveGamePlayers(baseDir);
         }
 
         public int TotalCount => _allPlayers.Count;
@@ -120,7 +119,7 @@ namespace ZeroGBridge
                         {
                             foreach (var p in loaded)
                             {
-                                p.status = "Offline"; // Default to offline on server startup
+                                p.status = "Offline";
                                 _allPlayers[p.steamId] = p;
                             }
                             Console.WriteLine($"[ZGB] -INFO- Restored {_allPlayers.Count} historical player record(s) from players.json.");
@@ -131,6 +130,46 @@ namespace ZeroGBridge
             catch (Exception ex)
             {
                 Console.WriteLine($"[ZGB] -WARN- Could not load players.json: {ex.Message}");
+            }
+        }
+
+        private void ScanSaveGamePlayers(string baseDir)
+        {
+            try
+            {
+                // Searches for Saves/Games/<GameName>/Players or Shared/Players
+                string savesPath = Path.Combine(baseDir, "Saves", "Games");
+                if (!Directory.Exists(savesPath)) return;
+
+                var playerFiles = Directory.GetFiles(savesPath, "*.ply", SearchOption.AllDirectories)
+                    .Concat(Directory.GetFiles(savesPath, "*.plr", SearchOption.AllDirectories));
+
+                foreach (var file in playerFiles)
+                {
+                    string filename = Path.GetFileNameWithoutExtension(file);
+                    // Match numeric SteamID or EntityID filename conventions
+                    if (filename.Length >= 7 && (filename.StartsWith("7656") || long.TryParse(filename, out _)))
+                    {
+                        if (!_allPlayers.ContainsKey(filename))
+                        {
+                            DateTime lastMod = File.GetLastWriteTimeUtc(file);
+                            _allPlayers[filename] = new PlayerRecord
+                            {
+                                entityId = Math.Abs(filename.GetHashCode() % 10000),
+                                steamId = filename,
+                                name = $"Player_{filename.Substring(Math.Max(0, filename.Length - 4))}",
+                                status = "Offline",
+                                lastSeen = lastMod.ToString("yyyy-MM-dd HH:mm:ss")
+                            };
+                        }
+                    }
+                }
+                Console.WriteLine($"[ZGB] -INFO- Total player registry count after savegame scan: {_allPlayers.Count}");
+                SaveToDisk();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Savegame player scan exception: {ex.Message}");
             }
         }
 
