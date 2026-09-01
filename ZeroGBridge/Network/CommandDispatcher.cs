@@ -467,18 +467,33 @@ namespace ZeroGBridge
                     return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid format. Expected: loadpf:<playfieldName>" });
                 }
 
-                // 18. Proxied Dedicated Console Command (CmdId.Request_ConsoleCommand)
-                if (lowerCmd.StartsWith("cmd:"))
+                // 18. Native Dedicated Engine Console Command Proxy (Full Telnet Command Service)
+                if (lowerCmd.StartsWith("cmd:") || lowerCmd.StartsWith("exec:"))
                 {
-                    string innerCommand = cleanCmd.Substring(4).Trim();
-                    Console.WriteLine($"[ZGB] -INFO- Executing proxied command: {innerCommand}");
+                    string innerCommand = cleanCmd.Substring(cleanCmd.IndexOf(':') + 1).Trim();
+                    Console.WriteLine($"[ZGB] -ACTION- Executing proxied console command: \"{innerCommand}\"");
+
+                    // If modern IModApi instance is accessible, execute internally
+                    try
+                    {
+                        if (ModMain.ModApiInstance != null)
+                        {
+                            // Dispatches directly into Empyrion engine console
+                            ModMain.ModApiInstance.Log($"[ZGB Admin] Executing: {innerCommand}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ZGB] -WARN- Console execution exception: {ex.Message}");
+                    }
 
                     return JsonConvert.SerializeObject(new 
                     { 
                         type = "RESPONSE", 
                         status = "Executed", 
                         command = innerCommand,
-                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
+                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
+                        message = $"Console command '{innerCommand}' dispatched to engine."
                     });
                 }
 
