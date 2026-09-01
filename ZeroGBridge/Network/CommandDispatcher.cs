@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Newtonsoft.Json;
 
 namespace ZeroGBridge
@@ -69,7 +70,8 @@ namespace ZeroGBridge
                         string name = parts[1].Trim();
                         int entityId = Math.Abs(steam.GetHashCode() % 10000);
 
-                        _playerCache?.AddOrUpdate(steam, name, entityId, 0);
+                        // Match AddOrUpdate signature: (steamId, entityId, name, status, playfield, ping)
+                        _playerCache?.AddOrUpdate(steam, entityId, name, "Online", "--", 0);
 
                         return JsonConvert.SerializeObject(new 
                         { 
@@ -126,44 +128,37 @@ namespace ZeroGBridge
                         "Kriel", "Trader", "Traders", "Uch", "UCH", "Warlord", "Alien"
                     };
 
-                    List<object> structureSnapshot;
-                    lock (ModMain.CachedGlobalStructures)
+                    List<object> structureSnapshot = new List<object>();
+                    var cached = ModMain.CachedGlobalStructures;
+
+                    if (cached?.globalEntities == null || cached.globalEntities.Count == 0)
                     {
-                        if (ModMain.CachedGlobalStructures.Count == 0)
+                        // Fallback mock data containing only player/player-faction entities
+                        structureSnapshot = new List<object>
                         {
-                            // Fallback mock data containing only player/player-faction entities
-                            structureSnapshot = new List<object>
-                            {
-                                new { id = 1001, name = "Zero-G Outpost Delta", type = "BA", faction = "MEC", playfield = "Akua", pos = "120, 65, -340" },
-                                new { id = 1002, name = "Starlight Vanguard", type = "CV", faction = "MEC", playfield = "Akua Orbit", pos = "1420, 0, 5200" },
-                                new { id = 1003, name = "Mining Rig Alpha", type = "BA", faction = "TCS", playfield = "Omicron", pos = "-500, 110, 80" }
-                            };
-                        }
-                        else
+                            new { id = 1001, name = "Zero-G Outpost Delta", type = "BA", faction = "MEC", playfield = "Akua", pos = "120, 65, -340" },
+                            new { id = 1002, name = "Starlight Vanguard", type = "CV", faction = "MEC", playfield = "Akua Orbit", pos = "1420, 0, 5200" },
+                            new { id = 1003, name = "Mining Rig Alpha", type = "BA", faction = "TCS", playfield = "Omicron", pos = "-500, 110, 80" }
+                        };
+                    }
+                    else
+                    {
+                        foreach (var kvp in cached.globalEntities)
                         {
-                            structureSnapshot = new List<object>();
+                            if (kvp.Value == null) continue;
 
-                            foreach (var item in ModMain.CachedGlobalStructures)
+                            foreach (var s in kvp.Value)
                             {
-                                string factionStr = null;
-                                try
+                                string typeLabel = s.type == 2 ? "BA" : s.type == 4 ? "CV" : s.type == 8 ? "SV" : s.type == 16 ? "HV" : "Unknown";
+                                structureSnapshot.Add(new
                                 {
-                                    var prop = item.GetType().GetProperty("faction") ?? item.GetType().GetProperty("Faction");
-                                    if (prop != null)
-                                    {
-                                        factionStr = prop.GetValue(item)?.ToString();
-                                    }
-                                }
-                                catch
-                                {
-                                    factionStr = null;
-                                }
-
-                                // Strictly include if unassigned or not in the NPC blacklist
-                                if (string.IsNullOrEmpty(factionStr) || !npcBlacklist.Contains(factionStr.Trim('[', ']', ' ')))
-                                {
-                                    structureSnapshot.Add(item);
-                                }
+                                    id = s.id,
+                                    name = s.name,
+                                    type = typeLabel,
+                                    faction = s.factionId.ToString(),
+                                    playfield = s.playfieldId.ToString(),
+                                    pos = $"{s.pos.x:F0}, {s.pos.y:F0}, {s.pos.z:F0}"
+                                });
                             }
                         }
                     }

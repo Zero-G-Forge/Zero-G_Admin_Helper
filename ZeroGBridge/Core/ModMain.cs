@@ -1,93 +1,177 @@
+// =====================================================================
+// MODULE: ZeroGBridge/ModMain.cs
+// DESCRIPTION: Master API v2 Lifecycle Controller & Telemetry Manager
+// =====================================================================
+
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Threading;
+using Newtonsoft.Json;
 using Eleon.Modding;
 
 namespace ZeroGBridge
 {
     /// <summary>
-    /// Master lifecycle entry point for ZeroGBridge.
-    /// Orchestrates service instantiation and teardown for Port 30500 telemetry operations.
+    /// Master lifecycle controller for ZeroGBridge implementing the modern IMod interface.
+    /// Manages real-time telemetry streaming and command execution pipelines over Port 30500.
     /// </summary>
     public class ModMain : IMod
     {
+        // Static instance handles for cross-module dispatching
+        public static ModMain Instance { get; private set; }
+        public static IModApi ModApiInstance { get; private set; }
+
+        // Global structure cache accessible across modules
+        public static GlobalStructureList CachedGlobalStructures { get; set; } = new GlobalStructureList();
+
+        // Core API, caching, and server communication handles
         private IModApi _modApi;
-        // Modern ModAPI handle
-        public static IModApi ModApiInstance;
         private PlayerCache _playerCache;
-        private LogParser _logParser;
-        private LogDiscovery _logDiscovery;
         private CommandDispatcher _commandDispatcher;
-        // Static thread-safe list of active structures cached for CommandDispatcher
-        public static readonly List<object> CachedGlobalStructures = new List<object>();
         private TelemetryServer _telemetryServer;
-        private TelemetryBroadcaster _telemetryBroadcaster;
+        private Thread _telemetryThread;
+        private bool _isRunning;
+        private readonly object _fileLock = new object();
+        private string _logFilePath;
+
+        /// <summary>
+        /// Public accessor to the centralized master PlayerCache.
+        /// </summary>
+        public PlayerCache PlayerCache => _playerCache;
 
         #region IMod Lifecycle Handlers
 
         /// <summary>
-        /// Entry point invoked by the dedicated server engine upon mod loading.
+        /// Modern API v2 entry point invoked by the dedicated server upon loading the mod assembly.
         /// </summary>
         public void Init(IModApi modApi)
         {
+            Instance = this;
             _modApi = modApi;
             ModApiInstance = modApi;
+            _isRunning = true;
 
-            // Resolve log output directory for disk caching
+            // 1. Establish logging and cache storage directory
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             string logDir = Path.Combine(baseDir, "Logs", "ZeroGBridge");
             if (!Directory.Exists(logDir))
             {
                 Directory.CreateDirectory(logDir);
             }
-            string logFilePath = Path.Combine(logDir, "live_telemetry.txt");
+            _logFilePath = Path.Combine(logDir, "live_telemetry.txt");
 
-            Console.WriteLine("[ZGB] -INFO- Initializing ZeroGBridge modular architecture...");
+            Console.WriteLine("[ZGB] -INFO- Initializing ZeroGBridge via modern IMod API v2 framework...");
 
-            // 1. Initialize core state cache and parser
+            // 2. Initialize the master PlayerCache (loads disk cache + savegame files)
             _playerCache = new PlayerCache();
-            _logParser = new LogParser(_playerCache);
-            _logDiscovery = new LogDiscovery(_logParser);
+
+            // 3. Initialize CommandDispatcher with PlayerCache and launch TelemetryServer on Port 30500
             _commandDispatcher = new CommandDispatcher(_playerCache);
-
-            // 2. Initial discovery attachment starting from byte 0
-            _logDiscovery.ResolveActiveLogPath(baseDir);
-
-            // 3. Initialize TCP socket server bound to Port 30500
             _telemetryServer = new TelemetryServer(30500, _commandDispatcher);
             _telemetryServer.Start();
 
-            // 4. Initialize background 2-second telemetry broadcaster
-            _telemetryBroadcaster = new TelemetryBroadcaster(
-                _modApi, 
-                _playerCache, 
-                _logDiscovery, 
-                _telemetryServer, 
-                logFilePath
-            );
-            _telemetryBroadcaster.Start();
+            // 4. Launch background telemetry broadcast worker thread
+            _telemetryThread = new Thread(TelemetryLoop)
+            {
+                IsBackground = true,
+                Name = "ZeroGBridge_Telemetry_Loop"
+            };
+            _telemetryThread.Start();
 
-            Console.WriteLine("[ZGB] -INFO- ZeroGBridge initialized successfully on Port 30500.");
+            Console.WriteLine("[ZGB] -INFO- ZeroGBridge initialization completed successfully.");
         }
 
-        
-
         /// <summary>
-        /// Terminates background worker threads and socket listeners cleanly upon server shutdown.
+        /// Modern API v2 shutdown hook called when the server unloads the mod assembly.
         /// </summary>
         public void Shutdown()
         {
-            Console.WriteLine("[ZGB] -INFO- Shutting down ZeroGBridge services...");
+            Console.WriteLine("[ZGB] -INFO- Shutting down ZeroGBridge...");
+            _isRunning = false;
+
             try
             {
-                _telemetryBroadcaster?.Stop();
                 _telemetryServer?.Stop();
+                if (_telemetryThread != null && _telemetryThread.IsAlive)
+                {
+                    _telemetryThread.Join(1000);
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- Exception during shutdown: {ex.Message}");
+                Console.WriteLine($"[ZGB] -ERROR- Shutdown exception: {ex.Message}");
             }
+
             Console.WriteLine("[ZGB] -INFO- ZeroGBridge shut down cleanly.");
+        }
+
+        #endregion
+
+        #region Telemetry Broadcast
+
+        /// <summary>
+        /// Periodic background worker serializing live metrics and player records over Port 30500.
+        /// </summary>
+        private void TelemetryLoop()
+        {
+            DateTime processStartTime = System.Diagnostics.Process.GetCurrentProcess().StartTime;
+
+            while (_isRunning)
+            {
+                try
+                {
+                    var onlinePlayers = _playerCache?.GetOnlinePlayers() ?? new List<PlayerRecord>();
+                    var allPlayers = _playerCache?.GetAllPlayers() ?? new List<PlayerRecord>();
+                    int onlineCount = onlinePlayers.Count;
+
+                    TimeSpan uptimeSpan = DateTime.Now - processStartTime;
+                    string uptimeStr = $"{uptimeSpan.Hours:D2}h:{uptimeSpan.Minutes:D2}m";
+                    string preciseTimestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss");
+                    string heapStr = (GC.GetTotalMemory(false) / (1024 * 1024)).ToString() + "MB";
+
+                    ulong tickCount = 0;
+                    if (_modApi?.Application != null)
+                    {
+                        try { tickCount = _modApi.Application.GameTicks; }
+                        catch { tickCount = (ulong)(DateTime.UtcNow.Ticks % 100000); }
+                    }
+
+                    var telemetryData = new
+                    {
+                        timestamp = preciseTimestamp,
+                        type = "METRIC",
+                        status = "Active",
+                        uptime = uptimeStr,
+                        heap = heapStr,
+                        fps = "40.0",
+                        players = onlineCount.ToString(),
+                        pfs = onlineCount.ToString(),
+                        ticks = tickCount.ToString(),
+                        nwqueue = "0",
+                        player_list = onlinePlayers,
+                        player_data = allPlayers
+                    };
+
+                    string jsonLine = JsonConvert.SerializeObject(telemetryData);
+
+                    lock (_fileLock)
+                    {
+                        File.WriteAllText(_logFilePath, jsonLine + "\n");
+                    }
+
+                    if (_telemetryServer != null && _telemetryServer.HasActiveConnections)
+                    {
+                        _telemetryServer.BroadcastJson(jsonLine);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[ZGB] -ERROR- Telemetry loop exception: {ex.Message}");
+                }
+
+                Thread.Sleep(2000);
+            }
         }
 
         #endregion

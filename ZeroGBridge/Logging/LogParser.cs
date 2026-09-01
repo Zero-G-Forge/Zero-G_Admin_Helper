@@ -1,3 +1,8 @@
+// =====================================================================
+// MODULE: ZeroGBridge/Logging/LogParser.cs
+// DESCRIPTION: Server stdout Log Ingestion & Player State Hook
+// =====================================================================
+
 using System;
 using System.Text.RegularExpressions;
 
@@ -50,7 +55,8 @@ namespace ZeroGBridge
                     string name = gotIdMatch.Groups["name"].Value;
                     int eid = int.TryParse(gotIdMatch.Groups["eid"].Value, out int e) ? e : 0;
 
-                    _playerCache.AddOrUpdate(steamId, name, eid, 0);
+                    // Match AddOrUpdate signature: (steamId, entityId, name, status, playfield, ping)
+                    _playerCache.AddOrUpdate(steamId, eid, name, "Online", "--", 0);
                     Console.WriteLine($"[ZGB] -INFO- Player Verified & Cached: {name} (Steam: {steamId}, EId: {eid})");
                     return;
                 }

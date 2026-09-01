@@ -1,3 +1,8 @@
+// =====================================================================
+// MODULE: ZeroGBridge/Core/PlayerCache.cs
+// DESCRIPTION: Thread-Safe Master Player State & Telemetry Bridge
+// =====================================================================
+
 using System;
 using System.IO;
 using System.Collections.Concurrent;
@@ -7,21 +12,97 @@ using Newtonsoft.Json;
 
 namespace ZeroGBridge
 {
-    public class PlayerRecord
+    #region Data Contract Stubs (Matching Eleon.Modding Schemas)
+
+    public struct PVector3
     {
-        public int entityId { get; set; }
-        public string steamId { get; set; }
-        public string name { get; set; }
-        public string status { get; set; } = "Offline";
-        public string faction { get; set; } = "--";
-        public string playfield { get; set; } = "--";
-        public int ping { get; set; }
-        public string lastSeen { get; set; }
+        public float x;
+        public float y;
+        public float z;
     }
 
+    public class PlayerInfo
+    {
+        public int entityId;
+        public string steamId;
+        public string playerName;
+        public string playfield;
+        public int factionId;
+        public int ping;
+        public PVector3 pos;
+    }
+
+    public struct FactionInfo
+    {
+        public int factionId;
+        public string name;
+        public string abbrev;
+        public byte origin;
+    }
+
+    public class FactionInfoList
+    {
+        public List<FactionInfo> factions;
+    }
+
+    public struct GlobalStructureInfo
+    {
+        public int id;
+        public string name;
+        public int type; // 2=BA, 4=CV, 8=SV, 16=HV
+        public int factionId;
+        public int playfieldId;
+        public PVector3 pos;
+    }
+
+    public class GlobalStructureList
+    {
+        public Dictionary<string, List<GlobalStructureInfo>> globalEntities { get; set; } = new Dictionary<string, List<GlobalStructureInfo>>();
+    }
+
+    #endregion
+
+    /// <summary>
+    /// Encapsulates the complete modern player schema matching ZAH requirements.
+    /// </summary>
+    public class PlayerRecord
+    {
+        public string name { get; set; } = "Unknown";
+        public string steamId { get; set; } = "--";
+        public string entityId { get; set; } = "--";
+        public string status { get; set; } = "Offline";
+        public string faction { get; set; } = "--";
+        public string role { get; set; } = "Member";
+        public string playfield { get; set; } = "--";
+        public string solar_system { get; set; } = "Unknown";
+        public string coordinates { get; set; } = "-";
+        public string cheat { get; set; } = "Off";
+        public string cheater { get; set; } = "No";
+        public string banned { get; set; } = "No";
+        public string auto_ban_protection { get; set; } = "Active";
+        public Dictionary<string, object> stats { get; set; } = new Dictionary<string, object>
+        {
+            { "playtime", "0h" },
+            { "bases", 0 },
+            { "ships", 0 }
+        };
+        public Dictionary<string, object> inventory { get; set; } = new Dictionary<string, object>();
+        public string last_seen { get; set; } = "";
+        public int ping { get; set; } = 0;
+    }
+
+    /// <summary>
+    /// Thread-safe in-memory cache managing connected and historical player records.
+    /// Bridges runtime engine telemetry, savegame crawlers, and TCP Port 30500 broadcasts.
+    /// </summary>
     public class PlayerCache
     {
+        // Thread-safe dictionary storing all player entities indexed by primary Steam ID
         private readonly ConcurrentDictionary<string, PlayerRecord> _allPlayers = new ConcurrentDictionary<string, PlayerRecord>();
+        
+        // Faction lookup cache: maps numerical FactionId -> FactionInfo
+        private readonly ConcurrentDictionary<int, FactionInfo> _factionLookup = new ConcurrentDictionary<int, FactionInfo>();
+
         private readonly string _cacheFilePath;
         private readonly object _diskLock = new object();
 
@@ -35,45 +116,156 @@ namespace ZeroGBridge
             }
             _cacheFilePath = Path.Combine(storageDir, "players.json");
 
-            // 1. Load any saved JSON database
             LoadFromDisk();
-
-            // 2. Scan Empyrion Savegame directory for all historical .ply / .plr player files
             ScanSaveGamePlayers(baseDir);
         }
 
         public int TotalCount => _allPlayers.Count;
         public int OnlineCount => _allPlayers.Values.Count(p => p.status == "Online");
 
-        public void AddOrUpdate(string steamId, string name, int entityId, int ping = 0, string faction = "--", string playfield = "--")
+        // ---------------------------------------------------------------------
+        // AddOrUpdate Ingestion Handlers (LogParser & CommandDispatcher compatibility)
+        // ---------------------------------------------------------------------
+        public void AddOrUpdate(string steamId, int entityId, string name, string status = "Online", string playfield = "--", int ping = 0)
         {
-            if (string.IsNullOrEmpty(steamId)) return;
+            string key = (!string.IsNullOrEmpty(steamId) && steamId != "--") ? steamId : (!string.IsNullOrEmpty(name) && !name.StartsWith("Player_") ? name : entityId.ToString());
 
-            string nowStr = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+            var record = _allPlayers.GetOrAdd(key, k => new PlayerRecord());
 
-            _allPlayers.AddOrUpdate(steamId,
-                new PlayerRecord
+            if (!string.IsNullOrEmpty(name) && !name.StartsWith("Player_")) record.name = name;
+            if (!string.IsNullOrEmpty(steamId) && steamId != "--") record.steamId = steamId;
+            if (entityId > 0) record.entityId = entityId.ToString();
+            if (!string.IsNullOrEmpty(playfield) && playfield != "--") record.playfield = playfield;
+
+            record.status = status;
+            record.ping = ping;
+            record.last_seen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+
+            SaveToDisk();
+        }
+
+        public void AddOrUpdate(PlayerRecord record)
+        {
+            if (record == null) return;
+            string key = (!string.IsNullOrEmpty(record.steamId) && record.steamId != "--") ? record.steamId : record.name;
+            _allPlayers[key] = record;
+            SaveToDisk();
+        }
+
+        // ---------------------------------------------------------------------
+        // PlayerInfo Ingestion Handler
+        // ---------------------------------------------------------------------
+        public void UpdateFromPlayerInfo(PlayerInfo info)
+        {
+            if (info == null) return;
+
+            string steamId = info.steamId ?? "";
+            string eidStr = info.entityId.ToString();
+            string playerName = info.playerName ?? "";
+
+            PlayerRecord record = null;
+            if (!string.IsNullOrEmpty(steamId) && steamId != "--")
+            {
+                _allPlayers.TryGetValue(steamId, out record);
+            }
+
+            if (record == null)
+            {
+                record = _allPlayers.Values.FirstOrDefault(p => p.entityId == eidStr || p.steamId == steamId);
+            }
+
+            if (record == null)
+            {
+                string key = !string.IsNullOrEmpty(steamId) ? steamId : eidStr;
+                record = new PlayerRecord();
+                _allPlayers[key] = record;
+            }
+
+            if (!string.IsNullOrEmpty(playerName) && !playerName.StartsWith("Player_"))
+            {
+                record.name = playerName;
+            }
+            if (!string.IsNullOrEmpty(steamId)) record.steamId = steamId;
+            record.entityId = eidStr;
+            record.status = "Online";
+            record.playfield = !string.IsNullOrEmpty(info.playfield) ? info.playfield : record.playfield;
+            record.ping = info.ping;
+            record.coordinates = $"{info.pos.x:F0}, {info.pos.y:F0}, {info.pos.z:F0}";
+            record.last_seen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+
+            if (info.factionId > 0 && _factionLookup.TryGetValue(info.factionId, out FactionInfo fac))
+            {
+                record.faction = !string.IsNullOrEmpty(fac.abbrev) ? fac.abbrev : fac.name;
+            }
+
+            SaveToDisk();
+        }
+
+        // ---------------------------------------------------------------------
+        // FactionInfoList Ingestion Handler
+        // ---------------------------------------------------------------------
+        public void UpdateFromFactionList(FactionInfoList factionList)
+        {
+            if (factionList?.factions == null) return;
+
+            foreach (var fac in factionList.factions)
+            {
+                _factionLookup[fac.factionId] = fac;
+
+                string facTag = !string.IsNullOrEmpty(fac.abbrev) ? fac.abbrev : fac.name;
+
+                if (fac.origin > 0)
                 {
-                    entityId = entityId,
-                    steamId = steamId,
-                    name = name,
-                    status = "Online",
-                    faction = faction,
-                    playfield = playfield,
-                    ping = ping,
-                    lastSeen = nowStr
-                },
-                (key, existing) =>
+                    var founder = _allPlayers.Values.FirstOrDefault(p => p.entityId == fac.origin.ToString());
+                    if (founder != null)
+                    {
+                        founder.faction = facTag;
+                        founder.role = "Founder";
+                    }
+                }
+            }
+
+            SaveToDisk();
+        }
+
+        // ---------------------------------------------------------------------
+        // GlobalStructureList Ingestion Handler
+        // ---------------------------------------------------------------------
+        public void UpdateFromGlobalStructures(GlobalStructureList structList)
+        {
+            if (structList?.globalEntities == null) return;
+
+            var baseCounts = new Dictionary<string, int>();
+            var shipCounts = new Dictionary<string, int>();
+
+            foreach (var kvp in structList.globalEntities)
+            {
+                if (kvp.Value == null) continue;
+
+                foreach (var s in kvp.Value)
                 {
-                    existing.name = string.IsNullOrEmpty(name) ? existing.name : name;
-                    existing.entityId = entityId != 0 ? entityId : existing.entityId;
-                    existing.status = "Online";
-                    if (faction != "--") existing.faction = faction;
-                    if (playfield != "--") existing.playfield = playfield;
-                    existing.ping = ping;
-                    existing.lastSeen = nowStr;
-                    return existing;
-                });
+                    string ownerId = s.id.ToString();
+                    int type = s.type; // 2=BA, 4=CV, 8=SV, 16=HV
+
+                    if (type == 2)
+                    {
+                        baseCounts[ownerId] = baseCounts.ContainsKey(ownerId) ? baseCounts[ownerId] + 1 : 1;
+                    }
+                    else if (type == 4 || type == 8 || type == 16)
+                    {
+                        shipCounts[ownerId] = shipCounts.ContainsKey(ownerId) ? shipCounts[ownerId] + 1 : 1;
+                    }
+                }
+            }
+
+            foreach (var p in _allPlayers.Values)
+            {
+                int bases = baseCounts.ContainsKey(p.entityId) ? baseCounts[p.entityId] : 0;
+                int ships = shipCounts.ContainsKey(p.entityId) ? shipCounts[p.entityId] : 0;
+
+                p.stats["bases"] = bases;
+                p.stats["ships"] = ships;
+            }
 
             SaveToDisk();
         }
@@ -85,57 +277,56 @@ namespace ZeroGBridge
             var target = _allPlayers.Values.FirstOrDefault(p =>
                 p.steamId == identifier ||
                 string.Equals(p.name, identifier, StringComparison.OrdinalIgnoreCase) ||
-                p.entityId.ToString() == identifier);
+                p.entityId == identifier);
 
             if (target != null)
             {
                 target.status = "Offline";
-                target.lastSeen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+                target.last_seen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
                 SaveToDisk();
             }
         }
 
-        public List<PlayerRecord> GetAllPlayers()
-        {
-            return new List<PlayerRecord>(_allPlayers.Values);
-        }
-
-        public List<PlayerRecord> GetOnlinePlayers()
-        {
-            return _allPlayers.Values.Where(p => p.status == "Online").ToList();
-        }
+        public List<PlayerRecord> GetAllPlayers() => new List<PlayerRecord>(_allPlayers.Values);
+        public List<PlayerRecord> GetOnlinePlayers() => _allPlayers.Values.Where(p => p.status == "Online").ToList();
 
         private void ScanSaveGamePlayers(string baseDir)
         {
             try
             {
-                string savesPath = Path.Combine(baseDir, "Saves", "Games");
-                if (!Directory.Exists(savesPath)) return;
-
-                var playerFiles = Directory.GetFiles(savesPath, "*.ply", SearchOption.AllDirectories)
-                    .Concat(Directory.GetFiles(savesPath, "*.plr", SearchOption.AllDirectories));
-
-                foreach (var file in playerFiles)
+                var searchPaths = new List<string>
                 {
-                    string filename = Path.GetFileNameWithoutExtension(file);
-                    // Match numeric SteamID or entity files
-                    if (filename.Length >= 6 && long.TryParse(filename, out _))
+                    Path.Combine(baseDir, "Saves", "Games", "Zero-G Server", "Players"),
+                    Path.Combine(Directory.GetParent(baseDir)?.FullName ?? baseDir, "Saves", "Games", "Zero-G Server", "Players")
+                };
+
+                string targetFolder = searchPaths.FirstOrDefault(Directory.Exists);
+
+                if (!string.IsNullOrEmpty(targetFolder))
+                {
+                    var playerFiles = Directory.GetFiles(targetFolder, "*.ply", SearchOption.TopDirectoryOnly);
+
+                    foreach (var file in playerFiles)
                     {
-                        if (!_allPlayers.ContainsKey(filename))
+                        string filename = Path.GetFileNameWithoutExtension(file);
+
+                        if (filename.Length == 17 && filename.StartsWith("7656") && long.TryParse(filename, out _))
                         {
-                            DateTime lastMod = File.GetLastWriteTimeUtc(file);
-                            _allPlayers[filename] = new PlayerRecord
+                            if (!_allPlayers.ContainsKey(filename))
                             {
-                                entityId = Math.Abs(filename.GetHashCode() % 10000),
-                                steamId = filename,
-                                name = $"Player_{filename.Substring(Math.Max(0, filename.Length - 4))}",
-                                status = "Offline",
-                                lastSeen = lastMod.ToString("yyyy-MM-dd HH:mm:ss")
-                            };
+                                DateTime lastMod = File.GetLastWriteTimeUtc(file);
+                                _allPlayers[filename] = new PlayerRecord
+                                {
+                                    steamId = filename,
+                                    name = $"Player_{filename.Substring(filename.Length - 4)}",
+                                    status = "Offline",
+                                    last_seen = lastMod.ToString("yyyy-MM-dd HH:mm:ss")
+                                };
+                            }
                         }
                     }
                 }
-                Console.WriteLine($"[ZGB] -INFO- Total player registry count after savegame scan: {_allPlayers.Count}");
+
                 SaveToDisk();
             }
             catch (Exception ex)
@@ -159,7 +350,8 @@ namespace ZeroGBridge
                             foreach (var p in loaded)
                             {
                                 p.status = "Offline";
-                                _allPlayers[p.steamId] = p;
+                                string key = !string.IsNullOrEmpty(p.steamId) && p.steamId != "--" ? p.steamId : p.name;
+                                _allPlayers[key] = p;
                             }
                         }
                     }
