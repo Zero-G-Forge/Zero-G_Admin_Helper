@@ -178,7 +178,7 @@ namespace ZeroGBridge
                     Console.WriteLine($"[ZGB] -ERROR- Telemetry loop exception: {ex.Message}");
                 }
 
-                Thread.Sleep(2000);
+                Thread.Sleep(5000);
             }
         }
         #endregion
