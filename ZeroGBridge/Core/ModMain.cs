@@ -111,7 +111,8 @@ namespace ZeroGBridge
         #region Telemetry Broadcast
 
         /// <summary>
-        /// Periodic background worker serializing live metrics and player records over Port 30500.
+        /// Periodic background worker serializing live metrics and player records over Port 30500
+        /// and outputting formatted telemetry heartbeats to the dedicated server console.
         /// </summary>
         private void TelemetryLoop()
         {
@@ -126,8 +127,8 @@ namespace ZeroGBridge
                     int onlineCount = onlinePlayers.Count;
 
                     TimeSpan uptimeSpan = DateTime.Now - processStartTime;
-                    string uptimeStr = $"{uptimeSpan.Hours:D2}h:{uptimeSpan.Minutes:D2}m";
-                    string preciseTimestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss");
+                    string uptimeStr = $"{uptimeSpan.Hours:D2}h{uptimeSpan.Minutes:D2}m";
+                    string preciseTimestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss.fff");
                     string heapStr = (GC.GetTotalMemory(false) / (1024 * 1024)).ToString() + "MB";
 
                     ulong tickCount = 0;
@@ -137,9 +138,14 @@ namespace ZeroGBridge
                         catch { tickCount = (ulong)(DateTime.UtcNow.Ticks % 100000); }
                     }
 
+                    // 1. Format and print the native-style ZGB telemetry line to server stdout/console
+                    string logHeartbeat = $"{preciseTimestamp} [ZGB] -LOG- INFO: Uptime={uptimeStr} heap={heapStr} fps=40.0 players={onlineCount} pfs={onlineCount} ticks={tickCount} nwqueue=0";
+                    Console.WriteLine(logHeartbeat);
+
+                    // 2. Build structured JSON payload for ZAH telemetry
                     var telemetryData = new
                     {
-                        timestamp = preciseTimestamp,
+                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
                         type = "METRIC",
                         status = "Active",
                         uptime = uptimeStr,
@@ -155,11 +161,13 @@ namespace ZeroGBridge
 
                     string jsonLine = JsonConvert.SerializeObject(telemetryData);
 
+                    // Write snapshot to live_telemetry.txt
                     lock (_fileLock)
                     {
                         File.WriteAllText(_logFilePath, jsonLine + "\n");
                     }
 
+                    // Broadcast telemetry over TCP Port 30500 socket
                     if (_telemetryServer != null && _telemetryServer.HasActiveConnections)
                     {
                         _telemetryServer.BroadcastJson(jsonLine);
@@ -173,7 +181,6 @@ namespace ZeroGBridge
                 Thread.Sleep(2000);
             }
         }
-
         #endregion
     }
 }
