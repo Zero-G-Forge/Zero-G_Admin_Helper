@@ -47,6 +47,12 @@
       <HintPath>libs/Newtonsoft.Json.dll</HintPath>
       <Private>False</Private>
     </Reference>
+
+    <Reference Include="Mono.Data.Sqlite">
+    <HintPath>path/to/Mono.Data.Sqlite.dll</HintPath>
+    <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Data" />
   </ItemGroup>
 
   <!-- Auto-generate matching ModInfo.yaml on build -->

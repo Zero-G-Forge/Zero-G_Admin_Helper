@@ -9,6 +9,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using Newtonsoft.Json;
+using Mono.Data.Sqlite;
 
 namespace ZeroGBridge
 {
@@ -117,7 +118,7 @@ namespace ZeroGBridge
             _cacheFilePath = Path.Combine(storageDir, "players.json");
 
             LoadFromDisk();
-            ScanSaveGamePlayers(baseDir);
+            ScanSaveGameDatabase(baseDir);
         }
 
         public int TotalCount => _allPlayers.Count;
@@ -290,40 +291,67 @@ namespace ZeroGBridge
         public List<PlayerRecord> GetAllPlayers() => new List<PlayerRecord>(_allPlayers.Values);
         public List<PlayerRecord> GetOnlinePlayers() => _allPlayers.Values.Where(p => p.status == "Online").ToList();
 
-        private void ScanSaveGamePlayers(string baseDir)
+        /// <summary>
+        /// Scans the dedicated server savegame SQLite database to resolve real
+        /// player names, Steam IDs, Entity IDs, and faction assignments offline.
+        /// </summary>
+        private void ScanSaveGameDatabase(string baseDir)
         {
             try
             {
-                var searchPaths = new List<string>
+                // Locate the active savegame folder
+                string[] possibleDbPaths = new string[]
                 {
-                    Path.Combine(baseDir, "Saves", "Games", "Zero-G Server", "Players"),
-                    Path.Combine(Directory.GetParent(baseDir)?.FullName ?? baseDir, "Saves", "Games", "Zero-G Server", "Players")
+                    Path.Combine(baseDir, "Saves", "Games", "Zero-G Server", "game.db"),
+                    Path.Combine(Directory.GetParent(baseDir)?.FullName ?? baseDir, "Saves", "Games", "Zero-G Server", "game.db")
                 };
 
-                string targetFolder = searchPaths.FirstOrDefault(Directory.Exists);
-
-                if (!string.IsNullOrEmpty(targetFolder))
+                string dbFile = null;
+                foreach (var path in possibleDbPaths)
                 {
-                    var playerFiles = Directory.GetFiles(targetFolder, "*.ply", SearchOption.TopDirectoryOnly);
-
-                    foreach (var file in playerFiles)
+                    if (File.Exists(path))
                     {
-                        string filename = Path.GetFileNameWithoutExtension(file);
+                        dbFile = path;
+                        break;
+                    }
+                }
 
-                        if (filename.Length == 17 && filename.StartsWith("7656") && long.TryParse(filename, out _))
+                if (string.IsNullOrEmpty(dbFile))
+                {
+                    Console.WriteLine("[ZGB] -WARN- game.db not found for offline player resolution.");
+                    return;
+                }
+
+                // URI mode with read-only flag prevents file lock conflicts with the running server
+                string connString = $"URI=file:{dbFile},version=3,Read Only=True;";
+
+                using (var connection = new SqliteConnection(connString))
+                {
+                    connection.Open();
+
+                    // Query real player identifiers from the game's internal table
+                    string query = "SELECT steamId, entityId, name, factionId FROM Players;";
+
+                    using (var command = new SqliteCommand(query, connection))
+                    using (var reader = command.ExecuteReader())
+                    {
+                        int loadedCount = 0;
+                        while (reader.Read())
                         {
-                            if (!_allPlayers.ContainsKey(filename))
+                            string steamId = reader.IsDBNull(0) ? "" : reader.GetString(0);
+                            int entityId = reader.IsDBNull(1) ? 0 : reader.GetInt32(1);
+                            string realName = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                            int factionId = reader.IsDBNull(3) ? 0 : reader.GetInt32(3);
+
+                            if (!string.IsNullOrEmpty(steamId) && steamId.Length == 17)
                             {
-                                DateTime lastMod = File.GetLastWriteTimeUtc(file);
-                                _allPlayers[filename] = new PlayerRecord
-                                {
-                                    steamId = filename,
-                                    name = $"Player_{filename.Substring(filename.Length - 4)}",
-                                    status = "Offline",
-                                    last_seen = lastMod.ToString("yyyy-MM-dd HH:mm:ss")
-                                };
+                                // Ingest without generic Player_XXXX placeholders
+                                AddOrUpdate(steamId, entityId, realName, "Offline", "--", 0);
+                                loadedCount++;
                             }
                         }
+
+                        Console.WriteLine($"[ZGB] -INFO- Successfully hydrated {loadedCount} player record(s) from game.db.");
                     }
                 }
 
@@ -331,7 +359,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -WARN- Savegame player scan exception: {ex.Message}");
+                Console.WriteLine($"[ZGB] -WARN- SQLite database scan exception: {ex.Message}");
             }
         }
 
