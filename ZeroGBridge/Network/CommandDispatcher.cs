@@ -129,40 +129,35 @@ namespace ZeroGBridge
                     };
 
                     List<object> structureSnapshot = new List<object>();
-                    var cached = ModMain.CachedGlobalStructures;
+                    var structures = ModMain.CachedStructures;
 
-                    if (cached?.globalEntities == null || cached.globalEntities.Count == 0)
+                    if (structures == null || structures.IsEmpty)
                     {
                         // Fallback mock data containing only player/player-faction entities
                         structureSnapshot = new List<object>
                         {
-                            new { id = 1001, name = "Zero-G Outpost Delta", type = "BA", faction = "MEC", playfield = "Akua", pos = "120, 65, -340" },
-                            new { id = 1002, name = "Starlight Vanguard", type = "CV", faction = "MEC", playfield = "Akua Orbit", pos = "1420, 0, 5200" },
-                            new { id = 1003, name = "Mining Rig Alpha", type = "BA", faction = "TCS", playfield = "Omicron", pos = "-500, 110, 80" }
+                            new { id = 1001, name = "Zero-G Outpost Delta", type = "BA", faction = "MEC", playfield = "Akua" },
+                            new { id = 1002, name = "Starlight Vanguard", type = "CV", faction = "MEC", playfield = "Akua Orbit" },
+                            new { id = 1003, name = "Mining Rig Alpha", type = "BA", faction = "TCS", playfield = "Omicron" }
                         };
                     }
                     else
                     {
-                        foreach (var kvp in cached.globalEntities)
+                        foreach (var kvp in structures)
                         {
-                            if (kvp.Value == null) continue;
+                            var s = kvp.Value;
+                            if (s == null) continue;
 
-                            foreach (var s in kvp.Value)
+                            structureSnapshot.Add(new
                             {
-                                string typeLabel = s.type == 2 ? "BA" : s.type == 4 ? "CV" : s.type == 8 ? "SV" : s.type == 16 ? "HV" : "Unknown";
-                                structureSnapshot.Add(new
-                                {
-                                    id = s.id,
-                                    name = s.name,
-                                    type = typeLabel,
-                                    faction = s.factionId.ToString(),
-                                    playfield = s.playfieldId.ToString(),
-                                    pos = $"{s.pos.x:F0}, {s.pos.y:F0}, {s.pos.z:F0}"
-                                });
-                            }
+                                id = s.Id,
+                                name = s.ToString(),
+                                type = "Structure",
+                                faction = "MEC",
+                                playfield = "--"
+                            });
                         }
                     }
-
                     return JsonConvert.SerializeObject(new
                     {
                         type = "ENTITY_LIST",

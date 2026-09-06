@@ -116,14 +116,15 @@ class TelemetryWorker(QThread):
         if not line:
             return
 
-        # Live debug print of raw incoming server stream packets
-        print(f"[TelemetryWorker << RAW] {line}")
-
         payload = TelemetryParser.parse_raw_line(line)
         if not payload:
             return
 
         pkt_type = payload.get("type")
+
+        # Selective debug printing to suppress high-frequency metric heartbeat flood
+        if pkt_type != "METRIC":
+            print(f"[TelemetryWorker << RAW] {line}")
 
         # 1. Route METRIC packets (2-second heartbeat stream)
         if pkt_type == "METRIC":

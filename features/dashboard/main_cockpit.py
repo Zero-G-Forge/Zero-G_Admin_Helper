@@ -522,14 +522,13 @@ class MainCockpit(QMainWindow):
     # -------------------------------------------------------------------------
 
     def _on_full_cache_received(self, cache_pkg: dict):
-        """
-        Slot receiver handling the full server roster package returned from 'plys'.
-        Updates the persistent PlayerManager database and refreshes the table.
-        """
+        """Ingests server player cache, merges it with local disk JSON, and refreshes table."""
+
         if not cache_pkg or not isinstance(cache_pkg, dict):
             return
 
         roster = cache_pkg.get("player_list", [])
+
         self.player_manager.update_from_roster_cache(roster)
         self._refresh_dashboard_table()
 
@@ -538,10 +537,8 @@ class MainCockpit(QMainWindow):
     # -------------------------------------------------------------------------
 
     def _on_live_stream_received(self, online_list: list):
-        """
-        Receives the 2-second live active player stream from METRIC broadcasts.
-        Passes live states to PlayerManager and triggers a table redraw.
-        """
+        """Ingests 2-second METRIC player stream into PlayerManager and refreshes table."""
+
         if not isinstance(online_list, list):
             return
 
@@ -563,13 +560,13 @@ class MainCockpit(QMainWindow):
         self.player_table.setSortingEnabled(False)
         self.player_table.setRowCount(len(recent_players))
 
-        # Step 2: Iterate and populate the 5-column table structure
+        # Step 2: Populate the 5-column table structure using modern keys
         for row_pos, p in enumerate(recent_players):
-            name = str(p.get("name") or p.get("player_name", "Unknown"))
-            status = str(p.get("status") or p.get("active", "Offline"))
-            faction = str(p.get("faction") or "--")
-            system = str(p.get("solar_system") or p.get("system", "--"))
-            playfield = str(p.get("playfield") or "--")
+            name = str(p.get("name", "Unknown"))
+            status = str(p.get("status", "Offline"))
+            faction = str(p.get("faction", "--"))
+            system = str(p.get("solar_system", "--"))
+            playfield = str(p.get("playfield", "--"))
 
             col_values = [name, status, faction, system, playfield]
             for col_idx, text_val in enumerate(col_values):
@@ -593,7 +590,7 @@ class MainCockpit(QMainWindow):
         if not response_data or not isinstance(response_data, dict):
             return
 
-        timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        timestamp = datetime.now(timezone.utc).strftime("%H:%M")
         res_type = response_data.get("type", "RESPONSE")
         status = response_data.get("status", "")
         message = response_data.get("message", "")
@@ -638,7 +635,7 @@ class MainCockpit(QMainWindow):
             return
 
         # Step 1: Echo outbound command to the console/chat feed
-        timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        timestamp = datetime.now(timezone.utc).strftime("%H:%M")
         echo_line = f"[{timestamp}] [ADMIN >>] {raw_command}"
         self.console.append(echo_line)
 

@@ -1,77 +1,27 @@
 // =====================================================================
 // MODULE: ZeroGBridge/Core/PlayerCache.cs
-// DESCRIPTION: Thread-Safe Master Player State & Telemetry Bridge
+// DESCRIPTION: Modern API v2 Ingestion & Dynamic Faction/Structure Resolver
 // =====================================================================
 
 using System;
 using System.IO;
-using System.Data;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Linq;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
 using Newtonsoft.Json;
 using Mono.Data.Sqlite;
+using Eleon.Modding;
 
 namespace ZeroGBridge
 {
-    #region Data Contract Stubs (Matching Eleon.Modding Schemas)
+    #region Data Models
 
-    public struct PVector3
-    {
-        public float x;
-        public float y;
-        public float z;
-    }
-
-    public class PlayerInfo
-    {
-        public int entityId;
-        public string steamId;
-        public string playerName;
-        public string playfield;
-        public int factionId;
-        public int ping;
-        public PVector3 pos;
-    }
-
-    public struct FactionInfo
-    {
-        public int factionId;
-        public string name;
-        public string abbrev;
-        public byte origin;
-    }
-
-    public class FactionInfoList
-    {
-        public List<FactionInfo> factions;
-    }
-
-    public struct GlobalStructureInfo
-    {
-        public int id;
-        public string name;
-        public int type; // 2=BA, 4=CV, 8=SV, 16=HV
-        public int factionId;
-        public int playfieldId;
-        public PVector3 pos;
-    }
-
-    public class GlobalStructureList
-    {
-        public Dictionary<string, List<GlobalStructureInfo>> globalEntities { get; set; } = new Dictionary<string, List<GlobalStructureInfo>>();
-    }
-
-    #endregion
-
-    /// <summary>
-    /// Encapsulates the complete modern player schema matching ZAH requirements.
-    /// </summary>
     public class PlayerRecord
     {
         public string name { get; set; } = "Unknown";
         public string steamId { get; set; } = "--";
         public string entityId { get; set; } = "--";
+        public int factionId { get; set; } = 0;
         public string status { get; set; } = "Offline";
         public string faction { get; set; } = "--";
         public string role { get; set; } = "Member";
@@ -93,20 +43,32 @@ namespace ZeroGBridge
         public int ping { get; set; } = 0;
     }
 
+    public class FactionTag
+    {
+        public int FactionId { get; set; }
+        public string Abbrev { get; set; } = "--";
+        public string Name { get; set; } = "--";
+    }
+
+    #endregion
+
     /// <summary>
-    /// Thread-safe in-memory cache managing connected and historical player records.
-    /// Bridges runtime engine telemetry, savegame crawlers, and TCP Port 30500 broadcasts.
+    /// Thread-safe in-memory cache managing player records, dynamic faction tags,
+    /// and live API v2 telemetry.
     /// </summary>
     public class PlayerCache
     {
-        // Thread-safe dictionary storing all player entities indexed by primary Steam ID
-        private readonly ConcurrentDictionary<string, PlayerRecord> _allPlayers = new ConcurrentDictionary<string, PlayerRecord>();
-        
-        // Faction lookup cache: maps numerical FactionId -> FactionInfo
-        private readonly ConcurrentDictionary<int, FactionInfo> _factionLookup = new ConcurrentDictionary<int, FactionInfo>();
+        #region Private Fields & Constants
 
+        private readonly ConcurrentDictionary<string, PlayerRecord> _allPlayers = new ConcurrentDictionary<string, PlayerRecord>();
+        private readonly ConcurrentDictionary<int, FactionTag> _factionLookup = new ConcurrentDictionary<int, FactionTag>();
         private readonly string _cacheFilePath;
+        private readonly string _factionCacheFilePath;
         private readonly object _diskLock = new object();
+
+        #endregion
+
+        #region Lifecycle & Constructor
 
         public PlayerCache()
         {
@@ -117,25 +79,40 @@ namespace ZeroGBridge
                 Directory.CreateDirectory(storageDir);
             }
             _cacheFilePath = Path.Combine(storageDir, "players.json");
+            _factionCacheFilePath = Path.Combine(storageDir, "factions.json");
 
-            Console.WriteLine("[ZGB] -DEBUG- PlayerCache initializing...");
+            // 1. Restore previously discovered factions from disk
+            LoadFactionsFromDisk();
 
-            // Step 1: Load disk cache if present
+            // 2. Discover configuration/scenario factions dynamically
+            RegisterServerFactions();
+
+            Console.WriteLine("[ZGB] -DEBUG- PlayerCache initializing (Pure API v2)...");
+
+            // 3. Restore cached players
             LoadFromDisk();
             Console.WriteLine($"[ZGB] -DEBUG- After LoadFromDisk: {_allPlayers.Count} players in memory.");
 
-            // Step 2: Trigger safe database scan
+            // 4. Hydrate offline state and structures from global.db
             SafeScanDatabase(baseDir);
             Console.WriteLine($"[ZGB] -DEBUG- After DatabaseScan: {_allPlayers.Count} players in memory.");
         }
 
+        #endregion
+
+        #region Public Accessors & Query API
+
         public int TotalCount => _allPlayers.Count;
         public int OnlineCount => _allPlayers.Values.Count(p => p.status == "Online");
 
-        // ---------------------------------------------------------------------
-        // AddOrUpdate Ingestion Handlers (LogParser & CommandDispatcher compatibility)
-        // ---------------------------------------------------------------------
-        public void AddOrUpdate(string steamId, int entityId, string name, string status = "Online", string playfield = "--", int ping = 0)
+        public List<PlayerRecord> GetAllPlayers() => new List<PlayerRecord>(_allPlayers.Values);
+        public List<PlayerRecord> GetOnlinePlayers() => _allPlayers.Values.Where(p => p.status == "Online").ToList();
+
+        #endregion
+
+        #region Live Player Telemetry & State Management
+
+        public void AddOrUpdate(string steamId, int entityId, string name, string status = "Online", string playfield = "--", int ping = 0, string role = "Member")
         {
             string key = (!string.IsNullOrEmpty(steamId) && steamId != "--") 
                 ? steamId 
@@ -143,12 +120,7 @@ namespace ZeroGBridge
 
             var record = _allPlayers.GetOrAdd(key, k => new PlayerRecord());
 
-            // Update name only if incoming value is valid and not a generic placeholder
             if (!string.IsNullOrEmpty(name) && !name.StartsWith("Player_"))
-            {
-                record.name = name;
-            }
-            else if (string.IsNullOrEmpty(record.name) || record.name == "Unknown")
             {
                 record.name = name;
             }
@@ -156,136 +128,11 @@ namespace ZeroGBridge
             if (!string.IsNullOrEmpty(steamId) && steamId != "--") record.steamId = steamId;
             if (entityId > 0) record.entityId = entityId.ToString();
             if (!string.IsNullOrEmpty(playfield) && playfield != "--") record.playfield = playfield;
+            if (!string.IsNullOrEmpty(role) && role != "None") record.role = role;
 
             record.status = status;
             record.ping = ping;
             record.last_seen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-
-            SaveToDisk();
-        }
-
-        public void AddOrUpdate(PlayerRecord record)
-        {
-            if (record == null) return;
-            string key = (!string.IsNullOrEmpty(record.steamId) && record.steamId != "--") ? record.steamId : record.name;
-            _allPlayers[key] = record;
-            SaveToDisk();
-        }
-
-        // ---------------------------------------------------------------------
-        // PlayerInfo Ingestion Handler (Live Engine Telemetry)
-        // ---------------------------------------------------------------------
-        public void UpdateFromPlayerInfo(PlayerInfo info)
-        {
-            if (info == null) return;
-
-            string steamId = info.steamId ?? "";
-            string eidStr = info.entityId.ToString();
-            string playerName = info.playerName ?? "";
-
-            PlayerRecord record = null;
-            if (!string.IsNullOrEmpty(steamId) && steamId != "--")
-            {
-                _allPlayers.TryGetValue(steamId, out record);
-            }
-
-            if (record == null)
-            {
-                record = _allPlayers.Values.FirstOrDefault(p => p.entityId == eidStr || p.steamId == steamId);
-            }
-
-            if (record == null)
-            {
-                string key = !string.IsNullOrEmpty(steamId) ? steamId : eidStr;
-                record = new PlayerRecord();
-                _allPlayers[key] = record;
-            }
-
-            if (!string.IsNullOrEmpty(playerName) && !playerName.StartsWith("Player_"))
-            {
-                record.name = playerName;
-            }
-            if (!string.IsNullOrEmpty(steamId)) record.steamId = steamId;
-            record.entityId = eidStr;
-            record.status = "Online";
-            record.playfield = !string.IsNullOrEmpty(info.playfield) ? info.playfield : record.playfield;
-            record.ping = info.ping;
-            record.coordinates = $"{info.pos.x:F0}, {info.pos.y:F0}, {info.pos.z:F0}";
-            record.last_seen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-
-            if (info.factionId > 0 && _factionLookup.TryGetValue(info.factionId, out FactionInfo fac))
-            {
-                record.faction = !string.IsNullOrEmpty(fac.abbrev) ? fac.abbrev : fac.name;
-            }
-
-            SaveToDisk();
-        }
-
-        // ---------------------------------------------------------------------
-        // FactionInfoList Ingestion Handler
-        // ---------------------------------------------------------------------
-        public void UpdateFromFactionList(FactionInfoList factionList)
-        {
-            if (factionList?.factions == null) return;
-
-            foreach (var fac in factionList.factions)
-            {
-                _factionLookup[fac.factionId] = fac;
-
-                string facTag = !string.IsNullOrEmpty(fac.abbrev) ? fac.abbrev : fac.name;
-
-                if (fac.origin > 0)
-                {
-                    var founder = _allPlayers.Values.FirstOrDefault(p => p.entityId == fac.origin.ToString());
-                    if (founder != null)
-                    {
-                        founder.faction = facTag;
-                        founder.role = "Founder";
-                    }
-                }
-            }
-
-            SaveToDisk();
-        }
-
-        // ---------------------------------------------------------------------
-        // GlobalStructureList Ingestion Handler
-        // ---------------------------------------------------------------------
-        public void UpdateFromGlobalStructures(GlobalStructureList structList)
-        {
-            if (structList?.globalEntities == null) return;
-
-            var baseCounts = new Dictionary<string, int>();
-            var shipCounts = new Dictionary<string, int>();
-
-            foreach (var kvp in structList.globalEntities)
-            {
-                if (kvp.Value == null) continue;
-
-                foreach (var s in kvp.Value)
-                {
-                    string ownerId = s.id.ToString();
-                    int type = s.type; // 2=BA, 4=CV, 8=SV, 16=HV
-
-                    if (type == 2)
-                    {
-                        baseCounts[ownerId] = baseCounts.ContainsKey(ownerId) ? baseCounts[ownerId] + 1 : 1;
-                    }
-                    else if (type == 4 || type == 8 || type == 16)
-                    {
-                        shipCounts[ownerId] = shipCounts.ContainsKey(ownerId) ? shipCounts[ownerId] + 1 : 1;
-                    }
-                }
-            }
-
-            foreach (var p in _allPlayers.Values)
-            {
-                int bases = baseCounts.ContainsKey(p.entityId) ? baseCounts[p.entityId] : 0;
-                int ships = shipCounts.ContainsKey(p.entityId) ? shipCounts[p.entityId] : 0;
-
-                p.stats["bases"] = bases;
-                p.stats["ships"] = ships;
-            }
 
             SaveToDisk();
         }
@@ -307,15 +154,250 @@ namespace ZeroGBridge
             }
         }
 
-        public List<PlayerRecord> GetAllPlayers() => new List<PlayerRecord>(_allPlayers.Values);
-        public List<PlayerRecord> GetOnlinePlayers() => _allPlayers.Values.Where(p => p.status == "Online").ToList();
+        public void ScanPlayfieldEntities(IPlayfield playfield)
+        {
+            if (playfield == null) return;
 
-        #region Database Hydration
+            try
+            {
+                if (playfield.Players != null)
+                {
+                    foreach (var kvp in playfield.Players)
+                    {
+                        var player = kvp.Value;
+                        if (player == null) continue;
 
-        /// <summary>
-        /// Safely invokes the SQLite database scanner with full diagnostic logging
-        /// and assembly load exception trapping.
-        /// </summary>
+                        string steamId = player.SteamId ?? "";
+                        int entityId = player.Id;
+                        string name = player.Name ?? "Unknown";
+
+                        // 1. Dynamic Faction Registration
+                        int fId = player.Faction.Id;
+                        if (fId > 0)
+                        {
+                            if (!_factionLookup.ContainsKey(fId))
+                            {
+                                string tag = $"FAC-{fId}";
+                                try
+                                {
+                                    tag = player.Faction.Group.ToString();
+                                }
+                                catch { }
+
+                                _factionLookup[fId] = new FactionTag
+                                {
+                                    FactionId = fId,
+                                    Abbrev = tag,
+                                    Name = tag
+                                };
+                                SaveFactionsToDisk();
+                            }
+
+                            // Propagate newly resolved tag to all records matching this faction
+                            if (_factionLookup.TryGetValue(fId, out FactionTag fac))
+                            {
+                                foreach (var p in _allPlayers.Values)
+                                {
+                                    if (p.factionId == fId)
+                                    {
+                                        p.faction = fac.Abbrev;
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Dynamic Faction Role from IPlayer
+                        string roleStr = "Member";
+                        try
+                        {
+                            roleStr = player.FactionRole.ToString();
+                        }
+                        catch { }
+
+                        // 3. Update player record
+                        AddOrUpdate(steamId, entityId, name, "Online", playfield.Name, player.Ping, roleStr);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Exception scanning API v2 playfield: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Faction Discovery & Extraction
+
+        private void RegisterServerFactions()
+        {
+            try
+            {
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                string currentDir = Directory.GetCurrentDirectory();
+
+                // 1. Locate and dynamically parse game.dat for player factions (100+)
+                List<string> candidateGameDats = new List<string>
+                {
+                    Path.Combine(currentDir, "Saves", "Games", "Zero-G Server", "game.dat"),
+                    Path.Combine(baseDir, "Saves", "Games", "Zero-G Server", "game.dat"),
+                    Path.Combine(Directory.GetParent(currentDir)?.FullName ?? currentDir, "Saves", "Games", "Zero-G Server", "game.dat"),
+                    Path.Combine(Directory.GetParent(baseDir)?.FullName ?? baseDir, "Saves", "Games", "Zero-G Server", "game.dat"),
+                    @"D:\66.23.236.138_30000\Saves\Games\Zero-G Server\game.dat"
+                };
+
+                string resolvedGameDat = candidateGameDats.FirstOrDefault(File.Exists);
+                if (!string.IsNullOrEmpty(resolvedGameDat))
+                {
+                    Console.WriteLine($"[ZGB] -INFO- Parsing player factions from: {resolvedGameDat}");
+                    ScanGameDatForFactions(resolvedGameDat);
+                }
+                else
+                {
+                    Console.WriteLine("[ZGB] -WARN- game.dat not found for dynamic faction extraction.");
+                }
+
+                // 2. Discover scenario / configuration NPC factions from ECF files
+                List<string> candidateDirs = new List<string>
+                {
+                    Path.Combine(currentDir, "Content", "Configuration"),
+                    Path.Combine(baseDir, "Content", "Configuration"),
+                    Path.Combine(currentDir, "Scenarios"),
+                    Path.Combine(baseDir, "Scenarios")
+                };
+
+                foreach (var dir in candidateDirs)
+                {
+                    if (!Directory.Exists(dir)) continue;
+
+                    var ecfFiles = Directory.GetFiles(dir, "*Faction*.ecf", SearchOption.AllDirectories);
+                    foreach (var file in ecfFiles)
+                    {
+                        ParseFactionEcf(file);
+                    }
+                }
+
+                SaveFactionsToDisk();
+                Console.WriteLine($"[ZGB] -SUCCESS- Discovered {_factionLookup.Count} total factions from game.dat and ECFs.");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Dynamic faction scan error: {ex.Message}");
+            }
+        }
+
+        private void ScanGameDatForFactions(string gameDatPath)
+        {
+            try
+            {
+                byte[] data;
+                using (var fs = new FileStream(gameDatPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    data = new byte[fs.Length];
+                    fs.Read(data, 0, (int)fs.Length);
+                }
+
+                // Scan byte by byte for sequential faction blocks (IDs 100 to 999)
+                for (int i = 0; i < data.Length - 10; i++)
+                {
+                    ushort potentialId = BitConverter.ToUInt16(data, i);
+
+                    if (potentialId >= 100 && potentialId <= 999)
+                    {
+                        int nameLen = data[i + 2];
+                        // Validate reasonable length for a faction name
+                        if (nameLen >= 3 && nameLen <= 32 && (i + 3 + nameLen) < data.Length)
+                        {
+                            string name = System.Text.Encoding.UTF8.GetString(data, i + 3, nameLen);
+
+                            // Check that the name consists of valid printable ASCII characters
+                            if (name.All(c => c >= 32 && c <= 126))
+                            {
+                                int tagOffset = i + 3 + nameLen;
+                                int tagLen = data[tagOffset];
+
+                                // Faction tags are typically 2 to 6 characters (e.g., MEC, TCS, =A=)
+                                if (tagLen >= 2 && tagLen <= 6 && (tagOffset + 1 + tagLen) <= data.Length)
+                                {
+                                    string tag = System.Text.Encoding.UTF8.GetString(data, tagOffset + 1, tagLen);
+
+                                    if (tag.All(c => c >= 33 && c <= 126))
+                                    {
+                                        _factionLookup[potentialId] = new FactionTag
+                                        {
+                                            FactionId = potentialId,
+                                            Name = name,
+                                            Abbrev = tag
+                                        };
+
+                                        // Skip forward past this discovered faction block
+                                        i = tagOffset + tagLen;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Could not parse game.dat: {ex.Message}");
+            }
+        }
+
+        private void ParseFactionEcf(string filePath)
+        {
+            try
+            {
+                string[] lines = File.ReadAllLines(filePath);
+                int currentId = -1;
+                string currentAbbrev = "";
+                string currentName = "";
+
+                foreach (var rawLine in lines)
+                {
+                    string line = rawLine.Trim();
+                    if (string.IsNullOrEmpty(line) || line.StartsWith("#")) continue;
+
+                    if (line.StartsWith("{ Faction") || line.StartsWith("{Faction"))
+                    {
+                        currentId = -1;
+                        currentAbbrev = "";
+                        currentName = "";
+                    }
+                    else if (line.StartsWith("Id:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int.TryParse(line.Substring(3).Trim(), out currentId);
+                    }
+                    else if (line.StartsWith("Abbrev:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentAbbrev = line.Substring(7).Trim().Trim('"');
+                    }
+                    else if (line.StartsWith("Name:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentName = line.Substring(5).Trim().Trim('"');
+                    }
+                    else if (line.StartsWith("}"))
+                    {
+                        if (currentId >= 0 && !string.IsNullOrEmpty(currentAbbrev))
+                        {
+                            _factionLookup[currentId] = new FactionTag
+                            {
+                                FactionId = currentId,
+                                Abbrev = currentAbbrev,
+                                Name = !string.IsNullOrEmpty(currentName) ? currentName : currentAbbrev
+                            };
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        #endregion
+
+        #region Database Hydration (global.db)
+
         private void SafeScanDatabase(string baseDir)
         {
             try
@@ -325,27 +407,16 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- SafeScanDatabase critical failure: {ex.GetType().Name} - {ex.Message}");
-                if (ex.InnerException != null)
-                {
-                    Console.WriteLine($"[ZGB] -ERROR- Inner Exception: {ex.InnerException.Message}");
-                }
+                Console.WriteLine($"[ZGB] -ERROR- SafeScanDatabase failure: {ex.GetType().Name} - {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Queries the dedicated server global.db to resolve real player names,
-        /// Steam IDs, Entity IDs, playfields, coordinates, and playtime metrics.
-        /// </summary>
-        private void ScanSaveGameDatabase(string baseDir)
+private void ScanSaveGameDatabase(string baseDir)
         {
             string tempDb = null;
             try
             {
                 string currentDir = Directory.GetCurrentDirectory();
-                Console.WriteLine($"[ZGB] -DEBUG- BaseDirectory is: {baseDir}");
-                Console.WriteLine($"[ZGB] -DEBUG- CurrentDirectory is: {currentDir}");
-
                 string parentBase = Directory.GetParent(baseDir)?.FullName ?? baseDir;
                 string parentCur = Directory.GetParent(currentDir)?.FullName ?? currentDir;
 
@@ -358,26 +429,16 @@ namespace ZeroGBridge
                     @"D:\66.23.236.138_30000\Saves\Games\Zero-G Server\global.db"
                 };
 
-                string resolvedDb = null;
-                foreach (var path in candidateFiles)
-                {
-                    string fullPath = Path.GetFullPath(path);
-                    Console.WriteLine($"[ZGB] -DEBUG- Checking path: {fullPath}");
-                    if (File.Exists(fullPath))
-                    {
-                        resolvedDb = fullPath;
-                        Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {resolvedDb}");
-                        break;
-                    }
-                }
+                string resolvedDb = candidateFiles.FirstOrDefault(File.Exists);
 
                 if (string.IsNullOrEmpty(resolvedDb))
                 {
-                    Console.WriteLine("[ZGB] -WARN- Unable to locate global.db across any candidate paths.");
+                    Console.WriteLine("[ZGB] -WARN- Unable to locate global.db across candidate paths.");
                     return;
                 }
 
-                // 1. Create a local working directory in the server root
+                Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {resolvedDb}");
+
                 string tempDir = Path.Combine(currentDir, "Logs", "ZeroGBridge");
                 if (!Directory.Exists(tempDir))
                 {
@@ -390,14 +451,13 @@ namespace ZeroGBridge
                     try { File.Delete(tempDb); } catch { }
                 }
 
-                // 2. Stream-copy with FileShare.ReadWrite to bypass Empyrion's active file locks
+                // Copy with FileShare.ReadWrite to avoid dedicated server locks
                 using (var sourceStream = new FileStream(resolvedDb, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 using (var destStream = new FileStream(tempDb, FileMode.Create, FileAccess.Write, FileShare.None))
                 {
                     sourceStream.CopyTo(destStream);
                 }
 
-                // 3. Connect using standard SQLite parameters with journaling in memory
                 string connString = $"Data Source={tempDb};Version=3;Journal Mode=Memory;Pooling=False;";
 
                 using (var connection = new SqliteConnection(connString))
@@ -409,12 +469,50 @@ namespace ZeroGBridge
                             l.playerid AS steamId,
                             l.entityid AS entityId,
                             l.playername AS playerName,
-                            COALESCE(e.facid, 0) AS factionId,
+                            CASE e.facid
+                                WHEN 0 THEN '[---] None'
+                                WHEN 100 THEN '[MEC]'
+                                WHEN 101 THEN '[TCS]'
+                                WHEN 102 THEN '[=A=]'
+                                WHEN 103 THEN '[GoG]'
+                                WHEN 105 THEN '[Gru]'
+                                WHEN 106 THEN '[KTV]'
+                                WHEN 107 THEN '[Den]'
+                                WHEN 108 THEN '[DIG]'
+                                WHEN 109 THEN '[GRE]'
+                                WHEN 111 THEN '[DDF]'
+                                WHEN 112 THEN '[LSW]'
+                                WHEN 113 THEN '[BOI]'
+                                WHEN 114 THEN '[ISA]'
+                                WHEN 115 THEN '[ASS]'
+                                WHEN 116 THEN '[Clo]'
+                                WHEN 117 THEN '[WoF]'
+                                WHEN 118 THEN '[MOO]'
+                                WHEN 119 THEN '[Bad]'
+                                WHEN 120 THEN '[iCF]'
+                                WHEN 121 THEN '[FBI]'
+                                ELSE 
+                                    CASE 
+                                        WHEN e.facid = e.entityid THEN '[---] Unaligned'
+                                        WHEN e.facid > 0 THEN '[ID:' || CAST(e.facid AS TEXT) || ']'
+                                        ELSE '--'
+                                    END
+                            END AS factionTag,
                             COALESCE(pf.name, '--') AS playfield,
-                            COALESCE(e.posx, 0.0) AS posx,
-                            COALESCE(e.posy, 0.0) AS posy,
-                            COALESCE(e.posz, 0.0) AS posz,
-                            COALESCE(ps.playtime, 0.0) AS playtime
+                            ROUND(COALESCE(pd.posx, e.posx, 0.0), 1) AS posx,
+                            ROUND(COALESCE(pd.posy, e.posy, 0.0), 1) AS posy,
+                            ROUND(COALESCE(pd.posz, e.posz, 0.0), 1) AS posz,
+                            COALESCE(ps.playtime, 0.0) AS playtime,
+                            COALESCE(pd.credits, 0) AS credits,
+                            (SELECT COUNT(*) FROM Entities b 
+                             WHERE b.belongstoentityid = l.entityid 
+                               AND b.etype = 2 
+                               AND b.isremoved = 0) AS baseCount,
+                            (SELECT COUNT(*) FROM Entities s 
+                             WHERE s.belongstoentityid = l.entityid 
+                               AND s.etype IN (4, 8, 16) 
+                               AND s.isremoved = 0) AS shipCount,
+                            COALESCE(NULLIF(l.logoffticks, 0), l.loginticks, 0) AS lastSessionTicks
                         FROM LoginLogoff l
                         INNER JOIN (
                             SELECT playerid, MAX(lid) AS max_lid
@@ -423,9 +521,10 @@ namespace ZeroGBridge
                             GROUP BY playerid
                         ) latest ON l.playerid = latest.playerid AND l.lid = latest.max_lid
                         LEFT JOIN Entities e ON l.entityid = e.entityid
-                        LEFT JOIN Playfields pf ON e.pfid = pf.pfid
-                        LEFT JOIN PlayerStatistics ps ON l.entityid = ps.entityid;";
-
+                        LEFT JOIN PlayerData pd ON l.entityid = pd.entityid
+                        LEFT JOIN Playfields pf ON COALESCE(pd.pfid, e.pfid) = pf.pfid
+                        LEFT JOIN PlayerStatistics ps ON l.entityid = ps.entityid
+                        ORDER BY l.playername ASC;";
                     using (var cmd = new SqliteCommand(query, connection))
                     using (var reader = cmd.ExecuteReader())
                     {
@@ -435,39 +534,83 @@ namespace ZeroGBridge
                             string steamId = reader.IsDBNull(0) ? "" : reader.GetString(0).Trim();
                             int entityId = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetValue(1));
                             string realName = reader.IsDBNull(2) ? "Unknown" : reader.GetString(2).Trim();
-                            int factionId = reader.IsDBNull(3) ? 0 : Convert.ToInt32(reader.GetValue(3));
+                            string factionTag = reader.IsDBNull(3) ? "--" : reader.GetString(3);
                             string playfield = reader.IsDBNull(4) ? "--" : reader.GetString(4);
 
-                            float px = reader.IsDBNull(5) ? 0f : Convert.ToSingle(reader.GetValue(5));
-                            float py = reader.IsDBNull(6) ? 0f : Convert.ToSingle(reader.GetValue(6));
-                            float pz = reader.IsDBNull(7) ? 0f : Convert.ToSingle(reader.GetValue(7));
+                            double px = reader.IsDBNull(5) ? 0.0 : Convert.ToDouble(reader.GetValue(5));
+                            double py = reader.IsDBNull(6) ? 0.0 : Convert.ToDouble(reader.GetValue(6));
+                            double pz = reader.IsDBNull(7) ? 0.0 : Convert.ToDouble(reader.GetValue(7));
                             double playtimeSec = reader.IsDBNull(8) ? 0.0 : Convert.ToDouble(reader.GetValue(8));
+                            long credits = reader.IsDBNull(9) ? 0 : Convert.ToInt64(reader.GetValue(9));
+                            int baseCount = reader.IsDBNull(10) ? 0 : Convert.ToInt32(reader.GetValue(10));
+                            int shipCount = reader.IsDBNull(11) ? 0 : Convert.ToInt32(reader.GetValue(11));
 
                             if (!string.IsNullOrEmpty(steamId) && steamId.Length == 17)
                             {
-                                string coords = (px != 0f || py != 0f || pz != 0f) ? $"{px:F0}, {py:F0}, {pz:F0}" : "-";
+                                string coords = (px != 0.0 || py != 0.0 || pz != 0.0) 
+                                    ? $"{px:F1}, {py:F1}, {pz:F1}" 
+                                    : "-";
                                 int hours = (int)(playtimeSec / 3600.0);
                                 string playtimeStr = $"{hours}h";
+
+                                // Read tick timestamp from LoginLogoff
+                                long sessionTicks = reader.IsDBNull(12) ? 0 : reader.GetInt64(12);
+                                string resolvedLastSeen = "";
+
+                                if (sessionTicks > 0)
+                                {
+                                    try
+                                    {
+                                        // Handle standard .NET DateTime ticks
+                                        if (sessionTicks > 621355968000000000L) // After year 1970
+                                        {
+                                            resolvedLastSeen = new DateTime(sessionTicks, DateTimeKind.Utc).ToString("yyyy-MM-dd HH:mm:ss");
+                                        }
+                                        // Handle Unix Epoch (Seconds or Milliseconds)
+                                        else if (sessionTicks > 1000000000000L) // Milliseconds epoch
+                                        {
+                                            resolvedLastSeen = DateTimeOffset.FromUnixTimeMilliseconds(sessionTicks).UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                                        }
+                                        else if (sessionTicks > 1000000000L) // Seconds epoch
+                                        {
+                                            resolvedLastSeen = DateTimeOffset.FromUnixTimeSeconds(sessionTicks).UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                                        }
+                                    }
+                                    catch
+                                    {
+                                        resolvedLastSeen = "";
+                                    }
+                                }
 
                                 var record = _allPlayers.GetOrAdd(steamId, k => new PlayerRecord());
                                 record.steamId = steamId;
                                 record.entityId = entityId.ToString();
                                 record.name = realName;
                                 record.status = "Offline";
+                                record.faction = factionTag;
                                 record.playfield = playfield;
                                 record.coordinates = coords;
                                 record.stats["playtime"] = playtimeStr;
+                                record.stats["credits"] = credits;
+                                record.stats["bases"] = baseCount;
+                                record.stats["ships"] = shipCount;
 
-                                if (factionId > 0 && _factionLookup.TryGetValue(factionId, out FactionInfo fac))
+                                if (string.IsNullOrEmpty(record.role) || record.role == "None")
                                 {
-                                    record.faction = !string.IsNullOrEmpty(fac.abbrev) ? fac.abbrev : fac.name;
+                                    record.role = "Member";
+                                }
+
+                                // Assign actual historical last seen from database only if valid
+                                if (!string.IsNullOrEmpty(resolvedLastSeen))
+                                {
+                                    record.last_seen = resolvedLastSeen;
                                 }
 
                                 count++;
                             }
                         }
 
-                        Console.WriteLine($"[ZGB] -INFO- Successfully hydrated {count} player record(s) from global.db.");
+                        Console.WriteLine($"[ZGB] -INFO- Successfully hydrated {count} player record(s) with structures and credits from global.db.");
                     }
                 }
 
@@ -485,8 +628,9 @@ namespace ZeroGBridge
                 }
             }
         }
-
         #endregion
+
+        #region Disk Persistence (players.json & factions.json)
 
         private void LoadFromDisk()
         {
@@ -531,5 +675,53 @@ namespace ZeroGBridge
                 Console.WriteLine($"[ZGB] -WARN- Could not write players.json: {ex.Message}");
             }
         }
+
+        private void LoadFactionsFromDisk()
+        {
+            try
+            {
+                lock (_diskLock)
+                {
+                    if (File.Exists(_factionCacheFilePath))
+                    {
+                        string json = File.ReadAllText(_factionCacheFilePath);
+                        var loaded = JsonConvert.DeserializeObject<List<FactionTag>>(json);
+                        if (loaded != null)
+                        {
+                            foreach (var f in loaded)
+                            {
+                                if (f.FactionId >= 0)
+                                {
+                                    _factionLookup[f.FactionId] = f;
+                                }
+                            }
+                            Console.WriteLine($"[ZGB] -INFO- Restored {_factionLookup.Count} faction(s) from factions.json cache.");
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Could not load factions.json: {ex.Message}");
+            }
+        }
+
+        private void SaveFactionsToDisk()
+        {
+            try
+            {
+                lock (_diskLock)
+                {
+                    string json = JsonConvert.SerializeObject(_factionLookup.Values.ToList(), Formatting.Indented);
+                    File.WriteAllText(_factionCacheFilePath, json);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Could not write factions.json: {ex.Message}");
+            }
+        }
+
+        #endregion
     }
 }

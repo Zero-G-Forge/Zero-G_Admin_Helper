@@ -1,11 +1,12 @@
 // =====================================================================
 // MODULE: ZeroGBridge/ModMain.cs
-// DESCRIPTION: Master API v2 Lifecycle Controller & Telemetry Manager
+// DESCRIPTION: Master API v2 Lifecycle Controller (Pure IMod / IModApi)
 // =====================================================================
 
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Threading;
 using Newtonsoft.Json;
 using Eleon.Modding;
@@ -13,19 +14,17 @@ using Eleon.Modding;
 namespace ZeroGBridge
 {
     /// <summary>
-    /// Master lifecycle controller for ZeroGBridge implementing the modern IMod interface.
-    /// Manages real-time telemetry streaming and command execution pipelines over Port 30500.
+    /// Master lifecycle controller for ZeroGBridge implementing pure modern IMod.
+    /// Hooks API v2 playfield delegates and manages Port 30500 telemetry broadcasts.
     /// </summary>
     public class ModMain : IMod
     {
-        // Static instance handles for cross-module dispatching
         public static ModMain Instance { get; private set; }
         public static IModApi ModApiInstance { get; private set; }
 
-        // Global structure cache accessible across modules
-        public static GlobalStructureList CachedGlobalStructures { get; set; } = new GlobalStructureList();
+        // Modern API v2 structure registry: EntityId -> IStructure
+        public static ConcurrentDictionary<int, IStructure> CachedStructures { get; set; } = new ConcurrentDictionary<int, IStructure>();
 
-        // Core API, caching, and server communication handles
         private IModApi _modApi;
         private PlayerCache _playerCache;
         private CommandDispatcher _commandDispatcher;
@@ -35,16 +34,10 @@ namespace ZeroGBridge
         private readonly object _fileLock = new object();
         private string _logFilePath;
 
-        /// <summary>
-        /// Public accessor to the centralized master PlayerCache.
-        /// </summary>
         public PlayerCache PlayerCache => _playerCache;
 
         #region IMod Lifecycle Handlers
 
-        /// <summary>
-        /// Modern API v2 entry point invoked by the dedicated server upon loading the mod assembly.
-        /// </summary>
         public void Init(IModApi modApi)
         {
             Instance = this;
@@ -52,7 +45,6 @@ namespace ZeroGBridge
             ModApiInstance = modApi;
             _isRunning = true;
 
-            // 1. Establish logging and cache storage directory
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
             string logDir = Path.Combine(baseDir, "Logs", "ZeroGBridge");
             if (!Directory.Exists(logDir))
@@ -63,15 +55,18 @@ namespace ZeroGBridge
 
             Console.WriteLine("[ZGB] -INFO- Initializing ZeroGBridge via modern IMod API v2 framework...");
 
-            // 2. Initialize the master PlayerCache (loads disk cache + savegame files)
+            // 1. Initialize PlayerCache (reads disk cache and hydrates global.db)
             _playerCache = new PlayerCache();
 
-            // 3. Initialize CommandDispatcher with PlayerCache and launch TelemetryServer on Port 30500
+            // 2. Wire into pure API v2 playfield lifecycle delegates
+            HookApiV2Events();
+
+            // 3. Start Port 30500 Telemetry Server and Dispatcher
             _commandDispatcher = new CommandDispatcher(_playerCache);
             _telemetryServer = new TelemetryServer(30500, _commandDispatcher);
             _telemetryServer.Start();
 
-            // 4. Launch background telemetry broadcast worker thread
+            // 4. Launch background telemetry broadcast thread
             _telemetryThread = new Thread(TelemetryLoop)
             {
                 IsBackground = true,
@@ -79,16 +74,15 @@ namespace ZeroGBridge
             };
             _telemetryThread.Start();
 
-            Console.WriteLine("[ZGB] -INFO- ZeroGBridge initialization completed successfully.");
+            Console.WriteLine("[ZGB] -INFO- ZeroGBridge API v2 initialization complete.");
         }
 
-        /// <summary>
-        /// Modern API v2 shutdown hook called when the server unloads the mod assembly.
-        /// </summary>
         public void Shutdown()
         {
             Console.WriteLine("[ZGB] -INFO- Shutting down ZeroGBridge...");
             _isRunning = false;
+
+            UnhookApiV2Events();
 
             try
             {
@@ -108,17 +102,66 @@ namespace ZeroGBridge
 
         #endregion
 
+        #region Pure API v2 Event Wiring
+
+        private void HookApiV2Events()
+        {
+            try
+            {
+                if (_modApi?.Application != null)
+                {
+                    _modApi.Application.OnPlayfieldLoaded += OnPlayfieldLoaded;
+                    _modApi.Application.OnPlayfieldUnloading += OnPlayfieldUnloading;
+                    Console.WriteLine("[ZGB] -SUCCESS- Registered API v2 OnPlayfieldLoaded and OnPlayfieldUnloading delegates.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Could not register playfield delegates: {ex.Message}");
+            }
+        }
+
+        private void UnhookApiV2Events()
+        {
+            try
+            {
+                if (_modApi?.Application != null)
+                {
+                    _modApi.Application.OnPlayfieldLoaded -= OnPlayfieldLoaded;
+                    _modApi.Application.OnPlayfieldUnloading -= OnPlayfieldUnloading;
+                }
+            }
+            catch { }
+        }
+
+        private void OnPlayfieldLoaded(IPlayfield playfield)
+        {
+            if (playfield == null) return;
+
+            try
+            {
+                Console.WriteLine($"[ZGB] -INFO- API v2 Playfield Loaded: {playfield.Name}");
+                _playerCache?.ScanPlayfieldEntities(playfield);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -ERROR- Error handling OnPlayfieldLoaded: {ex.Message}");
+            }
+        }
+
+        private void OnPlayfieldUnloading(IPlayfield playfield)
+        {
+            if (playfield == null) return;
+            Console.WriteLine($"[ZGB] -INFO- API v2 Playfield Unloading: {playfield.Name}");
+        }
+
+        #endregion
+
         #region Telemetry Broadcast
 
-        /// <summary>
-        /// Periodic background worker serializing live metrics and player records over Port 30500 every 2 seconds
-        /// and outputting formatted telemetry heartbeats to the dedicated server console every 30 seconds.
-        /// </summary>
         private void TelemetryLoop()
         {
             DateTime processStartTime = System.Diagnostics.Process.GetCurrentProcess().StartTime;
-            
-            // Tracks when the last console heartbeat log was printed to avoid flooding stdout
             DateTime lastConsoleLogTime = DateTime.MinValue;
 
             while (_isRunning)
@@ -141,7 +184,6 @@ namespace ZeroGBridge
                         catch { tickCount = (ulong)(DateTime.UtcNow.Ticks % 100000); }
                     }
 
-                    // 1. Format and print the native-style ZGB telemetry line to server console only once every 30 seconds
                     if ((DateTime.UtcNow - lastConsoleLogTime).TotalSeconds >= 30)
                     {
                         string logHeartbeat = $"{preciseTimestamp} [ZGB] -LOG- INFO: Uptime={uptimeStr} heap={heapStr} fps=40.0 players={onlineCount} pfs={onlineCount} ticks={tickCount} nwqueue=0";
@@ -149,7 +191,6 @@ namespace ZeroGBridge
                         lastConsoleLogTime = DateTime.UtcNow;
                     }
 
-                    // 2. Build structured JSON payload for ZAH telemetry (broadcasts every 2 seconds)
                     var telemetryData = new
                     {
                         timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
@@ -168,13 +209,11 @@ namespace ZeroGBridge
 
                     string jsonLine = JsonConvert.SerializeObject(telemetryData);
 
-                    // Write snapshot to live_telemetry.txt
                     lock (_fileLock)
                     {
                         File.WriteAllText(_logFilePath, jsonLine + "\n");
                     }
 
-                    // Broadcast telemetry over TCP Port 30500 socket to connected ZAH clients
                     if (_telemetryServer != null && _telemetryServer.HasActiveConnections)
                     {
                         _telemetryServer.BroadcastJson(jsonLine);
@@ -185,10 +224,10 @@ namespace ZeroGBridge
                     Console.WriteLine($"[ZGB] -ERROR- Telemetry loop exception: {ex.Message}");
                 }
 
-                // Sleep interval for the background thread (2 seconds per cycle)
                 Thread.Sleep(2000);
             }
         }
+
         #endregion
     }
 }
