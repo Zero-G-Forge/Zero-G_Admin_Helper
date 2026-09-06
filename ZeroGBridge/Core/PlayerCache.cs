@@ -1,77 +1,25 @@
 // =====================================================================
 // MODULE: ZeroGBridge/Core/PlayerCache.cs
-// DESCRIPTION: Thread-Safe Master Player State & Telemetry Bridge
+// DESCRIPTION: Modern API v2 Ingestion & Faction Resolver
 // =====================================================================
 
 using System;
 using System.IO;
-using System.Data;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Linq;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
 using Newtonsoft.Json;
 using Mono.Data.Sqlite;
+using Eleon.Modding;
 
 namespace ZeroGBridge
 {
-    #region Data Contract Stubs (Matching Eleon.Modding Schemas)
-
-    public struct PVector3
-    {
-        public float x;
-        public float y;
-        public float z;
-    }
-
-    public class PlayerInfo
-    {
-        public int entityId;
-        public string steamId;
-        public string playerName;
-        public string playfield;
-        public int factionId;
-        public int ping;
-        public PVector3 pos;
-    }
-
-    public struct FactionInfo
-    {
-        public int factionId;
-        public string name;
-        public string abbrev;
-        public byte origin;
-    }
-
-    public class FactionInfoList
-    {
-        public List<FactionInfo> factions;
-    }
-
-    public struct GlobalStructureInfo
-    {
-        public int id;
-        public string name;
-        public int type; // 2=BA, 4=CV, 8=SV, 16=HV
-        public int factionId;
-        public int playfieldId;
-        public PVector3 pos;
-    }
-
-    public class GlobalStructureList
-    {
-        public Dictionary<string, List<GlobalStructureInfo>> globalEntities { get; set; } = new Dictionary<string, List<GlobalStructureInfo>>();
-    }
-
-    #endregion
-
-    /// <summary>
-    /// Encapsulates the complete modern player schema matching ZAH requirements.
-    /// </summary>
     public class PlayerRecord
     {
         public string name { get; set; } = "Unknown";
         public string steamId { get; set; } = "--";
         public string entityId { get; set; } = "--";
+        public int factionId { get; set; } = 0;
         public string status { get; set; } = "Offline";
         public string faction { get; set; } = "--";
         public string role { get; set; } = "Member";
@@ -93,18 +41,20 @@ namespace ZeroGBridge
         public int ping { get; set; } = 0;
     }
 
+    public class FactionTag
+    {
+        public int FactionId { get; set; }
+        public string Abbrev { get; set; } = "--";
+        public string Name { get; set; } = "--";
+    }
+
     /// <summary>
-    /// Thread-safe in-memory cache managing connected and historical player records.
-    /// Bridges runtime engine telemetry, savegame crawlers, and TCP Port 30500 broadcasts.
+    /// Thread-safe in-memory cache managing player records and resolving dynamic faction tags.
     /// </summary>
     public class PlayerCache
     {
-        // Thread-safe dictionary storing all player entities indexed by primary Steam ID
         private readonly ConcurrentDictionary<string, PlayerRecord> _allPlayers = new ConcurrentDictionary<string, PlayerRecord>();
-        
-        // Faction lookup cache: maps numerical FactionId -> FactionInfo
-        private readonly ConcurrentDictionary<int, FactionInfo> _factionLookup = new ConcurrentDictionary<int, FactionInfo>();
-
+        private readonly ConcurrentDictionary<int, FactionTag> _factionLookup = new ConcurrentDictionary<int, FactionTag>();
         private readonly string _cacheFilePath;
         private readonly object _diskLock = new object();
 
@@ -118,13 +68,14 @@ namespace ZeroGBridge
             }
             _cacheFilePath = Path.Combine(storageDir, "players.json");
 
-            Console.WriteLine("[ZGB] -DEBUG- PlayerCache initializing...");
+            // Seed primary persistent factions
+            RegisterServerFactions();
 
-            // Step 1: Load disk cache if present
+            Console.WriteLine("[ZGB] -DEBUG- PlayerCache initializing (Pure API v2)...");
+
             LoadFromDisk();
             Console.WriteLine($"[ZGB] -DEBUG- After LoadFromDisk: {_allPlayers.Count} players in memory.");
 
-            // Step 2: Trigger safe database scan
             SafeScanDatabase(baseDir);
             Console.WriteLine($"[ZGB] -DEBUG- After DatabaseScan: {_allPlayers.Count} players in memory.");
         }
@@ -132,9 +83,81 @@ namespace ZeroGBridge
         public int TotalCount => _allPlayers.Count;
         public int OnlineCount => _allPlayers.Values.Count(p => p.status == "Online");
 
+        private void RegisterServerFactions()
+        {
+            // Seed verified persistent server factions
+            _factionLookup[1]   = new FactionTag { FactionId = 1,   Abbrev = "Hum", Name = "Human" };
+            _factionLookup[100] = new FactionTag { FactionId = 100, Abbrev = "MEC", Name = "The Mechanics" };
+            _factionLookup[101] = new FactionTag { FactionId = 101, Abbrev = "TCS", Name = "Tin Can Sailors" };
+            _factionLookup[102] = new FactionTag { FactionId = 102, Abbrev = "=A=", Name = "Ascension Alliance" };
+            _factionLookup[103] = new FactionTag { FactionId = 103, Abbrev = "GoG", Name = "Grumpy Old Gits" };
+            _factionLookup[104] = new FactionTag { FactionId = 104, Abbrev = "VII", Name = "Legio VII" };
+            _factionLookup[105] = new FactionTag { FactionId = 105, Abbrev = "Gru", Name = "GrumpyOldMen" };
+            _factionLookup[106] = new FactionTag { FactionId = 106, Abbrev = "KTV", Name = "Knights Templar" };
+            _factionLookup[107] = new FactionTag { FactionId = 107, Abbrev = "Den", Name = "Dragon's Den" };
+            _factionLookup[108] = new FactionTag { FactionId = 108, Abbrev = "DIG", Name = "DIG DUG" };
+            _factionLookup[109] = new FactionTag { FactionId = 109, Abbrev = "GRE", Name = "Gambiarra" };
+            _factionLookup[110] = new FactionTag { FactionId = 110, Abbrev = "=$=", Name = "Ascended Adventures" };
+            _factionLookup[111] = new FactionTag { FactionId = 111, Abbrev = "DDF", Name = "Dragons Den OG" };
+            _factionLookup[112] = new FactionTag { FactionId = 112, Abbrev = "LSW", Name = "Lavro Ship Works" };
+            _factionLookup[113] = new FactionTag { FactionId = 113, Abbrev = "BOI", Name = "OS BOIS" };
+            _factionLookup[114] = new FactionTag { FactionId = 114, Abbrev = "ISA", Name = "ISA" };
+            _factionLookup[115] = new FactionTag { FactionId = 115, Abbrev = "ASS", Name = "Aussie Space Service" };
+            _factionLookup[116] = new FactionTag { FactionId = 116, Abbrev = "Clo", Name = "Clodos" };
+            _factionLookup[117] = new FactionTag { FactionId = 117, Abbrev = "WoF", Name = "Wings of Fire" };
+            _factionLookup[118] = new FactionTag { FactionId = 118, Abbrev = "B&B", Name = "B&B" };
+            _factionLookup[119] = new FactionTag { FactionId = 119, Abbrev = "Bad", Name = "Bad Lucky" };
+            _factionLookup[120] = new FactionTag { FactionId = 120, Abbrev = "iCF", Name = "iCore Federation" };
+            _factionLookup[121] = new FactionTag { FactionId = 121, Abbrev = "FBI", Name = "Fire Began Inside" };
+        }
         // ---------------------------------------------------------------------
-        // AddOrUpdate Ingestion Handlers (LogParser & CommandDispatcher compatibility)
+        // Modern API v2 Object Scanner (IPlayfield -> Players / Entities)
         // ---------------------------------------------------------------------
+        public void ScanPlayfieldEntities(IPlayfield playfield)
+        {
+            if (playfield == null) return;
+
+            try
+            {
+                // In API v2, playfield.Players provides live connected IPlayer objects
+                if (playfield.Players != null)
+                {
+                    foreach (var kvp in playfield.Players)
+                    {
+                        var player = kvp.Value;
+                        if (player == null) continue;
+
+                        string steamId = player.SteamId ?? "";
+                        int entityId = player.Id; // IPlayer uses .Id, not .EntityId
+                        string name = player.Name ?? "Unknown";
+
+                        // FactionData is a struct; check id > 0
+                        int fId = player.Faction.Id;
+                        if (fId > 0)
+                        {
+                            // If this factionId exists in our lookup, sync any player records matching it
+                            if (_factionLookup.TryGetValue(fId, out FactionTag fac))
+                            {
+                                foreach (var p in _allPlayers.Values)
+                                {
+                                    if (p.factionId == fId)
+                                    {
+                                        p.faction = fac.Abbrev;
+                                    }
+                                }
+                            }
+                        }
+
+                        AddOrUpdate(steamId, entityId, name, "Online", playfield.Name, player.Ping);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Exception scanning API v2 playfield: {ex.Message}");
+            }
+        }
+
         public void AddOrUpdate(string steamId, int entityId, string name, string status = "Online", string playfield = "--", int ping = 0)
         {
             string key = (!string.IsNullOrEmpty(steamId) && steamId != "--") 
@@ -143,12 +166,7 @@ namespace ZeroGBridge
 
             var record = _allPlayers.GetOrAdd(key, k => new PlayerRecord());
 
-            // Update name only if incoming value is valid and not a generic placeholder
             if (!string.IsNullOrEmpty(name) && !name.StartsWith("Player_"))
-            {
-                record.name = name;
-            }
-            else if (string.IsNullOrEmpty(record.name) || record.name == "Unknown")
             {
                 record.name = name;
             }
@@ -160,132 +178,6 @@ namespace ZeroGBridge
             record.status = status;
             record.ping = ping;
             record.last_seen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-
-            SaveToDisk();
-        }
-
-        public void AddOrUpdate(PlayerRecord record)
-        {
-            if (record == null) return;
-            string key = (!string.IsNullOrEmpty(record.steamId) && record.steamId != "--") ? record.steamId : record.name;
-            _allPlayers[key] = record;
-            SaveToDisk();
-        }
-
-        // ---------------------------------------------------------------------
-        // PlayerInfo Ingestion Handler (Live Engine Telemetry)
-        // ---------------------------------------------------------------------
-        public void UpdateFromPlayerInfo(PlayerInfo info)
-        {
-            if (info == null) return;
-
-            string steamId = info.steamId ?? "";
-            string eidStr = info.entityId.ToString();
-            string playerName = info.playerName ?? "";
-
-            PlayerRecord record = null;
-            if (!string.IsNullOrEmpty(steamId) && steamId != "--")
-            {
-                _allPlayers.TryGetValue(steamId, out record);
-            }
-
-            if (record == null)
-            {
-                record = _allPlayers.Values.FirstOrDefault(p => p.entityId == eidStr || p.steamId == steamId);
-            }
-
-            if (record == null)
-            {
-                string key = !string.IsNullOrEmpty(steamId) ? steamId : eidStr;
-                record = new PlayerRecord();
-                _allPlayers[key] = record;
-            }
-
-            if (!string.IsNullOrEmpty(playerName) && !playerName.StartsWith("Player_"))
-            {
-                record.name = playerName;
-            }
-            if (!string.IsNullOrEmpty(steamId)) record.steamId = steamId;
-            record.entityId = eidStr;
-            record.status = "Online";
-            record.playfield = !string.IsNullOrEmpty(info.playfield) ? info.playfield : record.playfield;
-            record.ping = info.ping;
-            record.coordinates = $"{info.pos.x:F0}, {info.pos.y:F0}, {info.pos.z:F0}";
-            record.last_seen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-
-            if (info.factionId > 0 && _factionLookup.TryGetValue(info.factionId, out FactionInfo fac))
-            {
-                record.faction = !string.IsNullOrEmpty(fac.abbrev) ? fac.abbrev : fac.name;
-            }
-
-            SaveToDisk();
-        }
-
-        // ---------------------------------------------------------------------
-        // FactionInfoList Ingestion Handler
-        // ---------------------------------------------------------------------
-        public void UpdateFromFactionList(FactionInfoList factionList)
-        {
-            if (factionList?.factions == null) return;
-
-            foreach (var fac in factionList.factions)
-            {
-                _factionLookup[fac.factionId] = fac;
-
-                string facTag = !string.IsNullOrEmpty(fac.abbrev) ? fac.abbrev : fac.name;
-
-                if (fac.origin > 0)
-                {
-                    var founder = _allPlayers.Values.FirstOrDefault(p => p.entityId == fac.origin.ToString());
-                    if (founder != null)
-                    {
-                        founder.faction = facTag;
-                        founder.role = "Founder";
-                    }
-                }
-            }
-
-            SaveToDisk();
-        }
-
-        // ---------------------------------------------------------------------
-        // GlobalStructureList Ingestion Handler
-        // ---------------------------------------------------------------------
-        public void UpdateFromGlobalStructures(GlobalStructureList structList)
-        {
-            if (structList?.globalEntities == null) return;
-
-            var baseCounts = new Dictionary<string, int>();
-            var shipCounts = new Dictionary<string, int>();
-
-            foreach (var kvp in structList.globalEntities)
-            {
-                if (kvp.Value == null) continue;
-
-                foreach (var s in kvp.Value)
-                {
-                    string ownerId = s.id.ToString();
-                    int type = s.type; // 2=BA, 4=CV, 8=SV, 16=HV
-
-                    if (type == 2)
-                    {
-                        baseCounts[ownerId] = baseCounts.ContainsKey(ownerId) ? baseCounts[ownerId] + 1 : 1;
-                    }
-                    else if (type == 4 || type == 8 || type == 16)
-                    {
-                        shipCounts[ownerId] = shipCounts.ContainsKey(ownerId) ? shipCounts[ownerId] + 1 : 1;
-                    }
-                }
-            }
-
-            foreach (var p in _allPlayers.Values)
-            {
-                int bases = baseCounts.ContainsKey(p.entityId) ? baseCounts[p.entityId] : 0;
-                int ships = shipCounts.ContainsKey(p.entityId) ? shipCounts[p.entityId] : 0;
-
-                p.stats["bases"] = bases;
-                p.stats["ships"] = ships;
-            }
 
             SaveToDisk();
         }
@@ -310,12 +202,8 @@ namespace ZeroGBridge
         public List<PlayerRecord> GetAllPlayers() => new List<PlayerRecord>(_allPlayers.Values);
         public List<PlayerRecord> GetOnlinePlayers() => _allPlayers.Values.Where(p => p.status == "Online").ToList();
 
-        #region Database Hydration
+#region Database Hydration
 
-        /// <summary>
-        /// Safely invokes the SQLite database scanner with full diagnostic logging
-        /// and assembly load exception trapping.
-        /// </summary>
         private void SafeScanDatabase(string baseDir)
         {
             try
@@ -325,27 +213,16 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- SafeScanDatabase critical failure: {ex.GetType().Name} - {ex.Message}");
-                if (ex.InnerException != null)
-                {
-                    Console.WriteLine($"[ZGB] -ERROR- Inner Exception: {ex.InnerException.Message}");
-                }
+                Console.WriteLine($"[ZGB] -ERROR- SafeScanDatabase failure: {ex.GetType().Name} - {ex.Message}");
             }
         }
 
-        /// <summary>
-        /// Queries the dedicated server global.db to resolve real player names,
-        /// Steam IDs, Entity IDs, playfields, coordinates, and playtime metrics.
-        /// </summary>
         private void ScanSaveGameDatabase(string baseDir)
         {
             string tempDb = null;
             try
             {
                 string currentDir = Directory.GetCurrentDirectory();
-                Console.WriteLine($"[ZGB] -DEBUG- BaseDirectory is: {baseDir}");
-                Console.WriteLine($"[ZGB] -DEBUG- CurrentDirectory is: {currentDir}");
-
                 string parentBase = Directory.GetParent(baseDir)?.FullName ?? baseDir;
                 string parentCur = Directory.GetParent(currentDir)?.FullName ?? currentDir;
 
@@ -358,26 +235,16 @@ namespace ZeroGBridge
                     @"D:\66.23.236.138_30000\Saves\Games\Zero-G Server\global.db"
                 };
 
-                string resolvedDb = null;
-                foreach (var path in candidateFiles)
-                {
-                    string fullPath = Path.GetFullPath(path);
-                    Console.WriteLine($"[ZGB] -DEBUG- Checking path: {fullPath}");
-                    if (File.Exists(fullPath))
-                    {
-                        resolvedDb = fullPath;
-                        Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {resolvedDb}");
-                        break;
-                    }
-                }
+                string resolvedDb = candidateFiles.FirstOrDefault(File.Exists);
 
                 if (string.IsNullOrEmpty(resolvedDb))
                 {
-                    Console.WriteLine("[ZGB] -WARN- Unable to locate global.db across any candidate paths.");
+                    Console.WriteLine("[ZGB] -WARN- Unable to locate global.db across candidate paths.");
                     return;
                 }
 
-                // 1. Create a local working directory in the server root
+                Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {resolvedDb}");
+
                 string tempDir = Path.Combine(currentDir, "Logs", "ZeroGBridge");
                 if (!Directory.Exists(tempDir))
                 {
@@ -390,14 +257,13 @@ namespace ZeroGBridge
                     try { File.Delete(tempDb); } catch { }
                 }
 
-                // 2. Stream-copy with FileShare.ReadWrite to bypass Empyrion's active file locks
+                // Stream copy with FileShare.ReadWrite to avoid dedicated server locks
                 using (var sourceStream = new FileStream(resolvedDb, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 using (var destStream = new FileStream(tempDb, FileMode.Create, FileAccess.Write, FileShare.None))
                 {
                     sourceStream.CopyTo(destStream);
                 }
 
-                // 3. Connect using standard SQLite parameters with journaling in memory
                 string connString = $"Data Source={tempDb};Version=3;Journal Mode=Memory;Pooling=False;";
 
                 using (var connection = new SqliteConnection(connString))
@@ -409,7 +275,18 @@ namespace ZeroGBridge
                             l.playerid AS steamId,
                             l.entityid AS entityId,
                             l.playername AS playerName,
-                            COALESCE(e.facid, 0) AS factionId,
+                            COALESCE(
+                                NULLIF(e.facid, 0),
+                                (SELECT sh.facid 
+                                 FROM StructuresHistory sh 
+                                 WHERE sh.touchedentityid = l.entityid AND sh.facid > 0 
+                                 ORDER BY sh.gametime DESC LIMIT 1),
+                                (SELECT sh2.facid 
+                                 FROM StructuresHistory sh2 
+                                 WHERE sh2.entityid = l.entityid AND sh2.facid > 0 
+                                 ORDER BY sh2.gametime DESC LIMIT 1),
+                                0
+                            ) AS factionId,
                             COALESCE(pf.name, '--') AS playfield,
                             COALESCE(e.posx, 0.0) AS posx,
                             COALESCE(e.posy, 0.0) AS posy,
@@ -449,19 +326,27 @@ namespace ZeroGBridge
                                 int hours = (int)(playtimeSec / 3600.0);
                                 string playtimeStr = $"{hours}h";
 
+                                // Resolve faction name/abbreviation from cache
+                                string factionTag = "--";
+                                if (factionId > 0 && _factionLookup.TryGetValue(factionId, out FactionTag fac))
+                                {
+                                    factionTag = !string.IsNullOrEmpty(fac.Abbrev) ? fac.Abbrev : fac.Name;
+                                }
+                                else if (factionId > 1 && factionId < 1000)
+                                {
+                                    factionTag = $"FAC-{factionId}";
+                                }
+
                                 var record = _allPlayers.GetOrAdd(steamId, k => new PlayerRecord());
                                 record.steamId = steamId;
                                 record.entityId = entityId.ToString();
                                 record.name = realName;
+                                record.factionId = factionId;
                                 record.status = "Offline";
+                                record.faction = factionTag; // Unconditionally updates in-memory record
                                 record.playfield = playfield;
                                 record.coordinates = coords;
                                 record.stats["playtime"] = playtimeStr;
-
-                                if (factionId > 0 && _factionLookup.TryGetValue(factionId, out FactionInfo fac))
-                                {
-                                    record.faction = !string.IsNullOrEmpty(fac.abbrev) ? fac.abbrev : fac.name;
-                                }
 
                                 count++;
                             }
