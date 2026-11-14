@@ -34,22 +34,22 @@
 
   <ItemGroup>
     <Reference Include="ModApi">
-      <HintPath>libs/ModApi.dll</HintPath>
+      <HintPath>lib/ModApi.dll</HintPath>
       <Private>False</Private>
     </Reference>
 
     <Reference Include="Assembly-CSharp">
-      <HintPath>libs/Assembly-CSharp.dll</HintPath>
+      <HintPath>lib/Assembly-CSharp.dll</HintPath>
       <Private>False</Private>
     </Reference>
 
     <Reference Include="Newtonsoft.Json">
-      <HintPath>libs/Newtonsoft.Json.dll</HintPath>
+      <HintPath>lib/Additional Libs/Newtonsoft.Json.dll</HintPath>
       <Private>False</Private>
     </Reference>
 
     <Reference Include="Mono.Data.Sqlite">
-    <HintPath>path/to/Mono.Data.Sqlite.dll</HintPath>
+    <HintPath>lib/Additional Libs/Mono.Data.Sqlite.dll</HintPath>
     <Private>false</Private>
     </Reference>
     <Reference Include="System.Data" />
