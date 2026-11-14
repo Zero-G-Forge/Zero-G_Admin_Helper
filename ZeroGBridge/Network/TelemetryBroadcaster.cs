@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text;
 using System.Threading;
 using Newtonsoft.Json;
 using Eleon.Modding;
@@ -12,32 +13,46 @@ namespace ZeroGBridge
     /// </summary>
     public class TelemetryBroadcaster
     {
+        private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
+
         private readonly IModApi _modApi;
         private readonly PlayerCache _playerCache;
         private readonly LogDiscovery _logDiscovery;
         private readonly TelemetryServer _telemetryServer;
         private readonly string _logFilePath;
+        private readonly Action _onTick;
 
         private Thread _telemetryThread;
-        private bool _isRunning;
+        private readonly ManualResetEventSlim _stopEvent = new ManualResetEventSlim(false);
         private readonly object _fileLock = new object();
         private int _logCounter = 0;
 
+        // METRIC roster throttling (see TelemetryLoop)
+        public const int RosterResyncTicks = 15; // 15 x 2s = 30s keep-alive resync
+        private string _lastRosterSignature = null;
+        private int _lastAuthGeneration = 0;
+        private int _ticksSinceRoster = 0;
+        private int _rosterRevision = 0;
+
         /// <summary>
         /// Initializes the broadcaster with required engine handles and service references.
+        /// LogDiscovery may be null to leave the log watcher unwired.
+        /// onTick is an optional periodic callback (used to rescan loaded playfield entities).
         /// </summary>
         public TelemetryBroadcaster(
-            IModApi modApi, 
-            PlayerCache playerCache, 
-            LogDiscovery logDiscovery, 
-            TelemetryServer telemetryServer, 
-            string logFilePath)
+            IModApi modApi,
+            PlayerCache playerCache,
+            LogDiscovery logDiscovery,
+            TelemetryServer telemetryServer,
+            string logFilePath,
+            Action onTick = null)
         {
             _modApi = modApi;
             _playerCache = playerCache;
             _logDiscovery = logDiscovery;
             _telemetryServer = telemetryServer;
             _logFilePath = logFilePath;
+            _onTick = onTick;
         }
 
         /// <summary>
@@ -45,7 +60,7 @@ namespace ZeroGBridge
         /// </summary>
         public void Start()
         {
-            _isRunning = true;
+            _stopEvent.Reset();
             _telemetryThread = new Thread(TelemetryLoop)
             {
                 IsBackground = true,
@@ -55,19 +70,32 @@ namespace ZeroGBridge
         }
 
         /// <summary>
-        /// Stops the telemetry loop worker thread cleanly.
+        /// Stops the telemetry loop worker thread cleanly, signalling the wait handle so
+        /// the thread wakes immediately instead of finishing a 2s sleep.
         /// </summary>
         public void Stop()
         {
-            _isRunning = false;
+            _stopEvent.Set();
             try
             {
-                _telemetryThread?.Join(1000);
+                if (_telemetryThread != null && _telemetryThread.IsAlive)
+                {
+                    _telemetryThread.Join(5000);
+                    if (_telemetryThread.IsAlive)
+                    {
+                        Console.WriteLine("[ZGB] -WARN- TelemetryBroadcaster thread did not exit within 5s.");
+                    }
+                }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[ZGB] -ERROR- Exception stopping TelemetryBroadcaster: {ex.Message}");
             }
+        }
+
+        public bool IsThreadAlive
+        {
+            get { return _telemetryThread != null && _telemetryThread.IsAlive; }
         }
 
         /// <summary>
@@ -84,24 +112,46 @@ namespace ZeroGBridge
             TimeSpan lastCpuTime = currentProcess.TotalProcessorTime;
             DateTime lastSampleTime = DateTime.UtcNow;
 
-            while (_isRunning)
+            while (!_stopEvent.IsSet)
             {
                 try
                 {
-                    // 1. Ingest newly appended server log lines from the active log stream
+                    // Optional periodic work (entity rescan). LogDiscovery is only used if the caller wired it.
+                    _onTick?.Invoke();
                     _logDiscovery?.PollActiveLog();
 
-                    // 2. Fetch ONLY active online players for the live telemetry broadcast
-                    var onlinePlayers = _playerCache != null 
-                        ? _playerCache.GetOnlinePlayers() 
+                    // Fetch ONLY active online players. METRIC carries counts every tick; the
+                    // (slim) online roster is attached only when it changed, when a new client
+                    // authenticated, or every RosterResyncTicks as a resync. The full offline
+                    // roster is available via the plys command, never via METRIC.
+                    var onlinePlayers = _playerCache != null
+                        ? _playerCache.GetOnlinePlayers()
                         : new List<PlayerRecord>();
                     int onlineCount = onlinePlayers.Count;
 
-                    // 3. Calculate Server Process Uptime
+                    var slimRoster = BuildSlimRoster(onlinePlayers);
+                    string rosterSignature = BuildRosterSignature(slimRoster);
+                    int authGen = _telemetryServer != null ? _telemetryServer.AuthGeneration : 0;
+
+                    bool rosterChanged = !string.Equals(rosterSignature, _lastRosterSignature, StringComparison.Ordinal);
+                    bool newClient = authGen != _lastAuthGeneration;
+                    _ticksSinceRoster++;
+                    bool includeRoster = rosterChanged || newClient || _ticksSinceRoster >= RosterResyncTicks;
+
+                    if (rosterChanged)
+                    {
+                        _rosterRevision++;
+                        _lastRosterSignature = rosterSignature;
+                    }
+                    if (includeRoster)
+                    {
+                        _ticksSinceRoster = 0;
+                        _lastAuthGeneration = authGen;
+                    }
+
                     TimeSpan uptimeSpan = DateTime.Now - processStartTime;
                     string uptimeStr = $"{uptimeSpan.Hours:D2}h:{uptimeSpan.Minutes:D2}m";
 
-                    // 4. Calculate Real-Time Host CPU% across the iteration interval
                     DateTime currentSampleTime = DateTime.UtcNow;
                     currentProcess.Refresh();
                     TimeSpan currentCpuTime = currentProcess.TotalProcessorTime;
@@ -119,17 +169,15 @@ namespace ZeroGBridge
                     lastCpuTime = currentCpuTime;
                     lastSampleTime = currentSampleTime;
 
-                    // 5. Sample Dedicated Server Physical Working Set RAM
                     long ramBytes = currentProcess.WorkingSet64;
                     string ramFormatted = $"{ramBytes / (1024 * 1024)}MB";
 
                     string preciseTimestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss");
                     string heapStr = (GC.GetTotalMemory(false) / (1024 * 1024)).ToString() + "MB";
                     float fpsVal = 40.0f;
-                    int pfsCount = onlineCount;
+                    int pfsCount = ModMain.LoadedPlayfields != null ? ModMain.LoadedPlayfields.Count : 0;
                     int nwQueueVal = 0;
 
-                    // 6. Safe Engine GameTick Extraction via ModAPI
                     ulong tickCount = 0;
                     if (_modApi?.Application != null)
                     {
@@ -147,40 +195,42 @@ namespace ZeroGBridge
                         tickCount = (ulong)(DateTime.UtcNow.Ticks % 100000);
                     }
 
-                    // 7. Structure JSON Telemetry Payload
-                    var telemetryData = new
+                    var telemetryData = new Dictionary<string, object>
                     {
-                        timestamp = preciseTimestamp,
-                        type = "METRIC",
-                        status = "Active",
-                        uptime = uptimeStr,
-                        heap = heapStr,
-                        fps = fpsVal.ToString("0.0"),
-                        players = onlineCount.ToString(),
-                        pfs = pfsCount.ToString(),
-                        ticks = tickCount.ToString(),
-                        nwqueue = nwQueueVal.ToString(),
-                        cpu = cpuPercent,
-                        ram = ramFormatted,
-                        player_list = onlinePlayers,
-                        player_data = onlinePlayers
+                        { "timestamp", preciseTimestamp },
+                        { "type", "METRIC" },
+                        { "status", "Active" },
+                        { "uptime", uptimeStr },
+                        { "heap", heapStr },
+                        { "fps", fpsVal.ToString("0.0") },
+                        { "players", onlineCount.ToString() },
+                        { "pfs", pfsCount.ToString() },
+                        { "ticks", tickCount.ToString() },
+                        { "nwqueue", nwQueueVal.ToString() },
+                        { "cpu", cpuPercent },
+                        { "ram", ramFormatted },
+                        { "roster_rev", _rosterRevision }
                     };
+                    if (includeRoster)
+                    {
+                        telemetryData["player_list"] = slimRoster;
+                    }
 
                     string jsonLine = JsonConvert.SerializeObject(telemetryData);
 
-                    // 8. Write live metric cache to disk
-                    lock (_fileLock)
+                    if (!string.IsNullOrEmpty(_logFilePath))
                     {
-                        File.WriteAllText(_logFilePath, jsonLine + "\n");
+                        lock (_fileLock)
+                        {
+                            File.WriteAllText(_logFilePath, jsonLine + "\n", Utf8NoBom);
+                        }
                     }
 
-                    // 9. Broadcast JSON packet over TCP socket (Port 30500)
                     if (_telemetryServer != null && _telemetryServer.HasActiveConnections)
                     {
                         _telemetryServer.BroadcastJson(jsonLine);
                     }
 
-                    // 10. Periodic Server Log Trace (Every ~14 seconds)
                     _logCounter++;
                     if (_logCounter >= 7)
                     {
@@ -209,8 +259,51 @@ namespace ZeroGBridge
                     }
                 }
 
-                Thread.Sleep(2000);
+                _stopEvent.Wait(2000);
             }
+        }
+
+        /// <summary>
+        /// Lightweight per-player view for METRIC (no stats / inventory / ban fields).
+        /// Field names match what Admin Helper's PlayerManager.update_from_live_stream reads.
+        /// </summary>
+        private static List<Dictionary<string, object>> BuildSlimRoster(List<PlayerRecord> online)
+        {
+            var list = new List<Dictionary<string, object>>(online.Count);
+            foreach (var p in online)
+            {
+                if (p == null) continue;
+                list.Add(new Dictionary<string, object>
+                {
+                    { "name", p.name },
+                    { "steamId", p.steamId },
+                    { "entityId", p.entityId },
+                    { "status", p.status },
+                    { "faction", p.faction },
+                    { "factionId", p.factionId },
+                    { "playfield", p.playfield },
+                    { "solar_system", p.solar_system },
+                    { "ping", p.ping }
+                });
+            }
+            list.Sort((a, b) => string.CompareOrdinal(Convert.ToString(a["steamId"]) + Convert.ToString(a["name"]),
+                                                      Convert.ToString(b["steamId"]) + Convert.ToString(b["name"])));
+            return list;
+        }
+
+        /// <summary>
+        /// Signature of who is online and where. Ping is excluded on purpose so jitter
+        /// does not force the roster onto every tick; ping refreshes on the periodic resync.
+        /// </summary>
+        private static string BuildRosterSignature(List<Dictionary<string, object>> roster)
+        {
+            var sb = new StringBuilder();
+            foreach (var p in roster)
+            {
+                sb.Append(p["steamId"]).Append('|').Append(p["entityId"]).Append('|').Append(p["name"]).Append('|')
+                  .Append(p["faction"]).Append('|').Append(p["playfield"]).Append(';');
+            }
+            return sb.ToString();
         }
     }
 }

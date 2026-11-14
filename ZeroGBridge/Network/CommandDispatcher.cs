@@ -56,7 +56,7 @@ namespace ZeroGBridge
                     };
 
                     string jsonResponse = JsonConvert.SerializeObject(playerPackage);
-                    Console.WriteLine($"[ZGB] -DEBUG- Dispatching plys payload: {jsonResponse}");
+                    Console.WriteLine($"[ZGB] -DEBUG- Dispatching plys payload: {playerList.Count} player(s), {jsonResponse.Length} bytes");
                     return jsonResponse;
                 }
 
@@ -128,36 +128,32 @@ namespace ZeroGBridge
                         "Kriel", "Trader", "Traders", "Uch", "UCH", "Warlord", "Alien"
                     };
 
+                    // Real live entities from loaded playfields only. Empty list when none are loaded
+                    // (never return the old hardcoded mock structures).
                     List<object> structureSnapshot = new List<object>();
-                    var structures = ModMain.CachedStructures;
-
-                    if (structures == null || structures.IsEmpty)
+                    var records = ModMain.CachedEntityRecords;
+                    if (records != null)
                     {
-                        // Fallback mock data containing only player/player-faction entities
-                        structureSnapshot = new List<object>
+                        foreach (var kvp in records)
                         {
-                            new { id = 1001, name = "Zero-G Outpost Delta", type = "BA", faction = "MEC", playfield = "Akua" },
-                            new { id = 1002, name = "Starlight Vanguard", type = "CV", faction = "MEC", playfield = "Akua Orbit" },
-                            new { id = 1003, name = "Mining Rig Alpha", type = "BA", faction = "TCS", playfield = "Omicron" }
-                        };
-                    }
-                    else
-                    {
-                        foreach (var kvp in structures)
-                        {
-                            var s = kvp.Value;
-                            if (s == null) continue;
+                            var rec = kvp.Value;
+                            if (rec == null) continue;
+                            if (!string.IsNullOrEmpty(rec.faction) && npcBlacklist.Contains(rec.faction))
+                                continue;
 
                             structureSnapshot.Add(new
                             {
-                                id = s.Id,
-                                name = s.ToString(),
-                                type = "Structure",
-                                faction = "MEC",
-                                playfield = "--"
+                                rec.id,
+                                rec.name,
+                                rec.type,
+                                rec.faction,
+                                rec.playfield,
+                                position = rec.position,
+                                pos = rec.position
                             });
                         }
                     }
+
                     return JsonConvert.SerializeObject(new
                     {
                         type = "ENTITY_LIST",
@@ -372,12 +368,13 @@ namespace ZeroGBridge
                 {
                     Console.WriteLine("[ZGB] -ACTION- Processing 'getplayfields' sector query directive from ZAH.");
 
+                    var playfields = ModMain.BuildPlayfieldList();
                     return JsonConvert.SerializeObject(new
                     {
                         type = "PLAYFIELD_LIST",
                         status = "Synced",
                         action = "GetPlayfields",
-                        playfields = new List<string>(), // Populated via ModAPI Event_Playfield_List callback
+                        playfields = playfields,
                         timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
                     });
                 }

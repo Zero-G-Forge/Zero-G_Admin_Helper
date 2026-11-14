@@ -18,7 +18,7 @@
 
     <!-- Dynamic 16-bit Valid UTC-5 (CDT) Version Generation -->
     <MajorVersion>1</MajorVersion>
-    <MinorVersion>0</MinorVersion>
+    <MinorVersion>1</MinorVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
 
@@ -53,6 +53,11 @@
     <Private>false</Private>
     </Reference>
     <Reference Include="System.Data" />
+
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>lib/Additional Libs/UnityEngine.CoreModule.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
   </ItemGroup>
 
 

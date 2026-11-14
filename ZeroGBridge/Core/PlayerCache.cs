@@ -132,24 +132,22 @@ namespace ZeroGBridge
                         int entityId = player.Id; // IPlayer uses .Id, not .EntityId
                         string name = player.Name ?? "Unknown";
 
-                        // FactionData is a struct; check id > 0
-                        int fId = player.Faction.Id;
+                        int fId = 0;
+                        try { fId = player.Faction.Id; } catch { }
+
+                        string facAbbrev = ResolveFactionAbbrev(fId);
                         if (fId > 0)
                         {
-                            // If this factionId exists in our lookup, sync any player records matching it
-                            if (_factionLookup.TryGetValue(fId, out FactionTag fac))
+                            foreach (var existing in _allPlayers.Values)
                             {
-                                foreach (var p in _allPlayers.Values)
+                                if (existing.factionId == fId && existing.faction != facAbbrev)
                                 {
-                                    if (p.factionId == fId)
-                                    {
-                                        p.faction = fac.Abbrev;
-                                    }
+                                    existing.faction = facAbbrev;
                                 }
                             }
                         }
 
-                        AddOrUpdate(steamId, entityId, name, "Online", playfield.Name, player.Ping);
+                        AddOrUpdate(steamId, entityId, name, "Online", playfield.Name, player.Ping, fId, facAbbrev);
                     }
                 }
             }
@@ -159,7 +157,7 @@ namespace ZeroGBridge
             }
         }
 
-        public void AddOrUpdate(string steamId, int entityId, string name, string status = "Online", string playfield = "--", int ping = 0)
+        public void AddOrUpdate(string steamId, int entityId, string name, string status = "Online", string playfield = "--", int ping = 0, int factionId = 0, string faction = null)
         {
             string key = (!string.IsNullOrEmpty(steamId) && steamId != "--") 
                 ? steamId 
@@ -176,11 +174,38 @@ namespace ZeroGBridge
             if (entityId > 0) record.entityId = entityId.ToString();
             if (!string.IsNullOrEmpty(playfield) && playfield != "--") record.playfield = playfield;
 
+            if (factionId > 0)
+            {
+                record.factionId = factionId;
+                if (string.IsNullOrWhiteSpace(faction))
+                {
+                    faction = ResolveFactionAbbrev(factionId);
+                }
+                record.faction = faction;
+            }
+            else if (!string.IsNullOrWhiteSpace(faction))
+            {
+                record.faction = faction;
+            }
+
             record.status = status;
             record.ping = ping;
             record.last_seen = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
 
             SaveToDisk();
+        }
+
+        /// <summary>
+        /// Resolves a FactionData.Id to the known tag abbreviation, or "FAC-{id}" when unknown.
+        /// </summary>
+        public string ResolveFactionAbbrev(int factionId)
+        {
+            if (factionId <= 0) return "None";
+            if (_factionLookup.TryGetValue(factionId, out FactionTag fac))
+            {
+                return fac.Abbrev;
+            }
+            return "FAC-" + factionId;
         }
 
         public void MarkOffline(string identifier)
@@ -604,7 +629,7 @@ namespace ZeroGBridge
                 lock (_diskLock)
                 {
                     string json = JsonConvert.SerializeObject(_allPlayers.Values.ToList(), Formatting.Indented);
-                    File.WriteAllText(_cacheFilePath, json);
+                    File.WriteAllText(_cacheFilePath, json, new System.Text.UTF8Encoding(false));
                 }
             }
             catch (Exception ex)

@@ -138,8 +138,15 @@ class TelemetryWorker(QThread):
         elif pkt_type == "PLAYER_CACHE":
             cache_data = TelemetryParser.extract_player_cache(payload)
             if cache_data:
-                player_roster = cache_data.get("player_list", [])
-                self.players_updated.emit(player_roster)
+                # plys returns the full roster (online + offline). The live-stream slot marks
+                # every entry it receives as Online, so only pass the online subset there;
+                # the full roster is applied via player_cache_received below.
+                player_roster = cache_data.get("player_list", []) or []
+                online_only = [
+                    p for p in player_roster
+                    if isinstance(p, dict) and str(p.get("status", "")).lower() == "online"
+                ]
+                self.players_updated.emit(online_only)
             
             # Emit raw cache package for PlayerRegistryPopup and Admin Console
             self.player_cache_received.emit(payload)
