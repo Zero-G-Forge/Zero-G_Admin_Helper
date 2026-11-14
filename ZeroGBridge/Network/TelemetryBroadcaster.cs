@@ -176,7 +176,12 @@ namespace ZeroGBridge
                     string preciseTimestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss");
                     string heapStr = (GC.GetTotalMemory(false) / (1024 * 1024)).ToString() + "MB";
                     float fpsVal = 40.0f;
-                    int pfsCount = ModMain.LoadedPlayfields != null ? ModMain.LoadedPlayfields.Count : 0;
+                    // Playfields loaded in this process plus those the main server reports as running
+                    var pfNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    if (ModMain.LoadedPlayfields != null) foreach (var k in ModMain.LoadedPlayfields.Keys) pfNames.Add(k);
+                    var view = ModMain.Instance?.ServerView;
+                    if (view != null) foreach (var k in view.RunningPlayfields.Keys) pfNames.Add(k);
+                    int pfsCount = pfNames.Count;
                     int nwQueueVal = 0;
 
                     ulong tickCount = 0;

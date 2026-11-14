@@ -10,8 +10,10 @@ from datetime import datetime, timedelta, timezone
 
 def normalize_faction(raw) -> str:
     """
-    Normalizes a faction tag to the ZeroGBridge 1.2 format: "[ABC]", or "--" for none.
+    Normalizes a faction tag to the ZeroGBridge format: "[ABC]", or "--" for none.
     Older bridge builds and caches mixed "MEC", "[MEC]", "None" and "[---] Unaligned".
+    Faction 1 ("Hum", the default human group) is not a real faction and maps to "--"
+    (ZeroGBridge 1.2 showed it as "[Hum]").
     """
     if raw is None:
         return "--"
@@ -21,10 +23,10 @@ def normalize_faction(raw) -> str:
     if t.startswith("["):
         close = t.find("]")
         inner = (t[1:close] if close > 0 else t.strip("[]")).strip()
-        if not inner or not inner.strip("-"):
+        if not inner or not inner.strip("-") or inner.lower() == "hum":
             return "--"
         return f"[{inner}]"
-    if not t.strip("-"):
+    if not t.strip("-") or t.lower() == "hum":
         return "--"
     return f"[{t}]"
 
@@ -265,9 +267,10 @@ class PlayerManager:
                 target["playfield"] = incoming.get("playfield")
             if incoming.get("solar_system") and incoming.get("solar_system") != "Unknown":
                 target["solar_system"] = incoming.get("solar_system")
-            roster_faction = normalize_faction(incoming.get("faction"))
-            if roster_faction != "--":
-                target["faction"] = roster_faction
+            # The plys roster is the bridge's full record, so its faction is authoritative,
+            # including "--" (clears stale tags such as "[Hum]" from ZeroGBridge 1.2).
+            if "faction" in incoming:
+                target["faction"] = normalize_faction(incoming.get("faction"))
             if incoming.get("role") and incoming.get("role") != "--":
                 target["role"] = incoming.get("role")
 

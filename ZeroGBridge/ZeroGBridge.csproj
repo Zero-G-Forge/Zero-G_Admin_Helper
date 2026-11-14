@@ -18,7 +18,7 @@
 
     <!-- Dynamic 16-bit Valid UTC-5 (CDT) Version Generation -->
     <MajorVersion>1</MajorVersion>
-    <MinorVersion>2</MinorVersion>
+    <MinorVersion>3</MinorVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
 
@@ -35,6 +35,12 @@
   <ItemGroup>
     <Reference Include="ModApi">
       <HintPath>lib/ModApi.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+
+    <!-- GlobalStructureInfo (IApplication.GetStructures) lives in Mif.dll; the game ships it. -->
+    <Reference Include="Mif">
+      <HintPath>lib/Mif.dll</HintPath>
       <Private>False</Private>
     </Reference>
 

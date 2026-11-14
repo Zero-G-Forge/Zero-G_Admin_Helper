@@ -6,6 +6,7 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Linq;
 using System.Collections.Concurrent;
 using System.Threading;
 using Eleon.Modding;
@@ -27,6 +28,16 @@ namespace ZeroGBridge
         public string playfield { get; set; }
         public string position { get; set; }
         public string pos { get { return position; } }
+
+        // "playfield" = live IPlayfield entity (playfield process), "server" = IApplication.GetStructures
+        public string source { get; set; } = "playfield";
+        public bool? powered { get; set; }
+        public int? blocks { get; set; }
+        public int? devices { get; set; }
+
+        // true when fetched by an explicit gents:<playfield> request (kept even if that playfield is not running)
+        [Newtonsoft.Json.JsonIgnore]
+        public bool requested { get; set; }
     }
 
     /// <summary>
@@ -49,6 +60,7 @@ namespace ZeroGBridge
 
         private IModApi _modApi;
         private PlayerCache _playerCache;
+        private ServerView _serverView;
         private CommandDispatcher _commandDispatcher;
         private TelemetryServer _telemetryServer;
         private TelemetryBroadcaster _telemetryBroadcaster;
@@ -58,6 +70,7 @@ namespace ZeroGBridge
         private readonly ConcurrentDictionary<string, EntityDelegate> _entityUnloadedHandlers = new ConcurrentDictionary<string, EntityDelegate>(StringComparer.OrdinalIgnoreCase);
 
         public PlayerCache PlayerCache => _playerCache;
+        public ServerView ServerView => _serverView;
 
         #region IMod Lifecycle Handlers
 
@@ -80,6 +93,7 @@ namespace ZeroGBridge
 
             // 1. Initialize PlayerCache (reads disk cache and hydrates global.db)
             _playerCache = new PlayerCache();
+            _serverView = new ServerView(modApi, _playerCache);
 
             // 2. Wire into pure API v2 playfield lifecycle delegates
             HookApiV2Events();
@@ -96,7 +110,7 @@ namespace ZeroGBridge
                 null,
                 _telemetryServer,
                 _logFilePath,
-                ScanLoadedPlayfields);
+                () => { ScanLoadedPlayfields(); _serverView?.EnsureFresh(); });
             _telemetryBroadcaster.Start();
 
             ZgbLog.Write("[ZGB] -INFO- ZeroGBridge API v2 initialization complete.");
@@ -169,7 +183,8 @@ namespace ZeroGBridge
                 {
                     _modApi.Application.OnPlayfieldLoaded += OnPlayfieldLoaded;
                     _modApi.Application.OnPlayfieldUnloading += OnPlayfieldUnloading;
-                    ZgbLog.Write("[ZGB] -SUCCESS- Registered API v2 OnPlayfieldLoaded and OnPlayfieldUnloading delegates.");
+                    _modApi.Application.Update += OnApplicationUpdate;
+                    ZgbLog.Write("[ZGB] -SUCCESS- Registered API v2 OnPlayfieldLoaded, OnPlayfieldUnloading and Update delegates.");
                 }
             }
             catch (Exception ex)
@@ -186,9 +201,16 @@ namespace ZeroGBridge
                 {
                     _modApi.Application.OnPlayfieldLoaded -= OnPlayfieldLoaded;
                     _modApi.Application.OnPlayfieldUnloading -= OnPlayfieldUnloading;
+                    _modApi.Application.Update -= OnApplicationUpdate;
                 }
             }
             catch { }
+        }
+
+        private void OnApplicationUpdate()
+        {
+            try { _serverView?.OnUpdate(); }
+            catch { /* never let the frame loop see an exception */ }
         }
 
         private void OnPlayfieldLoaded(IPlayfield playfield)
@@ -461,6 +483,26 @@ namespace ZeroGBridge
                     isPvP = pf.IsPvP,
                     loaded = true
                 });
+            }
+
+            // Playfields running in PlayfieldServer processes, as reported to the main server.
+            var view = Instance?._serverView;
+            if (view != null)
+            {
+                var online = Instance?._playerCache?.GetOnlinePlayers() ?? new List<PlayerRecord>();
+                foreach (var kv in view.RunningPlayfields)
+                {
+                    if (!seen.Add(kv.Key)) continue;
+                    string pfName = kv.Key;
+                    results.Add(new
+                    {
+                        name = pfName,
+                        pfServer = kv.Value,
+                        players = online.Count(p => string.Equals(p.playfield, pfName, StringComparison.OrdinalIgnoreCase)),
+                        loaded = true,
+                        source = "server"
+                    });
+                }
             }
 
             // Default: loaded playfields only (the full known list is ~1,750 entries / ~150 KB).

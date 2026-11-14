@@ -117,8 +117,23 @@ namespace ZeroGBridge
                 }
 
                 // 5. Global Structure / Entity Query with NPC Blacklist Filter
-                if (lowerCmd == "gents" || lowerCmd == "structures" || lowerCmd == "getentities")
+                if (lowerCmd == "gents" || lowerCmd == "structures" || lowerCmd == "getentities"
+                    || lowerCmd.StartsWith("gents:") || lowerCmd.StartsWith("structures:"))
                 {
+                    // Optional playfield filter: gents:<playfield name> (also works for a playfield that is not running)
+                    string pfFilter = null;
+                    int colon = cleanCmd.IndexOf(':');
+                    if (colon > 0 && colon < cleanCmd.Length - 1) pfFilter = cleanCmd.Substring(colon + 1).Trim();
+
+                    // Main-process view: refresh structures from IApplication.GetStructures (waits up to 3 s)
+                    var view = ModMain.Instance?.ServerView;
+                    bool viewFresh = true;
+                    if (view != null && view.Enabled)
+                    {
+                        bool stale = DateTime.UtcNow - view.LastStructuresUtc > TimeSpan.FromSeconds(5);
+                        if (stale || !string.IsNullOrEmpty(pfFilter)) viewFresh = view.RefreshStructuresAndWait(pfFilter, 3000);
+                    }
+
                     ZgbLog.Write("[ZGB] -ACTION- Processing 'gents' entity query directive from ZAH.");
 
                     // NPC blacklist for filtering out non-player entities
@@ -130,28 +145,40 @@ namespace ZeroGBridge
 
                     // Real live entities from loaded playfields only. Empty list when none are loaded
                     // (never return the old hardcoded mock structures).
-                    List<object> structureSnapshot = new List<object>();
+                    // Server-wide structures first, then live playfield-process entities (more precise) win.
+                    var merged = new Dictionary<int, EntityRecord>();
+                    if (view != null)
+                    {
+                        foreach (var kvp in view.Structures) if (kvp.Value != null) merged[kvp.Key] = kvp.Value;
+                    }
                     var records = ModMain.CachedEntityRecords;
                     if (records != null)
                     {
-                        foreach (var kvp in records)
-                        {
-                            var rec = kvp.Value;
-                            if (rec == null) continue;
-                            if (!string.IsNullOrEmpty(rec.faction) && npcBlacklist.Contains(rec.faction.Trim('[', ']')))
-                                continue;
+                        foreach (var kvp in records) if (kvp.Value != null) merged[kvp.Key] = kvp.Value;
+                    }
 
-                            structureSnapshot.Add(new
-                            {
-                                rec.id,
-                                rec.name,
-                                rec.type,
-                                rec.faction,
-                                rec.playfield,
-                                position = rec.position,
-                                pos = rec.position
-                            });
-                        }
+                    List<object> structureSnapshot = new List<object>();
+                    foreach (var rec in merged.Values.OrderBy(r => r.playfield).ThenBy(r => r.name))
+                    {
+                        if (!string.IsNullOrEmpty(rec.faction) && npcBlacklist.Contains(rec.faction.Trim('[', ']')))
+                            continue;
+                        if (!string.IsNullOrEmpty(pfFilter) && !string.Equals(rec.playfield, pfFilter, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        structureSnapshot.Add(new
+                        {
+                            rec.id,
+                            rec.name,
+                            rec.type,
+                            rec.faction,
+                            rec.playfield,
+                            position = rec.position,
+                            pos = rec.position,
+                            rec.source,
+                            rec.powered,
+                            rec.blocks,
+                            rec.devices
+                        });
                     }
 
                     return JsonConvert.SerializeObject(new
@@ -160,6 +187,9 @@ namespace ZeroGBridge
                         status = "Synced",
                         action = "GetEntities",
                         timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
+                        playfield = pfFilter,
+                        count = structureSnapshot.Count,
+                        fresh = viewFresh,
                         entities = structureSnapshot
                     });
                 }

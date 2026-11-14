@@ -88,7 +88,7 @@ namespace ZeroGBridge
         private void RegisterServerFactions()
         {
             // Seed verified persistent server factions
-            _factionLookup[1]   = new FactionTag { FactionId = 1,   Abbrev = "Hum", Name = "Human" };
+            // Faction 1 ("Hum", the default human group) is not a real faction: shown as "--".
             _factionLookup[100] = new FactionTag { FactionId = 100, Abbrev = "MEC", Name = "The Mechanics" };
             _factionLookup[101] = new FactionTag { FactionId = 101, Abbrev = "TCS", Name = "Tin Can Sailors" };
             _factionLookup[102] = new FactionTag { FactionId = 102, Abbrev = "=A=", Name = "Ascension Alliance" };
@@ -292,7 +292,7 @@ namespace ZeroGBridge
         /// </summary>
         public string ResolveFactionAbbrev(int factionId)
         {
-            if (factionId <= 0) return NoFaction;
+            if (factionId <= DefaultHumanFactionId) return NoFaction;
             if (_factionLookup.TryGetValue(factionId, out FactionTag fac))
             {
                 string abbrev = !string.IsNullOrWhiteSpace(fac.Abbrev) ? fac.Abbrev : fac.Name;
@@ -303,6 +303,9 @@ namespace ZeroGBridge
         }
 
         public const string NoFaction = "--";
+
+        /// <summary>Faction id 1 is the default human group every unaligned player belongs to.</summary>
+        public const int DefaultHumanFactionId = 1;
 
         /// <summary>
         /// Normalizes a free-form tag to "[ABC]" (or "--" for none). Handles old cache values
@@ -319,11 +322,65 @@ namespace ZeroGBridge
                 int close = t.IndexOf(']');
                 string inner = close > 0 ? t.Substring(1, close - 1).Trim() : t.Trim('[', ']').Trim();
                 if (inner.Length == 0 || inner.Trim('-').Length == 0) return NoFaction; // "[---] Unaligned"
+                if (inner.Equals("Hum", StringComparison.OrdinalIgnoreCase)) return NoFaction; // 1.2 showed faction 1 as [Hum]
                 return "[" + inner + "]";
             }
 
             if (t.Trim('-').Length == 0) return NoFaction;
+            if (t.Equals("Hum", StringComparison.OrdinalIgnoreCase)) return NoFaction;
             return "[" + t + "]";
+        }
+
+        /// <summary>
+        /// Applies the main server's online list (IApplication.GetPlayerEntityIds/GetPlayerDataFor).
+        /// That list is authoritative in the DedicatedServer process: listed players are Online,
+        /// everyone else who was Online goes Offline. players.json is written only on changes.
+        /// </summary>
+        public int SyncOnlineFromServer(IList<PlayerData> online)
+        {
+            if (online == null) return 0;
+            string now = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+            var present = new HashSet<PlayerRecord>();
+            bool changed = false;
+
+            foreach (var pd in online)
+            {
+                string steamId = string.IsNullOrWhiteSpace(pd.SteamId) ? "" : pd.SteamId.Trim();
+                string name = pd.PlayerName ?? "";
+                PlayerRecord record = null;
+
+                if (steamId.Length > 0 && steamId != "--")
+                {
+                    record = _allPlayers.GetOrAdd(steamId, k => { changed = true; return new PlayerRecord(); });
+                }
+                else
+                {
+                    string eid = pd.EntityId.ToString();
+                    record = _allPlayers.Values.FirstOrDefault(p => p.entityId == eid)
+                          ?? _allPlayers.GetOrAdd(!string.IsNullOrEmpty(name) ? name : eid, k => { changed = true; return new PlayerRecord(); });
+                }
+
+                if (!string.IsNullOrEmpty(name) && !name.StartsWith("Player_") && record.name != name) { record.name = name; changed = true; }
+                if (steamId.Length > 0 && record.steamId != steamId) { record.steamId = steamId; changed = true; }
+                if (pd.EntityId > 0 && record.entityId != pd.EntityId.ToString()) { record.entityId = pd.EntityId.ToString(); changed = true; }
+                if (!string.IsNullOrEmpty(pd.PlayfieldName) && record.playfield != pd.PlayfieldName) { record.playfield = pd.PlayfieldName; changed = true; }
+                if (record.status != "Online") { record.status = "Online"; changed = true; }
+                record.last_seen = now;
+                present.Add(record);
+            }
+
+            foreach (var p in _allPlayers.Values)
+            {
+                if (p.status == "Online" && !present.Contains(p))
+                {
+                    p.status = "Offline";
+                    p.last_seen = now;
+                    changed = true;
+                }
+            }
+
+            if (changed) SaveToDisk();
+            return present.Count;
         }
 
         public void MarkOffline(string identifier)
@@ -785,7 +842,15 @@ namespace ZeroGBridge
                 if (logoffCol == null && loginCol == null) return 0;
 
                 var slices = GlobalDbTime.LoadServerStartStop(connection, GetColumns(connection, "ServerStartStop"));
+                DateTime nowUtc = DateTime.UtcNow;
+                ulong gameTicks = 0;
+                try { gameTicks = ModMain.ModApiInstance?.Application?.GameTicks ?? 0UL; } catch { }
+                DateTime? procStart = null;
+                try { procStart = System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime(); } catch { }
+                GlobalDbTime.Calibrate(slices, gameTicks, nowUtc, procStart);
+                ZgbLog.Write($"[ZGB] -INFO- global.db time calibration: {GlobalDbTime.CalibrationNote}");
                 TimeSpan tz = GlobalDbTime.LatestOffset;
+                int future = 0;
 
                 string a = logoffCol != null ? "MAX(\"" + logoffCol + "\")" : "NULL";
                 string b = loginCol != null ? "MAX(\"" + loginCol + "\")" : "NULL";
@@ -804,6 +869,14 @@ namespace ZeroGBridge
                         DateTime? on = GlobalDbTime.ToUtc(reader.IsDBNull(2) ? null : reader.GetValue(2), slices, tz);
                         DateTime? best = off.HasValue && on.HasValue ? (off.Value > on.Value ? off : on) : (off ?? on);
                         if (!best.HasValue) continue;
+                        if (!GlobalDbTime.NotInFuture(best, nowUtc).HasValue)
+                        {
+                            // Never report a future last_seen; fall back to the other value if it is sane.
+                            DateTime? alt = best == off ? GlobalDbTime.NotInFuture(on, nowUtc) : GlobalDbTime.NotInFuture(off, nowUtc);
+                            future++;
+                            if (!alt.HasValue) continue;
+                            best = alt;
+                        }
 
                         if (!_allPlayers.TryGetValue(steamId, out PlayerRecord rec)) continue;
 
@@ -817,6 +890,7 @@ namespace ZeroGBridge
                         }
                     }
                 }
+                if (future > 0) ZgbLog.Write($"[ZGB] -WARN- {future} last_seen value(s) from global.db were in the future and were not used.");
                 return filled;
             }
             catch (Exception ex)
