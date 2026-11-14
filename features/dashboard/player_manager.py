@@ -8,6 +8,27 @@ import json
 from datetime import datetime, timedelta, timezone
 
 
+def normalize_faction(raw) -> str:
+    """
+    Normalizes a faction tag to the ZeroGBridge 1.2 format: "[ABC]", or "--" for none.
+    Older bridge builds and caches mixed "MEC", "[MEC]", "None" and "[---] Unaligned".
+    """
+    if raw is None:
+        return "--"
+    t = str(raw).strip()
+    if not t or t == "--" or t.lower() == "none":
+        return "--"
+    if t.startswith("["):
+        close = t.find("]")
+        inner = (t[1:close] if close > 0 else t.strip("[]")).strip()
+        if not inner or not inner.strip("-"):
+            return "--"
+        return f"[{inner}]"
+    if not t.strip("-"):
+        return "--"
+    return f"[{t}]"
+
+
 class PlayerManager:
     """
     Manages persistent local storage and real-time state synchronization
@@ -99,7 +120,7 @@ class PlayerManager:
                         record["steamId"] = steam_id if steam_id else record.get("steamId", "--")
                         record["entityId"] = p_id if p_id else record.get("entityId", "--")
                         record["status"] = p.get("status") or p.get("active", record.get("status", "Offline"))
-                        record["faction"] = p.get("faction") or record.get("faction", "--")
+                        record["faction"] = normalize_faction(p.get("faction") or record.get("faction", "--"))
                         record["role"] = p.get("role", record.get("role", "Member"))
                         record["solar_system"] = p.get("solar_system") or p.get("system", record.get("solar_system", "Unknown"))
                         record["playfield"] = p.get("playfield") or record.get("playfield", "--")
@@ -176,8 +197,9 @@ class PlayerManager:
                 target["name"] = name
 
             # Update location and faction if provided by live stream
-            if p.get("faction") and p.get("faction") not in ("--", "None"):
-                target["faction"] = p.get("faction")
+            live_faction = normalize_faction(p.get("faction"))
+            if live_faction != "--":
+                target["faction"] = live_faction
             if p.get("playfield") and p.get("playfield") not in ("--", "Unknown"):
                 target["playfield"] = p.get("playfield")
             if p.get("solar_system") and p.get("solar_system") not in ("--", "Unknown"):
@@ -243,8 +265,9 @@ class PlayerManager:
                 target["playfield"] = incoming.get("playfield")
             if incoming.get("solar_system") and incoming.get("solar_system") != "Unknown":
                 target["solar_system"] = incoming.get("solar_system")
-            if incoming.get("faction") and incoming.get("faction") != "--":
-                target["faction"] = incoming.get("faction")
+            roster_faction = normalize_faction(incoming.get("faction"))
+            if roster_faction != "--":
+                target["faction"] = roster_faction
             if incoming.get("role") and incoming.get("role") != "--":
                 target["role"] = incoming.get("role")
 

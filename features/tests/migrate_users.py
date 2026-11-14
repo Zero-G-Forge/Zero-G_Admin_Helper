@@ -1,3 +1,7 @@
+import os
+
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # app root
+os.makedirs(os.path.join(_APP_ROOT, "data"), exist_ok=True)
 # migrate_users.py
 
 import json
@@ -19,7 +23,7 @@ plaintext_users = [
 sec = SecurityModule()
 encrypted_blob = sec.encrypt_data(json.dumps(plaintext_users, indent=4))
 
-with open("data/users.json", "w") as f:
+with open(os.path.join(_APP_ROOT, "data", "users.json"), "w") as f:
     f.write(encrypted_blob)
 
 print("[SUCCESS] users.json has been migrated to encrypted format.")

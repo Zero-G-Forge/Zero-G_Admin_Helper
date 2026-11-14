@@ -51,9 +51,10 @@ class TelemetryWorker(QThread):
         """
         Main worker execution loop. Connects to the server socket and buffers stream lines.
         """
-        buffer = ""
-
         while self._is_running:
+            # Fresh byte buffer per connection so a partial line from a dropped
+            # session can't corrupt the first packet of the next one.
+            buffer = b""
             try:
                 print(f"[TelemetryWorker] -INFO- Connecting to ZeroGBridge socket at {self.host}:{self.port}...")
                 self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -76,18 +77,22 @@ class TelemetryWorker(QThread):
                             print("[TelemetryWorker] -WARN- Server closed the connection stream.")
                             break
 
-                        buffer += data.decode("utf-8", errors="replace")
-
-                        # Split stream on newline boundary
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            self._process_line(line.strip())
+                        # Buffer raw bytes and decode per complete line, so a multi-byte
+                        # UTF-8 character split across two recv() chunks stays intact
+                        # (getplayfields replies are ~150 KB, plys ~20 KB).
+                        buffer += data
+                        while b"\n" in buffer:
+                            raw_line, buffer = buffer.split(b"\n", 1)
+                            self._process_line(raw_line.decode("utf-8", errors="replace").strip())
 
                     except socket.timeout:
                         # Timeout is expected; loop continues to evaluate _is_running
                         continue
 
             except Exception as err:
+                if not self._is_running:
+                    # stop() closed the socket under recv(); this is a normal shutdown.
+                    break
                 self.connection_status.emit(False, f"Disconnected: {err}")
                 print(f"[TelemetryWorker] -ERROR- Socket connection error: {err}")
 
@@ -122,9 +127,10 @@ class TelemetryWorker(QThread):
 
         pkt_type = payload.get("type")
 
-        # Selective debug printing to suppress high-frequency metric heartbeat flood
+        # Selective debug printing: skip the 2-second METRIC heartbeat, cap long replies
         if pkt_type != "METRIC":
-            print(f"[TelemetryWorker << RAW] {line}")
+            preview = line if len(line) <= 300 else f"{line[:300]}... ({len(line)} chars)"
+            print(f"[TelemetryWorker << RAW] {preview}")
 
         # 1. Route METRIC packets (2-second heartbeat stream)
         if pkt_type == "METRIC":
@@ -139,8 +145,15 @@ class TelemetryWorker(QThread):
         elif pkt_type == "PLAYER_CACHE":
             cache_data = TelemetryParser.extract_player_cache(payload)
             if cache_data:
-                player_roster = cache_data.get("player_list", [])
-                self.players_updated.emit(player_roster)
+                # plys returns the full roster (online + offline). The live-stream slot marks
+                # every entry it receives as Online, so only pass the online subset there;
+                # the full roster is applied via player_cache_received below.
+                player_roster = cache_data.get("player_list", []) or []
+                online_only = [
+                    p for p in player_roster
+                    if isinstance(p, dict) and str(p.get("status", "")).lower() == "online"
+                ]
+                self.players_updated.emit(online_only)
             
             # Emit raw cache package for PlayerRegistryPopup and Admin Console
             self.player_cache_received.emit(payload)

@@ -37,7 +37,7 @@ namespace ZeroGBridge
                 string lowerCmd = cleanCmd.ToLowerInvariant();
 
                 // Live server console trace
-                Console.WriteLine($"[ZGB] -INFO- Received command from ZAH: \"{cleanCmd}\"");
+                ZgbLog.Write($"[ZGB] -INFO- Received command from ZAH: \"{cleanCmd}\"");
 
                 // 1. Handle live player roster query (CmdId.Request_Player_List)
                 if (lowerCmd == "plys")
@@ -56,7 +56,7 @@ namespace ZeroGBridge
                     };
 
                     string jsonResponse = JsonConvert.SerializeObject(playerPackage);
-                    Console.WriteLine($"[ZGB] -DEBUG- Dispatching plys payload: {jsonResponse}");
+                    ZgbLog.Write($"[ZGB] -DEBUG- Dispatching plys payload: {playerList.Count} player(s), {jsonResponse.Length} bytes");
                     return jsonResponse;
                 }
 
@@ -89,7 +89,7 @@ namespace ZeroGBridge
                 // 3. Handle "save" / "backup" command
                 if (lowerCmd == "save" || lowerCmd == "backup")
                 {
-                    Console.WriteLine("[ZGB] -ACTION- Received manual 'save' directive from ZAH.");
+                    ZgbLog.Write("[ZGB] -ACTION- Received manual 'save' directive from ZAH.");
 
                     return JsonConvert.SerializeObject(new
                     {
@@ -104,7 +104,7 @@ namespace ZeroGBridge
                 // 4. Handle "restart" command
                 if (lowerCmd == "restart")
                 {
-                    Console.WriteLine("[ZGB] -ACTION- Received manual 'restart' directive from ZAH.");
+                    ZgbLog.Write("[ZGB] -ACTION- Received manual 'restart' directive from ZAH.");
 
                     return JsonConvert.SerializeObject(new
                     {
@@ -119,7 +119,7 @@ namespace ZeroGBridge
                 // 5. Global Structure / Entity Query with NPC Blacklist Filter
                 if (lowerCmd == "gents" || lowerCmd == "structures" || lowerCmd == "getentities")
                 {
-                    Console.WriteLine("[ZGB] -ACTION- Processing 'gents' entity query directive from ZAH.");
+                    ZgbLog.Write("[ZGB] -ACTION- Processing 'gents' entity query directive from ZAH.");
 
                     // NPC blacklist for filtering out non-player entities
                     var npcBlacklist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -128,36 +128,32 @@ namespace ZeroGBridge
                         "Kriel", "Trader", "Traders", "Uch", "UCH", "Warlord", "Alien"
                     };
 
+                    // Real live entities from loaded playfields only. Empty list when none are loaded
+                    // (never return the old hardcoded mock structures).
                     List<object> structureSnapshot = new List<object>();
-                    var structures = ModMain.CachedStructures;
-
-                    if (structures == null || structures.IsEmpty)
+                    var records = ModMain.CachedEntityRecords;
+                    if (records != null)
                     {
-                        // Fallback mock data containing only player/player-faction entities
-                        structureSnapshot = new List<object>
+                        foreach (var kvp in records)
                         {
-                            new { id = 1001, name = "Zero-G Outpost Delta", type = "BA", faction = "MEC", playfield = "Akua" },
-                            new { id = 1002, name = "Starlight Vanguard", type = "CV", faction = "MEC", playfield = "Akua Orbit" },
-                            new { id = 1003, name = "Mining Rig Alpha", type = "BA", faction = "TCS", playfield = "Omicron" }
-                        };
-                    }
-                    else
-                    {
-                        foreach (var kvp in structures)
-                        {
-                            var s = kvp.Value;
-                            if (s == null) continue;
+                            var rec = kvp.Value;
+                            if (rec == null) continue;
+                            if (!string.IsNullOrEmpty(rec.faction) && npcBlacklist.Contains(rec.faction.Trim('[', ']')))
+                                continue;
 
                             structureSnapshot.Add(new
                             {
-                                id = s.Id,
-                                name = s.ToString(),
-                                type = "Structure",
-                                faction = "MEC",
-                                playfield = "--"
+                                rec.id,
+                                rec.name,
+                                rec.type,
+                                rec.faction,
+                                rec.playfield,
+                                position = rec.position,
+                                pos = rec.position
                             });
                         }
                     }
+
                     return JsonConvert.SerializeObject(new
                     {
                         type = "ENTITY_LIST",
@@ -176,7 +172,7 @@ namespace ZeroGBridge
 
                     if (int.TryParse(idStr, out int structureId))
                     {
-                        Console.WriteLine($"[ZGB] -ACTION- Executing Structure Touch on Entity ID: {structureId}");
+                        ZgbLog.Write($"[ZGB] -ACTION- Executing Structure Touch on Entity ID: {structureId}");
 
                         return JsonConvert.SerializeObject(new
                         {
@@ -200,7 +196,7 @@ namespace ZeroGBridge
 
                     if (int.TryParse(idStr, out int entityId))
                     {
-                        Console.WriteLine($"[ZGB] -ACTION- Executing Entity Destroy directive on Entity ID: {entityId}");
+                        ZgbLog.Write($"[ZGB] -ACTION- Executing Entity Destroy directive on Entity ID: {entityId}");
 
                         return JsonConvert.SerializeObject(new
                         {
@@ -222,7 +218,7 @@ namespace ZeroGBridge
                     int colonIdx = cleanCmd.IndexOf(':');
                     string broadcastMsg = cleanCmd.Substring(colonIdx + 1).Trim();
 
-                    Console.WriteLine($"[ZGB] -ACTION- Executing server-wide broadcast: \"{broadcastMsg}\"");
+                    ZgbLog.Write($"[ZGB] -ACTION- Executing server-wide broadcast: \"{broadcastMsg}\"");
 
                     return JsonConvert.SerializeObject(new
                     {
@@ -246,7 +242,7 @@ namespace ZeroGBridge
                     if (parts.Length >= 2 && int.TryParse(parts[0].Trim(), out int targetEntityId))
                     {
                         string messageText = parts[1].Trim();
-                        Console.WriteLine($"[ZGB] -ACTION- Direct message to Entity [{targetEntityId}]: \"{messageText}\"");
+                        ZgbLog.Write($"[ZGB] -ACTION- Direct message to Entity [{targetEntityId}]: \"{messageText}\"");
 
                         return JsonConvert.SerializeObject(new
                         {
@@ -273,7 +269,7 @@ namespace ZeroGBridge
                     if (parts.Length >= 2 && int.TryParse(parts[0].Trim(), out int factionId))
                     {
                         string messageText = parts[1].Trim();
-                        Console.WriteLine($"[ZGB] -ACTION- Message to Faction [{factionId}]: \"{messageText}\"");
+                        ZgbLog.Write($"[ZGB] -ACTION- Message to Faction [{factionId}]: \"{messageText}\"");
 
                         return JsonConvert.SerializeObject(new
                         {
@@ -298,7 +294,7 @@ namespace ZeroGBridge
 
                     if (int.TryParse(idStr, out int targetEntityId))
                     {
-                        Console.WriteLine($"[ZGB] -ACTION- Querying credit balance for Entity ID: {targetEntityId}");
+                        ZgbLog.Write($"[ZGB] -ACTION- Querying credit balance for Entity ID: {targetEntityId}");
 
                         return JsonConvert.SerializeObject(new
                         {
@@ -325,7 +321,7 @@ namespace ZeroGBridge
                     if (parts.Length >= 2 && int.TryParse(parts[0].Trim(), out int targetEntityId) && long.TryParse(parts[1].Trim(), out long amount))
                     {
                         string creditAction = lowerCmd.StartsWith("setcredits:") ? "SetCredits" : "AddCredits";
-                        Console.WriteLine($"[ZGB] -ACTION- Executing {creditAction} ({amount}) on Entity ID: {targetEntityId}");
+                        ZgbLog.Write($"[ZGB] -ACTION- Executing {creditAction} ({amount}) on Entity ID: {targetEntityId}");
 
                         return JsonConvert.SerializeObject(new
                         {
@@ -351,7 +347,7 @@ namespace ZeroGBridge
 
                     if (int.TryParse(idStr, out int targetEntityId))
                     {
-                        Console.WriteLine($"[ZGB] -ACTION- Querying inventory payload for Entity ID: {targetEntityId}");
+                        ZgbLog.Write($"[ZGB] -ACTION- Querying inventory payload for Entity ID: {targetEntityId}");
 
                         return JsonConvert.SerializeObject(new
                         {
@@ -368,16 +364,23 @@ namespace ZeroGBridge
                 }
 
                 // 14. Stage 4: Query All Playfields (CmdId.Request_Playfield_List)
-                if (lowerCmd == "getplayfields" || lowerCmd == "pfs" || lowerCmd == "playfields")
+                // getplayfields      -> loaded playfields only (default, small)
+                // getplayfields:all  -> loaded + every known playfield (GetAllPlayfields/GetPfServerInfos)
+                if (lowerCmd == "getplayfields" || lowerCmd == "pfs" || lowerCmd == "playfields"
+                    || lowerCmd == "getplayfields:all" || lowerCmd == "pfs:all" || lowerCmd == "playfields:all")
                 {
-                    Console.WriteLine("[ZGB] -ACTION- Processing 'getplayfields' sector query directive from ZAH.");
+                    bool includeAll = lowerCmd.EndsWith(":all");
+                    ZgbLog.Write($"[ZGB] -ACTION- Processing 'getplayfields' ({(includeAll ? "all" : "loaded")}) sector query directive from ZAH.");
 
+                    var playfields = ModMain.BuildPlayfieldList(includeAll);
                     return JsonConvert.SerializeObject(new
                     {
                         type = "PLAYFIELD_LIST",
                         status = "Synced",
                         action = "GetPlayfields",
-                        playfields = new List<string>(), // Populated via ModAPI Event_Playfield_List callback
+                        scope = includeAll ? "all" : "loaded",
+                        count = playfields.Count,
+                        playfields = playfields,
                         timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss")
                     });
                 }
@@ -391,7 +394,7 @@ namespace ZeroGBridge
 
                     if (!string.IsNullOrEmpty(playfieldName))
                     {
-                        Console.WriteLine($"[ZGB] -ACTION- Querying statistics for Playfield: \"{playfieldName}\"");
+                        ZgbLog.Write($"[ZGB] -ACTION- Querying statistics for Playfield: \"{playfieldName}\"");
 
                         return JsonConvert.SerializeObject(new
                         {
@@ -416,7 +419,7 @@ namespace ZeroGBridge
 
                     if (!string.IsNullOrEmpty(playfieldName))
                     {
-                        Console.WriteLine($"[ZGB] -ACTION- Querying active entities for Playfield: \"{playfieldName}\"");
+                        ZgbLog.Write($"[ZGB] -ACTION- Querying active entities for Playfield: \"{playfieldName}\"");
 
                         return JsonConvert.SerializeObject(new
                         {
@@ -441,7 +444,7 @@ namespace ZeroGBridge
 
                     if (!string.IsNullOrEmpty(playfieldName))
                     {
-                        Console.WriteLine($"[ZGB] -ACTION- Queuing load request for Playfield: \"{playfieldName}\"");
+                        ZgbLog.Write($"[ZGB] -ACTION- Queuing load request for Playfield: \"{playfieldName}\"");
 
                         return JsonConvert.SerializeObject(new
                         {
@@ -461,7 +464,7 @@ namespace ZeroGBridge
                 if (lowerCmd.StartsWith("cmd:") || lowerCmd.StartsWith("exec:"))
                 {
                     string innerCommand = cleanCmd.Substring(cleanCmd.IndexOf(':') + 1).Trim();
-                    Console.WriteLine($"[ZGB] -ACTION- Executing proxied console command: \"{innerCommand}\"");
+                    ZgbLog.Write($"[ZGB] -ACTION- Executing proxied console command: \"{innerCommand}\"");
 
                     // If modern IModApi instance is accessible, execute internally
                     try
@@ -474,7 +477,7 @@ namespace ZeroGBridge
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[ZGB] -WARN- Console execution exception: {ex.Message}");
+                        ZgbLog.Write($"[ZGB] -WARN- Console execution exception: {ex.Message}");
                     }
 
                     return JsonConvert.SerializeObject(new 

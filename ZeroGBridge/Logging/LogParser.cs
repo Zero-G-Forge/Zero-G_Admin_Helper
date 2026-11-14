@@ -57,7 +57,7 @@ namespace ZeroGBridge
 
                     // Match AddOrUpdate signature: (steamId, entityId, name, status, playfield, ping)
                     _playerCache.AddOrUpdate(steamId, eid, name, "Online", "--", 0);
-                    Console.WriteLine($"[ZGB] -INFO- Player Verified & Cached: {name} (Steam: {steamId}, EId: {eid})");
+                    ZgbLog.Write($"[ZGB] -INFO- Player Verified & Cached: {name} (Steam: {steamId}, EId: {eid})");
                     return;
                 }
 
@@ -76,13 +76,13 @@ namespace ZeroGBridge
                     if (!string.IsNullOrEmpty(targetIdentifier))
                     {
                         _playerCache.MarkOffline(targetIdentifier);
-                        Console.WriteLine($"[ZGB] -INFO- Player Disconnected & Marked Offline: ({targetIdentifier})");
+                        ZgbLog.Write($"[ZGB] -INFO- Player Disconnected & Marked Offline: ({targetIdentifier})");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- Exception in LogParser.IngestLine: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -ERROR- Exception in LogParser.IngestLine: {ex.Message}");
             }
         }
     }

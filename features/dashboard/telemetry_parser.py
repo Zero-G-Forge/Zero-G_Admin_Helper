@@ -16,12 +16,13 @@ class TelemetryParser:
     def parse_raw_line(line: str) -> Optional[Dict[str, Any]]:
         """
         Parses a raw line string into a structured dictionary.
-        Returns None if the line is empty or malformed.
+        Returns None if the line is empty or malformed. A leading UTF-8 BOM is still
+        ignored defensively (older bridge builds emitted one on the first packet).
         """
         if not line or not line.strip():
             return None
 
-        clean_line = line.strip()
+        clean_line = line.strip().lstrip("﻿").strip()
 
         try:
             payload = json.loads(clean_line)
@@ -53,7 +54,7 @@ class TelemetryParser:
             raw_ram = data.get("ram", data.get("server_ram", "--"))
             ram_val = str(raw_ram).strip()
 
-            return {
+            metric = {
                 "timestamp": data.get("timestamp", ""),
                 "status": data.get("status", "Active"),
                 "uptime": data.get("uptime", "00h:00m"),
@@ -65,8 +66,14 @@ class TelemetryParser:
                 "nwqueue": int(data.get("nwqueue", 0)),
                 "cpu": cpu_val,
                 "ram": ram_val,
-                "player_list": data.get("player_list", []),
+                "roster_rev": int(data.get("roster_rev", 0) or 0),
             }
+            # ZeroGBridge 1.1+ only attaches player_list when the online roster changed,
+            # a client just authenticated, or on a ~30s resync. Only forward it when present,
+            # otherwise an empty default would mark every player Offline on each heartbeat.
+            if isinstance(data.get("player_list"), list):
+                metric["player_list"] = data["player_list"]
+            return metric
         except (ValueError, TypeError) as err:
             print(f"[TelemetryParser] -ERROR- Failed to normalize METRIC packet: {err}")
             return None

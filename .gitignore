@@ -13,6 +13,7 @@ __pycache__/
 # Exclude local runtime data
 data/
 *.json
+!ZeroGBridge/ZeroGBridge.json
 
 # Allow Python files inside the data directory
 !data/*.py

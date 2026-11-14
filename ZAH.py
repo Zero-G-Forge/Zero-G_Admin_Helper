@@ -5,6 +5,7 @@ import sys
 import json
 from PyQt6.QtWidgets import QApplication, QDialog
 from PyQt6.QtCore import QEventLoop, QCoreApplication
+from PyQt6.QtGui import QIcon
 
 # Internal imports for registry modules
 from features.network.connection import is_network_ready
@@ -55,6 +56,14 @@ def main():
 
     # Dynamic Project Root Asset Traversal for the CSS Stylesheet
     root_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Application icon (used for every window and the taskbar)
+    icon_path = os.path.join(root_dir, "assets/branding/ZG_AdminHelper.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+        print("[SUCCESS] Application icon applied: ZG_AdminHelper.png")
+    else:
+        print(f"[WARNING] Application icon missing at: {icon_path}")
     css_path = os.path.join(root_dir, "assets/ZAH.css")
 
     # Ingest the centralized stylesheet via an immutable read stream

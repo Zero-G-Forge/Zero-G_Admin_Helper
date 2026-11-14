@@ -11,11 +11,14 @@ namespace ZeroGBridge
 {
     /// <summary>
     /// Represents an active connected client session and its authentication status.
+    /// A single StreamWriter is used for every write to this client.
     /// </summary>
     public class ClientSession
     {
         public string ClientId { get; set; }
         public TcpClient Client { get; set; }
+        public StreamWriter Writer { get; set; }
+        public readonly object WriteLock = new object();
         public bool IsAuthenticated { get; set; }
         public DateTime ConnectedAt { get; set; }
     }
@@ -26,17 +29,25 @@ namespace ZeroGBridge
     /// </summary>
     public class TelemetryServer
     {
+        private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
+
         private readonly int _port;
         private readonly CommandDispatcher _commandDispatcher;
         private readonly string _serverPassword;
         private TcpListener _listener;
         private Thread _listenerThread;
-        private bool _isRunning;
+        private volatile bool _isRunning;
+        private readonly ManualResetEventSlim _stopEvent = new ManualResetEventSlim(false);
 
         // Thread-safe map of active client sessions
         private readonly ConcurrentDictionary<string, ClientSession> _connectedSessions = new ConcurrentDictionary<string, ClientSession>();
 
         public bool HasActiveConnections => !_connectedSessions.IsEmpty;
+
+        // Incremented on every successful auth. TelemetryBroadcaster watches it so a newly
+        // connected client receives the online roster on the next METRIC tick.
+        private int _authGeneration;
+        public int AuthGeneration => Volatile.Read(ref _authGeneration);
 
         public TelemetryServer(int port, CommandDispatcher commandDispatcher, string serverPassword = "ZeroGAdmin2026")
         {
@@ -51,6 +62,7 @@ namespace ZeroGBridge
         public void Start()
         {
             _isRunning = true;
+            _stopEvent.Reset();
             _listenerThread = new Thread(ListenForClients)
             {
                 IsBackground = true,
@@ -65,7 +77,7 @@ namespace ZeroGBridge
             {
                 _listener = new TcpListener(IPAddress.Any, _port);
                 _listener.Start();
-                Console.WriteLine($"[ZGB] -STATUS- TelemetryServer listening on port {_port} with password protection enabled.");
+                ZgbLog.Write($"[ZGB] -STATUS- TelemetryServer listening on port {_port} with password protection enabled. Owner: {ModMain.DescribeProcess()}");
 
                 while (_isRunning)
                 {
@@ -89,13 +101,16 @@ namespace ZeroGBridge
                     }
                     else
                     {
-                        Thread.Sleep(100);
+                        _stopEvent.Wait(100);
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- TelemetryServer listener exception: {ex.Message}");
+                if (_isRunning)
+                {
+                    ZgbLog.Write($"[ZGB] -ERROR- TelemetryServer listener exception on port {_port}: {ex.Message} ({ModMain.DescribeProcess()}). If the port is in use, another ZeroGBridge process already owns it.");
+                }
             }
         }
 
@@ -103,16 +118,21 @@ namespace ZeroGBridge
         {
             try
             {
-                using (NetworkStream stream = session.Client.GetStream())
-                using (StreamReader reader = new StreamReader(stream, Encoding.UTF8))
-                using (StreamWriter writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true })
+                NetworkStream stream = session.Client.GetStream();
+                using (StreamReader reader = new StreamReader(stream, Utf8NoBom, detectEncodingFromByteOrderMarks: false, 1024, leaveOpen: true))
+                using (StreamWriter writer = new StreamWriter(stream, Utf8NoBom, 1024, leaveOpen: true) { AutoFlush = true })
                 {
+                    session.Writer = writer;
+
                     string line;
                     while (_isRunning && session.Client.Connected && (line = reader.ReadLine()) != null)
                     {
                         if (string.IsNullOrEmpty(line)) continue;
 
-                        string trimmedLine = line.Trim();
+                        // Tolerate a client that prefixes its first line with a UTF-8 BOM
+                        // (e.g. .NET StreamWriter with Encoding.UTF8); the bridge never emits one.
+                        string trimmedLine = line.Trim().TrimStart('\uFEFF').Trim();
+                        if (trimmedLine.Length == 0) continue;
 
                         // 1. Evaluate Authentication Handshake if unauthenticated
                         if (!session.IsAuthenticated)
@@ -123,16 +143,17 @@ namespace ZeroGBridge
                                 if (submittedPassword == _serverPassword)
                                 {
                                     session.IsAuthenticated = true;
-                                    Console.WriteLine($"[ZGB] -INFO- Client ZAH successfully authenticated on Port {_port}.");
+                                    Interlocked.Increment(ref _authGeneration);
+                                    ZgbLog.Write($"[ZGB] -INFO- Client ZAH successfully authenticated on Port {_port}.");
                                     var authSuccess = new { type = "AUTH", status = "Authenticated", message = "Access Granted" };
-                                    writer.WriteLine(JsonConvert.SerializeObject(authSuccess));
+                                    SendToClient(session, JsonConvert.SerializeObject(authSuccess));
                                     continue;
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[ZGB] -WARN- Client ZAH provided an invalid password.");
+                                    ZgbLog.Write($"[ZGB] -WARN- Client ZAH provided an invalid password.");
                                     var authDenied = new { type = "AUTH", status = "Denied", message = "Invalid Credentials" };
-                                    writer.WriteLine(JsonConvert.SerializeObject(authDenied));
+                                    SendToClient(session, JsonConvert.SerializeObject(authDenied));
                                     Thread.Sleep(1000);
                                     break;
                                 }
@@ -141,69 +162,81 @@ namespace ZeroGBridge
                             {
                                 // Reject unauthenticated commands
                                 var authRequired = new { type = "AUTH", status = "Required", message = "Authentication Required. Submit auth:<password>" };
-                                Console.WriteLine($"[ZGB] -WARN- Invalid Command Provided");
-                                writer.WriteLine(JsonConvert.SerializeObject(authRequired));
+                                ZgbLog.Write($"[ZGB] -WARN- Invalid Command Provided");
+                                SendToClient(session, JsonConvert.SerializeObject(authRequired));
                                 continue;
                             }
                         }
 
-                        // 2. Process authenticated commands via CommandDispatcher
-                        Console.WriteLine($"[ZGB] -INFO- Received command from ZAH : \"{trimmedLine}\"");
+                        // 2. Process authenticated commands via CommandDispatcher.
+                        // Exactly one reply per request, written only to the requesting client.
+                        // (CommandDispatcher logs the received command, so it is not logged twice here.)
                         string response = _commandDispatcher?.ProcessIncomingCommand(trimmedLine);
                         if (!string.IsNullOrEmpty(response))
                         {
-                            // Send directly to the requesting socket
-                            writer.WriteLine(response);
-                            writer.Flush();
-
-                            // Also broadcast to ensure all listening GUI workers receive the packet
-                            BroadcastJson(response);
+                            SendToClient(session, response);
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -TRACE- Client session ZAH disconnected: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -TRACE- Client session ZAH disconnected: {ex.Message}");
             }
             finally
             {
+                session.Writer = null;
                 _connectedSessions.TryRemove(session.ClientId, out _);
                 CloseClientConnection(session.Client);
             }
         }
 
         /// <summary>
-        /// Broadcasts serialized JSON data packages exclusively to authenticated clients.
+        /// Writes one JSON line to a single client using that session's StreamWriter.
         /// </summary>
-        public void BroadcastJson(string jsonPayload)
+        public void SendToClient(ClientSession session, string jsonPayload)
+        {
+            if (session == null || session.Writer == null || string.IsNullOrEmpty(jsonPayload))
+            {
+                return;
+            }
+
+            string line = jsonPayload.TrimEnd('\r', '\n');
+            lock (session.WriteLock)
+            {
+                session.Writer.WriteLine(line);
+                session.Writer.Flush();
+            }
+        }
+
+        /// <summary>
+        /// Broadcasts serialized JSON data packages exclusively to authenticated clients.
+        /// When exceptClientId is set, that client is skipped (used after a direct command reply).
+        /// </summary>
+        public void BroadcastJson(string jsonPayload, string exceptClientId = null)
         {
             if (string.IsNullOrEmpty(jsonPayload) || _connectedSessions.IsEmpty)
             {
                 return;
             }
 
-            string formattedPayload = jsonPayload.EndsWith("\n") ? jsonPayload : jsonPayload + "\n";
-            byte[] buffer = Encoding.UTF8.GetBytes(formattedPayload);
-
             foreach (var kvp in _connectedSessions)
             {
                 ClientSession session = kvp.Value;
-                
-                // Gate telemetry push behind authentication
+
                 if (session == null || !session.IsAuthenticated || session.Client == null || !session.Client.Connected)
+                {
+                    continue;
+                }
+
+                if (exceptClientId != null && session.ClientId == exceptClientId)
                 {
                     continue;
                 }
 
                 try
                 {
-                    NetworkStream stream = session.Client.GetStream();
-                    if (stream.CanWrite)
-                    {
-                        stream.Write(buffer, 0, buffer.Length);
-                        stream.Flush();
-                    }
+                    SendToClient(session, jsonPayload);
                 }
                 catch
                 {
@@ -215,6 +248,7 @@ namespace ZeroGBridge
         public void Stop()
         {
             _isRunning = false;
+            _stopEvent.Set();
             try
             {
                 _listener?.Stop();
@@ -223,13 +257,16 @@ namespace ZeroGBridge
                     CloseClientConnection(kvp.Value.Client);
                 }
                 _connectedSessions.Clear();
-                _listenerThread?.Join(1000);
+                if (_listenerThread != null && _listenerThread.IsAlive)
+                {
+                    _listenerThread.Join(3000);
+                }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- TelemetryServer shutdown exception: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -ERROR- TelemetryServer shutdown exception: {ex.Message}");
             }
-            Console.WriteLine("[ZGB] -INFO- TelemetryServer stopped cleanly.");
+            ZgbLog.Write("[ZGB] -INFO- TelemetryServer stopped cleanly.");
         }
 
         private void CloseClientConnection(TcpClient client)

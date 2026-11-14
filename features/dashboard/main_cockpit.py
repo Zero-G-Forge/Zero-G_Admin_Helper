@@ -4,6 +4,7 @@
 # =====================================================================
 
 import os
+from features.paths import asset_path
 import sys
 import json
 import socket
@@ -99,7 +100,7 @@ class MainCockpit(QMainWindow):
         self.central_widget = QWidget()
         self.central_widget.setObjectName("CentralWidgetCanvas")
         self.setCentralWidget(self.central_widget)
-        self.background = QPixmap("assets/backgrounds/background.png")
+        self.background = QPixmap(asset_path("backgrounds", "background.png"))
 
         # 3. Master Layout & Scaffolding
         self.master_layout = QHBoxLayout()
