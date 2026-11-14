@@ -16,12 +16,13 @@ class TelemetryParser:
     def parse_raw_line(line: str) -> Optional[Dict[str, Any]]:
         """
         Parses a raw line string into a structured dictionary.
-        Returns None if the line is empty or malformed.
+        Returns None if the line is empty or malformed. Leading UTF-8 BOM is ignored
+        (the bridge StreamWriter emits a BOM on the first packet of a session).
         """
         if not line or not line.strip():
             return None
 
-        clean_line = line.strip()
+        clean_line = line.strip().lstrip("﻿").strip()
 
         try:
             payload = json.loads(clean_line)
