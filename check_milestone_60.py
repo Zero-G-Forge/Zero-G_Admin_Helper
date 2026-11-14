@@ -1,11 +1,13 @@
 # check_milestone_60.py
 
 import os
+
+_APP_ROOT = os.path.dirname(os.path.abspath(__file__))  # app root (folder with ZAH.py)
 import json
 import socket
 
 # Define paths matching out State Separation Protocol
-CONFIG_PATH = "data/server_config.json"
+CONFIG_PATH = os.path.join(_APP_ROOT, "data", "server_config.json")
 TIMEOUT_LIMIT = 2.5
 
 print("===========================================")

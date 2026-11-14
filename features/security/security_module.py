@@ -2,11 +2,13 @@
 
 import os
 from cryptography.fernet import Fernet
+from features.paths import data_path
 
 class SecurityModule:
     """Handles secure encryption/decryption of administrative credentials."""
     
-    KEY_FILE = "data/secret.key"
+    # Resolved from the app root, not the launch directory (data/ is created if missing).
+    KEY_FILE = data_path("secret.key")
 
     def __init__(self):
         self.key = self._load_or_create_key()

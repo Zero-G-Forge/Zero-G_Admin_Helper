@@ -1,10 +1,12 @@
 # inspect_users.py
 
 import os
+
+_APP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # app root (folder with ZAH.py)
 import json
 
 # Define the local data file path relative to our execution root
-DATA_PATH = "data/users.json"
+DATA_PATH = os.path.join(_APP_ROOT, "data", "users.json")
 
 print("============================================")
 print("Zero-G Diagnostic Gate: User Profile Validation")

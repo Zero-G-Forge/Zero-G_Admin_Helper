@@ -4,15 +4,17 @@ import json
 import os
 from datetime import datetime, timedelta
 from features.security.security_module import SecurityModule
+from features.paths import DATA_DIR, data_path, ensure_data_dir
 
-SESSION_FILE = "data/session.json"
-USERS_FILE = "data/users.json"
-file_path = "data/users.json"
+# All data files resolve from the app root, not the launch directory.
+SESSION_FILE = data_path("session.json")
+USERS_FILE = data_path("users.json")
+file_path = USERS_FILE
 sec = SecurityModule()
 
 def get_data_path():
     """Returns the base data directory path."""
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "data")
+    return ensure_data_dir()
 
 def create_user_profile(username, password, role, steamID):
     """Creates an enriched user profile object."""
@@ -29,7 +31,7 @@ def create_user_profile(username, password, role, steamID):
 
 def save_account_data(user_data):
     """Saves user account data securely to users.json."""
-    os.makedirs("data", exist_ok=True)
+    ensure_data_dir()
     users = []
     
     # Load and decrypt existing users
@@ -96,7 +98,7 @@ def check_for_persistent_user():
 
 def save_session(username):
     """Saves a new session token to disk."""
-    os.makedirs("data", exist_ok=True)
+    ensure_data_dir()
     data = {
         "username": username,
         "timestamp": datetime.now().isoformat()

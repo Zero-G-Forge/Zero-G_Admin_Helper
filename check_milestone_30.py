@@ -1,10 +1,12 @@
 # check_milestone_30.py
 
 import os
+
+_APP_ROOT = os.path.dirname(os.path.abspath(__file__))  # app root (folder with ZAH.py)
 import json
 
 # Define our relative data path reference
-DATA_PATH = "data/users.json"
+DATA_PATH = os.path.join(_APP_ROOT, "data", "users.json")
 
 print("==================================================")
 print("INITIALIZATION MILESTONE: 30% USER LOGIN CHECK")

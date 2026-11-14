@@ -8,15 +8,19 @@ from PyQt6.QtWidgets import QDialog, QLabel, QLineEdit, QPushButton
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt
 
+from features.paths import data_path
+
 # ---------------------------------------------------
 # Network Configuration Validation Function (Ping Check + Config File Integrity)
 # ---------------------------------------------------
 
-def is_network_ready(config_path="data/server_config.json", timeout=5.0):
+def is_network_ready(config_path=None, timeout=5.0):
     """
     Performs a diagnostic ping to verify connectivity.
     Returns True if the server responds, False otherwise.
     """
+    if config_path is None:
+        config_path = data_path("server_config.json")
     if not os.path.exists(config_path):
         return False
         
@@ -184,8 +188,7 @@ class NetworkWizardOverlay(QDialog):
         }
         
         # 2. Persistence - Force indentation and line breaks
-        os.makedirs("data", exist_ok=True)
-        config_path = os.path.join("data", "server_config.json")
+        config_path = data_path("server_config.json")  # app root, data/ created if missing
         
         # 3. Explicit multiline serialization
         formatted_json = json.dumps(config_data, indent=4)
