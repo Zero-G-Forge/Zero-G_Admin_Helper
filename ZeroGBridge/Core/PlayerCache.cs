@@ -6,6 +6,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using Newtonsoft.Json;
@@ -204,6 +205,215 @@ namespace ZeroGBridge
 
 #region Database Hydration
 
+        private class BridgeConfig
+        {
+            public string SaveGameName { get; set; }
+            public string GlobalDbPath { get; set; }
+        }
+
+        /// <summary>
+        /// Resolves global.db from ZeroGBridge.json (mod folder), then the newest
+        /// Saves/Games/*/global.db under the process directory or its parent, then
+        /// the legacy "Zero-G Server" folder name.
+        /// </summary>
+        private static string ResolveGlobalDbPath(string baseDir, string currentDir)
+        {
+            var tried = new List<string>();
+            string parentCur = Directory.GetParent(currentDir)?.FullName ?? currentDir;
+            string parentBase = Directory.GetParent(baseDir)?.FullName ?? baseDir;
+
+            string[] serverRoots = UniquePaths(currentDir, parentCur, baseDir, parentBase);
+            string[] autoRoots = UniquePaths(currentDir, parentCur);
+
+            string modDir = null;
+            try
+            {
+                string assemblyPath = Assembly.GetExecutingAssembly().Location;
+                if (!string.IsNullOrEmpty(assemblyPath))
+                {
+                    modDir = Path.GetDirectoryName(assemblyPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Could not read assembly location for ZeroGBridge.json: {ex.Message}");
+            }
+
+            BridgeConfig cfg = LoadBridgeConfig(modDir);
+
+            if (cfg != null && !string.IsNullOrWhiteSpace(cfg.GlobalDbPath))
+            {
+                string raw = cfg.GlobalDbPath.Trim();
+                var pathCandidates = new List<string>();
+                if (Path.IsPathRooted(raw))
+                {
+                    pathCandidates.Add(raw);
+                }
+                else
+                {
+                    foreach (var root in serverRoots)
+                    {
+                        pathCandidates.Add(Path.GetFullPath(Path.Combine(root, raw)));
+                    }
+                    if (!string.IsNullOrEmpty(modDir))
+                    {
+                        pathCandidates.Add(Path.GetFullPath(Path.Combine(modDir, raw)));
+                    }
+                }
+
+                foreach (var p in UniquePaths(pathCandidates.ToArray()))
+                {
+                    tried.Add(p);
+                    if (File.Exists(p))
+                    {
+                        Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {p} (config, GlobalDbPath)");
+                        return p;
+                    }
+                }
+
+                Console.WriteLine($"[ZGB] -WARN- Configured GlobalDbPath not found: \"{raw}\"");
+            }
+
+            if (cfg != null && !string.IsNullOrWhiteSpace(cfg.SaveGameName))
+            {
+                string name = cfg.SaveGameName.Trim();
+                foreach (var root in serverRoots)
+                {
+                    string p = Path.Combine(root, "Saves", "Games", name, "global.db");
+                    tried.Add(p);
+                    if (File.Exists(p))
+                    {
+                        Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {p} (config, SaveGameName=\"{name}\")");
+                        return p;
+                    }
+                }
+
+                Console.WriteLine($"[ZGB] -WARN- Configured SaveGameName \"{name}\" did not resolve to a global.db; continuing with auto-detect.");
+            }
+
+            string newest = null;
+            DateTime newestTime = DateTime.MinValue;
+            foreach (var root in autoRoots)
+            {
+                string gamesDir = Path.Combine(root, "Saves", "Games");
+                if (!Directory.Exists(gamesDir))
+                {
+                    continue;
+                }
+
+                string[] files;
+                try
+                {
+                    files = Directory.GetFiles(gamesDir, "global.db", SearchOption.AllDirectories);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                foreach (var p in files)
+                {
+                    tried.Add(p);
+                    DateTime writeTime;
+                    try
+                    {
+                        writeTime = File.GetLastWriteTimeUtc(p);
+                    }
+                    catch
+                    {
+                        continue;
+                    }
+
+                    if (newest == null || writeTime >= newestTime)
+                    {
+                        newestTime = writeTime;
+                        newest = p;
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(newest))
+            {
+                Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {newest} (auto-detect, newest global.db)");
+                return newest;
+            }
+
+            const string fallbackName = "Zero-G Server";
+            foreach (var root in serverRoots)
+            {
+                string p = Path.Combine(root, "Saves", "Games", fallbackName, "global.db");
+                if (!tried.Any(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase)))
+                {
+                    tried.Add(p);
+                }
+                if (File.Exists(p))
+                {
+                    Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {p} (fallback, SaveGameName=\"{fallbackName}\")");
+                    return p;
+                }
+            }
+
+            Console.WriteLine("[ZGB] -WARN- Unable to locate global.db across candidate paths:");
+            if (tried.Count == 0)
+            {
+                Console.WriteLine("[ZGB] -WARN-   (no candidate paths were generated)");
+            }
+            else
+            {
+                foreach (var p in tried)
+                {
+                    Console.WriteLine($"[ZGB] -WARN-   {p}");
+                }
+            }
+            return null;
+        }
+
+        private static BridgeConfig LoadBridgeConfig(string modDir)
+        {
+            if (string.IsNullOrEmpty(modDir))
+            {
+                Console.WriteLine("[ZGB] -WARN- Could not determine mod folder for ZeroGBridge.json (assembly location empty).");
+                return null;
+            }
+
+            string configPath = Path.Combine(modDir, "ZeroGBridge.json");
+            if (!File.Exists(configPath))
+            {
+                Console.WriteLine($"[ZGB] -INFO- No ZeroGBridge.json at {configPath}; using auto-detect.");
+                return null;
+            }
+
+            try
+            {
+                string json = File.ReadAllText(configPath);
+                var cfg = JsonConvert.DeserializeObject<BridgeConfig>(json) ?? new BridgeConfig();
+                Console.WriteLine($"[ZGB] -INFO- Loaded config from {configPath} (SaveGameName=\"{cfg.SaveGameName}\", GlobalDbPath=\"{cfg.GlobalDbPath}\")");
+                return cfg;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ZGB] -WARN- Failed to read {configPath}: {ex.Message}");
+                return null;
+            }
+        }
+
+        private static string[] UniquePaths(params string[] paths)
+        {
+            var list = new List<string>();
+            foreach (var p in paths)
+            {
+                if (string.IsNullOrEmpty(p))
+                {
+                    continue;
+                }
+                if (!list.Any(x => string.Equals(x, p, StringComparison.OrdinalIgnoreCase)))
+                {
+                    list.Add(p);
+                }
+            }
+            return list.ToArray();
+        }
+
         private void SafeScanDatabase(string baseDir)
         {
             try
@@ -223,27 +433,13 @@ namespace ZeroGBridge
             try
             {
                 string currentDir = Directory.GetCurrentDirectory();
-                string parentBase = Directory.GetParent(baseDir)?.FullName ?? baseDir;
-                string parentCur = Directory.GetParent(currentDir)?.FullName ?? currentDir;
-
-                List<string> candidateFiles = new List<string>
-                {
-                    Path.Combine(parentCur, "Saves", "Games", "Zero-G Server", "global.db"),
-                    Path.Combine(currentDir, "Saves", "Games", "Zero-G Server", "global.db"),
-                    Path.Combine(parentBase, "Saves", "Games", "Zero-G Server", "global.db"),
-                    Path.Combine(baseDir, "Saves", "Games", "Zero-G Server", "global.db"),
-                    @"D:\66.23.236.138_30000\Saves\Games\Zero-G Server\global.db"
-                };
-
-                string resolvedDb = candidateFiles.FirstOrDefault(File.Exists);
+                string resolvedDb = ResolveGlobalDbPath(baseDir, currentDir);
 
                 if (string.IsNullOrEmpty(resolvedDb))
                 {
-                    Console.WriteLine("[ZGB] -WARN- Unable to locate global.db across candidate paths.");
                     return;
                 }
 
-                Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {resolvedDb}");
 
                 string tempDir = Path.Combine(currentDir, "Logs", "ZeroGBridge");
                 if (!Directory.Exists(tempDir))
