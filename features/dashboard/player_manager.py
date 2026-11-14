@@ -7,6 +7,27 @@ import os
 import json
 from datetime import datetime, timedelta
 
+
+def normalize_faction(raw) -> str:
+    """
+    Normalizes a faction tag to the ZeroGBridge 1.2 format: "[ABC]", or "--" for none.
+    Older bridge builds and caches mixed "MEC", "[MEC]", "None" and "[---] Unaligned".
+    """
+    if raw is None:
+        return "--"
+    t = str(raw).strip()
+    if not t or t == "--" or t.lower() == "none":
+        return "--"
+    if t.startswith("["):
+        close = t.find("]")
+        inner = (t[1:close] if close > 0 else t.strip("[]")).strip()
+        if not inner or not inner.strip("-"):
+            return "--"
+        return f"[{inner}]"
+    if not t.strip("-"):
+        return "--"
+    return f"[{t}]"
+
 class PlayerManager:
     """
     Manages persistent local storage and real-time state synchronization
@@ -54,7 +75,7 @@ class PlayerManager:
                             "entityId": p_id or p.get("entityId", "--"),
                             "steamId": steam_id or p.get("steamId", "--"),
                             "status": p.get("active") or p.get("status", "Offline"),
-                            "faction": p.get("faction") or "--",
+                            "faction": normalize_faction(p.get("faction")),
                             "role": p.get("role", "Member"),
                             "solar_system": p.get("solar_system") or p.get("system", "Unknown"),
                             "playfield": p.get("playfield") or "--",
@@ -110,7 +131,7 @@ class PlayerManager:
                 "entityId": eid or existing.get("entityId", "--"),
                 "steamId": steam_id or existing.get("steamId", "--"),
                 "status": "Online",
-                "faction": p.get("faction") if p.get("faction") != "--" else existing.get("faction", "--"),
+                "faction": normalize_faction(p.get("faction")) if normalize_faction(p.get("faction")) != "--" else normalize_faction(existing.get("faction")),
                 "role": existing.get("role", "Member"),
                 "solar_system": p.get("system") or existing.get("solar_system", "Unknown"),
                 "playfield": p.get("playfield") if p.get("playfield") != "--" else existing.get("playfield", "--"),
@@ -151,11 +172,13 @@ class PlayerManager:
                 "entityId": eid or existing.get("entityId", "--"),
                 "steamId": steam_id or existing.get("steamId", "--"),
                 "status": p.get("status", existing.get("status", "Offline")),
-                "faction": p.get("faction", existing.get("faction", "--")),
+                "faction": normalize_faction(p.get("faction", existing.get("faction", "--"))),
                 "role": existing.get("role", "Member"),
                 "solar_system": p.get("system") or existing.get("solar_system", "Unknown"),
                 "playfield": p.get("playfield", existing.get("playfield", "--")),
-                "last_seen": p.get("lastSeen") or existing.get("last_seen", now_str),
+                # ZeroGBridge sends "last_seen" (UTC "YYYY-MM-DD HH:MM:SS", from global.db
+                # or the last time it saw the player); "lastSeen" kept for older payloads.
+                "last_seen": p.get("last_seen") or p.get("lastSeen") or existing.get("last_seen", now_str),
                 "ping": p.get("ping", existing.get("ping", 0))
             })
             self._players[key] = existing

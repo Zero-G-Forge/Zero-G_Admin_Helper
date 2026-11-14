@@ -77,7 +77,7 @@ namespace ZeroGBridge
             {
                 _listener = new TcpListener(IPAddress.Any, _port);
                 _listener.Start();
-                Console.WriteLine($"[ZGB] -STATUS- TelemetryServer listening on port {_port} with password protection enabled.");
+                ZgbLog.Write($"[ZGB] -STATUS- TelemetryServer listening on port {_port} with password protection enabled. Owner: {ModMain.DescribeProcess()}");
 
                 while (_isRunning)
                 {
@@ -109,7 +109,7 @@ namespace ZeroGBridge
             {
                 if (_isRunning)
                 {
-                    Console.WriteLine($"[ZGB] -ERROR- TelemetryServer listener exception: {ex.Message}");
+                    ZgbLog.Write($"[ZGB] -ERROR- TelemetryServer listener exception on port {_port}: {ex.Message} ({ModMain.DescribeProcess()}). If the port is in use, another ZeroGBridge process already owns it.");
                 }
             }
         }
@@ -144,14 +144,14 @@ namespace ZeroGBridge
                                 {
                                     session.IsAuthenticated = true;
                                     Interlocked.Increment(ref _authGeneration);
-                                    Console.WriteLine($"[ZGB] -INFO- Client ZAH successfully authenticated on Port {_port}.");
+                                    ZgbLog.Write($"[ZGB] -INFO- Client ZAH successfully authenticated on Port {_port}.");
                                     var authSuccess = new { type = "AUTH", status = "Authenticated", message = "Access Granted" };
                                     SendToClient(session, JsonConvert.SerializeObject(authSuccess));
                                     continue;
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[ZGB] -WARN- Client ZAH provided an invalid password.");
+                                    ZgbLog.Write($"[ZGB] -WARN- Client ZAH provided an invalid password.");
                                     var authDenied = new { type = "AUTH", status = "Denied", message = "Invalid Credentials" };
                                     SendToClient(session, JsonConvert.SerializeObject(authDenied));
                                     Thread.Sleep(1000);
@@ -162,7 +162,7 @@ namespace ZeroGBridge
                             {
                                 // Reject unauthenticated commands
                                 var authRequired = new { type = "AUTH", status = "Required", message = "Authentication Required. Submit auth:<password>" };
-                                Console.WriteLine($"[ZGB] -WARN- Invalid Command Provided");
+                                ZgbLog.Write($"[ZGB] -WARN- Invalid Command Provided");
                                 SendToClient(session, JsonConvert.SerializeObject(authRequired));
                                 continue;
                             }
@@ -181,7 +181,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -TRACE- Client session ZAH disconnected: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -TRACE- Client session ZAH disconnected: {ex.Message}");
             }
             finally
             {
@@ -264,9 +264,9 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- TelemetryServer shutdown exception: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -ERROR- TelemetryServer shutdown exception: {ex.Message}");
             }
-            Console.WriteLine("[ZGB] -INFO- TelemetryServer stopped cleanly.");
+            ZgbLog.Write("[ZGB] -INFO- TelemetryServer stopped cleanly.");
         }
 
         private void CloseClientConnection(TcpClient client)

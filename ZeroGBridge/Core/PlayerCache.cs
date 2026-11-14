@@ -7,6 +7,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Globalization;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using Newtonsoft.Json;
@@ -72,13 +73,13 @@ namespace ZeroGBridge
             // Seed primary persistent factions
             RegisterServerFactions();
 
-            Console.WriteLine("[ZGB] -DEBUG- PlayerCache initializing (Pure API v2)...");
+            ZgbLog.Write("[ZGB] -DEBUG- PlayerCache initializing (Pure API v2)...");
 
             LoadFromDisk();
-            Console.WriteLine($"[ZGB] -DEBUG- After LoadFromDisk: {_allPlayers.Count} players in memory.");
+            ZgbLog.Write($"[ZGB] -DEBUG- After LoadFromDisk: {_allPlayers.Count} players in memory.");
 
             SafeScanDatabase(baseDir);
-            Console.WriteLine($"[ZGB] -DEBUG- After DatabaseScan: {_allPlayers.Count} players in memory.");
+            ZgbLog.Write($"[ZGB] -DEBUG- After DatabaseScan: {_allPlayers.Count} players in memory.");
         }
 
         public int TotalCount => _allPlayers.Count;
@@ -153,7 +154,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -WARN- Exception scanning API v2 playfield: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -WARN- Exception scanning API v2 playfield: {ex.Message}");
             }
         }
 
@@ -177,15 +178,13 @@ namespace ZeroGBridge
             if (factionId > 0)
             {
                 record.factionId = factionId;
-                if (string.IsNullOrWhiteSpace(faction))
-                {
-                    faction = ResolveFactionAbbrev(factionId);
-                }
-                record.faction = faction;
+                record.faction = string.IsNullOrWhiteSpace(faction)
+                    ? ResolveFactionAbbrev(factionId)
+                    : NormalizeFactionTag(faction);
             }
             else if (!string.IsNullOrWhiteSpace(faction))
             {
-                record.faction = faction;
+                record.faction = NormalizeFactionTag(faction);
             }
 
             record.status = status;
@@ -196,16 +195,45 @@ namespace ZeroGBridge
         }
 
         /// <summary>
-        /// Resolves a FactionData.Id to the known tag abbreviation, or "FAC-{id}" when unknown.
+        /// Resolves a FactionData.Id to the single bridge-wide tag format:
+        ///   known faction        -> "[ABC]"
+        ///   unknown id 1..999    -> "[FAC-123]"
+        ///   0 / none / id >= 1000 (private player faction) -> "--"
         /// </summary>
         public string ResolveFactionAbbrev(int factionId)
         {
-            if (factionId <= 0) return "None";
+            if (factionId <= 0) return NoFaction;
             if (_factionLookup.TryGetValue(factionId, out FactionTag fac))
             {
-                return fac.Abbrev;
+                string abbrev = !string.IsNullOrWhiteSpace(fac.Abbrev) ? fac.Abbrev : fac.Name;
+                return NormalizeFactionTag(abbrev);
             }
-            return "FAC-" + factionId;
+            if (factionId < 1000) return "[FAC-" + factionId + "]";
+            return NoFaction;
+        }
+
+        public const string NoFaction = "--";
+
+        /// <summary>
+        /// Normalizes a free-form tag to "[ABC]" (or "--" for none). Handles old cache values
+        /// such as "MEC", "[MEC]", "None", "[---] Unaligned".
+        /// </summary>
+        public static string NormalizeFactionTag(string raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw)) return NoFaction;
+            string t = raw.Trim();
+            if (t == "--" || t.Equals("None", StringComparison.OrdinalIgnoreCase)) return NoFaction;
+
+            if (t.StartsWith("["))
+            {
+                int close = t.IndexOf(']');
+                string inner = close > 0 ? t.Substring(1, close - 1).Trim() : t.Trim('[', ']').Trim();
+                if (inner.Length == 0 || inner.Trim('-').Length == 0) return NoFaction; // "[---] Unaligned"
+                return "[" + inner + "]";
+            }
+
+            if (t.Trim('-').Length == 0) return NoFaction;
+            return "[" + t + "]";
         }
 
         public void MarkOffline(string identifier)
@@ -261,7 +289,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -WARN- Could not read assembly location for ZeroGBridge.json: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -WARN- Could not read assembly location for ZeroGBridge.json: {ex.Message}");
             }
 
             BridgeConfig cfg = LoadBridgeConfig(modDir);
@@ -291,12 +319,12 @@ namespace ZeroGBridge
                     tried.Add(p);
                     if (File.Exists(p))
                     {
-                        Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {p} (config, GlobalDbPath)");
+                        ZgbLog.Write($"[ZGB] -SUCCESS- Located database at: {p} (config, GlobalDbPath)");
                         return p;
                     }
                 }
 
-                Console.WriteLine($"[ZGB] -WARN- Configured GlobalDbPath not found: \"{raw}\"");
+                ZgbLog.Write($"[ZGB] -WARN- Configured GlobalDbPath not found: \"{raw}\"");
             }
 
             if (cfg != null && !string.IsNullOrWhiteSpace(cfg.SaveGameName))
@@ -308,12 +336,12 @@ namespace ZeroGBridge
                     tried.Add(p);
                     if (File.Exists(p))
                     {
-                        Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {p} (config, SaveGameName=\"{name}\")");
+                        ZgbLog.Write($"[ZGB] -SUCCESS- Located database at: {p} (config, SaveGameName=\"{name}\")");
                         return p;
                     }
                 }
 
-                Console.WriteLine($"[ZGB] -WARN- Configured SaveGameName \"{name}\" did not resolve to a global.db; continuing with auto-detect.");
+                ZgbLog.Write($"[ZGB] -WARN- Configured SaveGameName \"{name}\" did not resolve to a global.db; continuing with auto-detect.");
             }
 
             string newest = null;
@@ -359,7 +387,7 @@ namespace ZeroGBridge
 
             if (!string.IsNullOrEmpty(newest))
             {
-                Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {newest} (auto-detect, newest global.db)");
+                ZgbLog.Write($"[ZGB] -SUCCESS- Located database at: {newest} (auto-detect, newest global.db)");
                 return newest;
             }
 
@@ -373,21 +401,21 @@ namespace ZeroGBridge
                 }
                 if (File.Exists(p))
                 {
-                    Console.WriteLine($"[ZGB] -SUCCESS- Located database at: {p} (fallback, SaveGameName=\"{fallbackName}\")");
+                    ZgbLog.Write($"[ZGB] -SUCCESS- Located database at: {p} (fallback, SaveGameName=\"{fallbackName}\")");
                     return p;
                 }
             }
 
-            Console.WriteLine("[ZGB] -WARN- Unable to locate global.db across candidate paths:");
+            ZgbLog.Write("[ZGB] -WARN- Unable to locate global.db across candidate paths:");
             if (tried.Count == 0)
             {
-                Console.WriteLine("[ZGB] -WARN-   (no candidate paths were generated)");
+                ZgbLog.Write("[ZGB] -WARN-   (no candidate paths were generated)");
             }
             else
             {
                 foreach (var p in tried)
                 {
-                    Console.WriteLine($"[ZGB] -WARN-   {p}");
+                    ZgbLog.Write($"[ZGB] -WARN-   {p}");
                 }
             }
             return null;
@@ -397,14 +425,14 @@ namespace ZeroGBridge
         {
             if (string.IsNullOrEmpty(modDir))
             {
-                Console.WriteLine("[ZGB] -WARN- Could not determine mod folder for ZeroGBridge.json (assembly location empty).");
+                ZgbLog.Write("[ZGB] -WARN- Could not determine mod folder for ZeroGBridge.json (assembly location empty).");
                 return null;
             }
 
             string configPath = Path.Combine(modDir, "ZeroGBridge.json");
             if (!File.Exists(configPath))
             {
-                Console.WriteLine($"[ZGB] -INFO- No ZeroGBridge.json at {configPath}; using auto-detect.");
+                ZgbLog.Write($"[ZGB] -INFO- No ZeroGBridge.json at {configPath}; using auto-detect.");
                 return null;
             }
 
@@ -412,12 +440,12 @@ namespace ZeroGBridge
             {
                 string json = File.ReadAllText(configPath);
                 var cfg = JsonConvert.DeserializeObject<BridgeConfig>(json) ?? new BridgeConfig();
-                Console.WriteLine($"[ZGB] -INFO- Loaded config from {configPath} (SaveGameName=\"{cfg.SaveGameName}\", GlobalDbPath=\"{cfg.GlobalDbPath}\")");
+                ZgbLog.Write($"[ZGB] -INFO- Loaded config from {configPath} (SaveGameName=\"{cfg.SaveGameName}\", GlobalDbPath=\"{cfg.GlobalDbPath}\")");
                 return cfg;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -WARN- Failed to read {configPath}: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -WARN- Failed to read {configPath}: {ex.Message}");
                 return null;
             }
         }
@@ -443,12 +471,12 @@ namespace ZeroGBridge
         {
             try
             {
-                Console.WriteLine("[ZGB] -INFO- Executing SafeScanDatabase...");
+                ZgbLog.Write("[ZGB] -INFO- Executing SafeScanDatabase...");
                 ScanSaveGameDatabase(baseDir);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- SafeScanDatabase failure: {ex.GetType().Name} - {ex.Message}");
+                ZgbLog.Write($"[ZGB] -ERROR- SafeScanDatabase failure: {ex.GetType().Name} - {ex.Message}");
             }
         }
 
@@ -548,15 +576,7 @@ namespace ZeroGBridge
                                 string playtimeStr = $"{hours}h";
 
                                 // Resolve faction name/abbreviation from cache
-                                string factionTag = "--";
-                                if (factionId > 0 && _factionLookup.TryGetValue(factionId, out FactionTag fac))
-                                {
-                                    factionTag = !string.IsNullOrEmpty(fac.Abbrev) ? fac.Abbrev : fac.Name;
-                                }
-                                else if (factionId > 1 && factionId < 1000)
-                                {
-                                    factionTag = $"FAC-{factionId}";
-                                }
+                                string factionTag = ResolveFactionAbbrev(factionId);
 
                                 var record = _allPlayers.GetOrAdd(steamId, k => new PlayerRecord());
                                 record.steamId = steamId;
@@ -573,15 +593,18 @@ namespace ZeroGBridge
                             }
                         }
 
-                        Console.WriteLine($"[ZGB] -INFO- Successfully hydrated {count} player record(s) from global.db.");
+                        ZgbLog.Write($"[ZGB] -INFO- Successfully hydrated {count} player record(s) from global.db.");
                     }
+
+                    int seenCount = ApplyLastSeenFromDb(connection);
+                    ZgbLog.Write($"[ZGB] -INFO- last_seen filled from global.db for {seenCount} player(s).");
                 }
 
                 SaveToDisk();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- Failed to query global.db: {ex.Message}\n{ex.StackTrace}");
+                ZgbLog.Write($"[ZGB] -ERROR- Failed to query global.db: {ex.Message}\n{ex.StackTrace}");
             }
             finally
             {
@@ -590,6 +613,99 @@ namespace ZeroGBridge
                     try { File.Delete(tempDb); } catch { }
                 }
             }
+        }
+
+        /// <summary>
+        /// Fills last_seen from LoginLogoff. Column names are discovered with PRAGMA
+        /// table_info (logged once) because they are not documented; game-tick values
+        /// are converted to UTC with the ServerStartStop table.
+        /// </summary>
+        private int ApplyLastSeenFromDb(SqliteConnection connection)
+        {
+            try
+            {
+                var cols = GetColumns(connection, "LoginLogoff");
+                if (cols.Count == 0) return 0;
+
+                string logoffCol = PickColumn(cols, new[] { "logofftime", "logouttime", "logoff", "logout" }, new[] { "logoff", "logout" }, null);
+                string loginCol = PickColumn(cols, new[] { "logintime", "login" }, new[] { "login" }, new[] { "logoff", "logout" });
+                ZgbLog.Write($"[ZGB] -INFO- global.db LoginLogoff columns: {string.Join(",", cols)}; last_seen uses logoff={logoffCol ?? "-"} login={loginCol ?? "-"}");
+                if (logoffCol == null && loginCol == null) return 0;
+
+                var slices = GlobalDbTime.LoadServerStartStop(connection, GetColumns(connection, "ServerStartStop"));
+                TimeSpan tz = GlobalDbTime.LatestOffset;
+
+                string a = logoffCol != null ? "MAX(\"" + logoffCol + "\")" : "NULL";
+                string b = loginCol != null ? "MAX(\"" + loginCol + "\")" : "NULL";
+                string sql = $"SELECT playerid, {a}, {b} FROM LoginLogoff WHERE playerid LIKE '7656%' GROUP BY playerid;";
+
+                int filled = 0;
+                using (var cmd = new SqliteCommand(sql, connection))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        string steamId = reader.IsDBNull(0) ? "" : Convert.ToString(reader.GetValue(0)).Trim();
+                        if (string.IsNullOrEmpty(steamId)) continue;
+
+                        DateTime? off = GlobalDbTime.ToUtc(reader.IsDBNull(1) ? null : reader.GetValue(1), slices, tz);
+                        DateTime? on = GlobalDbTime.ToUtc(reader.IsDBNull(2) ? null : reader.GetValue(2), slices, tz);
+                        DateTime? best = off.HasValue && on.HasValue ? (off.Value > on.Value ? off : on) : (off ?? on);
+                        if (!best.HasValue) continue;
+
+                        if (!_allPlayers.TryGetValue(steamId, out PlayerRecord rec)) continue;
+
+                        DateTime existing;
+                        bool hasExisting = DateTime.TryParseExact(rec.last_seen ?? "", "yyyy-MM-dd HH:mm:ss",
+                            CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out existing);
+                        if (!hasExisting || best.Value > existing)
+                        {
+                            rec.last_seen = best.Value.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                            filled++;
+                        }
+                    }
+                }
+                return filled;
+            }
+            catch (Exception ex)
+            {
+                ZgbLog.Write($"[ZGB] -WARN- Could not read last_seen from global.db: {ex.Message}");
+                return 0;
+            }
+        }
+
+        private static List<string> GetColumns(SqliteConnection connection, string table)
+        {
+            var cols = new List<string>();
+            try
+            {
+                using (var cmd = new SqliteCommand($"PRAGMA table_info(\"{table}\");", connection))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        cols.Add(Convert.ToString(reader.GetValue(1)));
+                    }
+                }
+            }
+            catch { }
+            return cols;
+        }
+
+        private static string PickColumn(List<string> cols, string[] exact, string[] contains, string[] exclude)
+        {
+            foreach (var e in exact)
+            {
+                var hit = cols.FirstOrDefault(c => string.Equals(c, e, StringComparison.OrdinalIgnoreCase));
+                if (hit != null) return hit;
+            }
+            foreach (var c in cols)
+            {
+                string lc = c.ToLowerInvariant();
+                if (exclude != null && exclude.Any(x => lc.Contains(x))) continue;
+                if (contains.Any(x => lc.Contains(x))) return c;
+            }
+            return null;
         }
 
         #endregion
@@ -609,6 +725,8 @@ namespace ZeroGBridge
                             foreach (var p in loaded)
                             {
                                 p.status = "Offline";
+                                // Older caches mixed "MEC" / "[MEC]" / "None"; normalize on load.
+                                p.faction = p.factionId > 0 ? ResolveFactionAbbrev(p.factionId) : NormalizeFactionTag(p.faction);
                                 string key = !string.IsNullOrEmpty(p.steamId) && p.steamId != "--" ? p.steamId : p.name;
                                 _allPlayers[key] = p;
                             }
@@ -618,7 +736,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -WARN- Could not load players.json: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -WARN- Could not load players.json: {ex.Message}");
             }
         }
 
@@ -634,7 +752,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -WARN- Could not write players.json: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -WARN- Could not write players.json: {ex.Message}");
             }
         }
     }

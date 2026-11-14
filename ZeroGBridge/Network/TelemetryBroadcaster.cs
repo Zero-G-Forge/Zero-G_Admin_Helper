@@ -83,13 +83,13 @@ namespace ZeroGBridge
                     _telemetryThread.Join(5000);
                     if (_telemetryThread.IsAlive)
                     {
-                        Console.WriteLine("[ZGB] -WARN- TelemetryBroadcaster thread did not exit within 5s.");
+                        ZgbLog.Write("[ZGB] -WARN- TelemetryBroadcaster thread did not exit within 5s.");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- Exception stopping TelemetryBroadcaster: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -ERROR- Exception stopping TelemetryBroadcaster: {ex.Message}");
             }
         }
 
@@ -169,8 +169,9 @@ namespace ZeroGBridge
                     lastCpuTime = currentCpuTime;
                     lastSampleTime = currentSampleTime;
 
-                    long ramBytes = currentProcess.WorkingSet64;
-                    string ramFormatted = $"{ramBytes / (1024 * 1024)}MB";
+                    // WorkingSet64 reads 0 on the live Empyrion runtime; see RamSampler.
+                    RamSample ram = RamSampler.Sample(currentProcess);
+                    string ramFormatted = RamSampler.FormatMb(ram.Bytes);
 
                     string preciseTimestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss");
                     string heapStr = (GC.GetTotalMemory(false) / (1024 * 1024)).ToString() + "MB";
@@ -209,6 +210,7 @@ namespace ZeroGBridge
                         { "nwqueue", nwQueueVal.ToString() },
                         { "cpu", cpuPercent },
                         { "ram", ramFormatted },
+                        { "ram_src", ram.Source },
                         { "roster_rev", _rosterRevision }
                     };
                     if (includeRoster)
@@ -235,7 +237,7 @@ namespace ZeroGBridge
                     if (_logCounter >= 7)
                     {
                         _logCounter = 0;
-                        string formattedLog = $"-LOG- INFO: Uptime={uptimeStr} heap={heapStr} fps={fpsVal:0.0} cpu={cpuPercent}% ram={ramFormatted} players={onlineCount} pfs={pfsCount} ticks={tickCount} nwqueue={nwQueueVal}";
+                        string formattedLog = $"-LOG- INFO: Uptime={uptimeStr} heap={heapStr} fps={fpsVal:0.0} cpu={cpuPercent}% ram={ramFormatted} ({ram.Source}) players={onlineCount} pfs={pfsCount} ticks={tickCount} nwqueue={nwQueueVal}";
 
                         if (_modApi != null)
                         {
@@ -243,7 +245,7 @@ namespace ZeroGBridge
                         }
                         else
                         {
-                            Console.WriteLine($"{preciseTimestamp} [ZGB] {formattedLog}");
+                            ZgbLog.Write($"{preciseTimestamp} [ZGB] {formattedLog}");
                         }
                     }
                 }
@@ -255,7 +257,7 @@ namespace ZeroGBridge
                     }
                     else
                     {
-                        Console.WriteLine($"[ZGB] -ERROR- Telemetry loop exception: {ex.Message}");
+                        ZgbLog.Write($"[ZGB] -ERROR- Telemetry loop exception: {ex.Message}");
                     }
                 }
 

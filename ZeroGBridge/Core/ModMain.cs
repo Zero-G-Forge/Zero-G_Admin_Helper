@@ -75,7 +75,8 @@ namespace ZeroGBridge
             }
             _logFilePath = Path.Combine(logDir, "live_telemetry.txt");
 
-            Console.WriteLine("[ZGB] -INFO- Initializing ZeroGBridge via modern IMod API v2 framework...");
+            ZgbLog.Write("[ZGB] -INFO- Initializing ZeroGBridge via modern IMod API v2 framework...");
+            ZgbLog.Write("[ZGB] -INFO- " + DescribeProcess());
 
             // 1. Initialize PlayerCache (reads disk cache and hydrates global.db)
             _playerCache = new PlayerCache();
@@ -98,12 +99,12 @@ namespace ZeroGBridge
                 ScanLoadedPlayfields);
             _telemetryBroadcaster.Start();
 
-            Console.WriteLine("[ZGB] -INFO- ZeroGBridge API v2 initialization complete.");
+            ZgbLog.Write("[ZGB] -INFO- ZeroGBridge API v2 initialization complete.");
         }
 
         public void Shutdown()
         {
-            Console.WriteLine("[ZGB] -INFO- Shutting down ZeroGBridge...");
+            ZgbLog.Write("[ZGB] -INFO- Shutting down ZeroGBridge...");
 
             UnhookApiV2Events();
             UnhookAllPlayfieldEntityEvents();
@@ -115,13 +116,48 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- Shutdown exception: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -ERROR- Shutdown exception: {ex.Message}");
             }
 
-            Console.WriteLine("[ZGB] -INFO- ZeroGBridge shut down cleanly.");
+            ZgbLog.Write("[ZGB] -INFO- ZeroGBridge shut down cleanly.");
         }
 
         #endregion
+
+        /// <summary>
+        /// Version, process mode and pid. Empyrion loads the mod in the dedicated server
+        /// and in every playfield server process, so this tells which one owns port 30500.
+        /// </summary>
+        public static string DescribeProcess()
+        {
+            string version = "?";
+            try { version = typeof(ModMain).Assembly.GetName().Version.ToString(); } catch { }
+
+            string mode = "unknown";
+            try
+            {
+                if (ModApiInstance?.Application != null)
+                {
+                    mode = ModApiInstance.Application.Mode.ToString();
+                }
+            }
+            catch (Exception ex)
+            {
+                mode = "unavailable (" + ex.GetType().Name + ")";
+            }
+
+            string proc = "?";
+            int pid = 0;
+            try
+            {
+                var p = System.Diagnostics.Process.GetCurrentProcess();
+                proc = p.ProcessName;
+                pid = p.Id;
+            }
+            catch { }
+
+            return $"ZeroGBridge v{version} process: mode={mode} name={proc} pid={pid}";
+        }
 
         #region Pure API v2 Event Wiring
 
@@ -133,12 +169,12 @@ namespace ZeroGBridge
                 {
                     _modApi.Application.OnPlayfieldLoaded += OnPlayfieldLoaded;
                     _modApi.Application.OnPlayfieldUnloading += OnPlayfieldUnloading;
-                    Console.WriteLine("[ZGB] -SUCCESS- Registered API v2 OnPlayfieldLoaded and OnPlayfieldUnloading delegates.");
+                    ZgbLog.Write("[ZGB] -SUCCESS- Registered API v2 OnPlayfieldLoaded and OnPlayfieldUnloading delegates.");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -WARN- Could not register playfield delegates: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -WARN- Could not register playfield delegates: {ex.Message}");
             }
         }
 
@@ -161,7 +197,7 @@ namespace ZeroGBridge
 
             try
             {
-                Console.WriteLine($"[ZGB] -INFO- API v2 Playfield Loaded: {playfield.Name}");
+                ZgbLog.Write($"[ZGB] -INFO- API v2 Playfield Loaded: {playfield.Name}");
                 if (!string.IsNullOrEmpty(playfield.Name))
                 {
                     LoadedPlayfields[playfield.Name] = playfield;
@@ -172,14 +208,14 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- Error handling OnPlayfieldLoaded: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -ERROR- Error handling OnPlayfieldLoaded: {ex.Message}");
             }
         }
 
         private void OnPlayfieldUnloading(IPlayfield playfield)
         {
             if (playfield == null) return;
-            Console.WriteLine($"[ZGB] -INFO- API v2 Playfield Unloading: {playfield.Name}");
+            ZgbLog.Write($"[ZGB] -INFO- API v2 Playfield Unloading: {playfield.Name}");
 
             UnhookPlayfieldEntityEvents(playfield);
 
@@ -214,7 +250,7 @@ namespace ZeroGBridge
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ZGB] -WARN- OnEntityLoaded handler: {ex.Message}");
+                    ZgbLog.Write($"[ZGB] -WARN- OnEntityLoaded handler: {ex.Message}");
                 }
             };
 
@@ -281,7 +317,7 @@ namespace ZeroGBridge
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[ZGB] -WARN- Periodic structure scan failed for {playfield.Name}: {ex.Message}");
+                    ZgbLog.Write($"[ZGB] -WARN- Periodic structure scan failed for {playfield.Name}: {ex.Message}");
                 }
             }
         }
@@ -314,7 +350,7 @@ namespace ZeroGBridge
 
                 string faction = _playerCache != null
                     ? _playerCache.ResolveFactionAbbrev(factionId)
-                    : (factionId > 0 ? "FAC-" + factionId : "None");
+                    : (factionId > 0 && factionId < 1000 ? "[FAC-" + factionId + "]" : PlayerCache.NoFaction);
 
                 string entityName = entity.Name;
                 if (string.IsNullOrEmpty(entityName))
@@ -337,7 +373,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -WARN- Failed to cache entity {entity.Id}: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -WARN- Failed to cache entity {entity.Id}: {ex.Message}");
             }
         }
 
@@ -406,7 +442,7 @@ namespace ZeroGBridge
         /// from IApplication.GetAllPlayfields() and GetPfServerInfos().
         /// Only loaded playfields expose live entity lists.
         /// </summary>
-        public static List<object> BuildPlayfieldList()
+        public static List<object> BuildPlayfieldList(bool includeAll = false)
         {
             var results = new List<object>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -425,6 +461,12 @@ namespace ZeroGBridge
                     isPvP = pf.IsPvP,
                     loaded = true
                 });
+            }
+
+            // Default: loaded playfields only (the full known list is ~1,750 entries / ~150 KB).
+            if (!includeAll)
+            {
+                return results;
             }
 
             try
@@ -449,7 +491,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -WARN- GetAllPlayfields failed: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -WARN- GetAllPlayfields failed: {ex.Message}");
             }
 
             try
@@ -475,7 +517,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -WARN- GetPfServerInfos failed: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -WARN- GetPfServerInfos failed: {ex.Message}");
             }
 
             return results;

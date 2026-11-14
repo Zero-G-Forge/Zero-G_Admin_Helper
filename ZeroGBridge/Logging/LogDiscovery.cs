@@ -40,7 +40,7 @@ namespace ZeroGBridge
                         {
                             _targetLogPath = candidate;
                             _lastLogFilePosition = 0;
-                            Console.WriteLine($"[ZGB] -INFO- Locked log tailer directly to root log: {_targetLogPath}");
+                            ZgbLog.Write($"[ZGB] -INFO- Locked log tailer directly to root log: {_targetLogPath}");
                         }
                         return;
                     }
@@ -88,12 +88,12 @@ namespace ZeroGBridge
                 {
                     _targetLogPath = newestLog;
                     _lastLogFilePosition = 0;
-                    Console.WriteLine($"[ZGB] -INFO- Locked log tailer to master log from byte 0: {_targetLogPath}");
+                    ZgbLog.Write($"[ZGB] -INFO- Locked log tailer to master log from byte 0: {_targetLogPath}");
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZGB] -ERROR- Exception resolving log path: {ex.Message}");
+                ZgbLog.Write($"[ZGB] -ERROR- Exception resolving log path: {ex.Message}");
             }
         }
 
