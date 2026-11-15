@@ -21,6 +21,7 @@ namespace ZeroGBridge
         public readonly object WriteLock = new object();
         public bool IsAuthenticated { get; set; }
         public DateTime ConnectedAt { get; set; }
+        public string RemoteEndpoint { get; set; } = "unknown";
     }
 
     /// <summary>
@@ -33,7 +34,8 @@ namespace ZeroGBridge
 
         private readonly int _port;
         private readonly CommandDispatcher _commandDispatcher;
-        private readonly string _serverPassword;
+        private readonly Func<string> _tokenProvider;
+        private readonly AlertService _alertService;
         private TcpListener _listener;
         private Thread _listenerThread;
         private volatile bool _isRunning;
@@ -49,11 +51,29 @@ namespace ZeroGBridge
         private int _authGeneration;
         public int AuthGeneration => Volatile.Read(ref _authGeneration);
 
-        public TelemetryServer(int port, CommandDispatcher commandDispatcher, string serverPassword = "ZeroGAdmin2026")
+        /// <param name="tokenProvider">Returns the current auth token (ZeroGBridge.json AuthToken or the fallback).
+        /// Called on every auth attempt so a changed token applies without a restart. Never logged.</param>
+        public TelemetryServer(int port, CommandDispatcher commandDispatcher, Func<string> tokenProvider = null, AlertService alertService = null)
         {
             _port = port;
             _commandDispatcher = commandDispatcher;
-            _serverPassword = serverPassword;
+            _tokenProvider = tokenProvider ?? AuthConfig.GetToken;
+            _alertService = alertService;
+        }
+
+        private static bool TokenEquals(string a, string b)
+        {
+            if (a == null || b == null) return false;
+            // constant-time compare
+            int diff = a.Length ^ b.Length;
+            int n = Math.Max(a.Length, b.Length);
+            for (int i = 0; i < n; i++)
+            {
+                char ca = i < a.Length ? a[i] : '\0';
+                char cb = i < b.Length ? b[i] : '\0';
+                diff |= ca ^ cb;
+            }
+            return diff == 0;
         }
 
         /// <summary>
@@ -93,6 +113,7 @@ namespace ZeroGBridge
                             IsAuthenticated = false,
                             ConnectedAt = DateTime.UtcNow
                         };
+                        try { session.RemoteEndpoint = client.Client?.RemoteEndPoint?.ToString() ?? "unknown"; } catch { }
 
                         _connectedSessions.TryAdd(clientId, session);
 
@@ -140,7 +161,9 @@ namespace ZeroGBridge
                             if (trimmedLine.StartsWith("auth:", StringComparison.OrdinalIgnoreCase))
                             {
                                 string submittedPassword = trimmedLine.Substring(5).Trim();
-                                if (submittedPassword == _serverPassword)
+                                string expected = null;
+                                try { expected = _tokenProvider(); } catch { }
+                                if (!string.IsNullOrEmpty(expected) && TokenEquals(submittedPassword, expected))
                                 {
                                     session.IsAuthenticated = true;
                                     Interlocked.Increment(ref _authGeneration);
@@ -151,24 +174,42 @@ namespace ZeroGBridge
                                 }
                                 else
                                 {
-                                    ZgbLog.Write($"[ZGB] -WARN- Client ZAH provided an invalid password.");
+                                    ZgbLog.Write($"[ZGB] -WARN- Client {session.RemoteEndpoint} provided an invalid auth token; closing.");
                                     var authDenied = new { type = "AUTH", status = "Denied", message = "Invalid Credentials" };
                                     SendToClient(session, JsonConvert.SerializeObject(authDenied));
                                     Thread.Sleep(1000);
                                     break;
                                 }
                             }
+                            else if (AlertService.IsAlertLine(trimmedLine))
+                            {
+                                // alert before auth: one failed ack, one WARN, close
+                                ZgbLog.Write($"[ZGB] -WARN- Unauthenticated alert from {session.RemoteEndpoint}; closing connection.");
+                                SendToClient(session, AlertService.Ack(AlertService.TryGetReqId(trimmedLine), "auth"));
+                                break;
+                            }
                             else
                             {
-                                // Reject unauthenticated commands
+                                // Not authenticated and not an auth line (e.g. port scanners sending HTTP):
+                                // reply once, log ONE warning with the remote address, close the connection.
                                 var authRequired = new { type = "AUTH", status = "Required", message = "Authentication Required. Submit auth:<password>" };
-                                ZgbLog.Write($"[ZGB] -WARN- Invalid Command Provided");
+                                ZgbLog.Write($"[ZGB] -WARN- Unauthenticated non-auth line from {session.RemoteEndpoint}; sent Auth Required and closed the connection.");
                                 SendToClient(session, JsonConvert.SerializeObject(authRequired));
-                                continue;
+                                break;
                             }
                         }
 
-                        // 2. Process authenticated commands via CommandDispatcher.
+                        // 2. In-game alerts: exactly one ALERT_ACK per request.
+                        if (AlertService.IsAlertLine(trimmedLine))
+                        {
+                            string ack = _alertService != null
+                                ? _alertService.Handle(trimmedLine)
+                                : AlertService.Ack(AlertService.TryGetReqId(trimmedLine), "api_error");
+                            SendToClient(session, ack);
+                            continue;
+                        }
+
+                        // 3. Process authenticated commands via CommandDispatcher.
                         // Exactly one reply per request, written only to the requesting client.
                         // (CommandDispatcher logs the received command, so it is not logged twice here.)
                         string response = _commandDispatcher?.ProcessIncomingCommand(trimmedLine);

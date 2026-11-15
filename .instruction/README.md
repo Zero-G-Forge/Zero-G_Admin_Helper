@@ -30,6 +30,7 @@ This Master Operational Registry establishes the foundational protocols for the 
                     -Real-time connected player caches (PlayerRecord: Steam ID, Entity ID, Ping).
                 -Command Dispatch Engine: Routes administrative and querying directives received from ZAH directly to the dedicated engine, returning structured JSON responses:
                     -plys $\rightarrow$ Live player cache snapshot (PLAYER_CACHE).
+                    -alert:{json} $\rightarrow$ In-game HUD alert via legacy Request_InGameMessage_* (ALERT_ACK). Default prio 0 (red). Contract: ZeroGBridge/README.md. Auth token: "AuthToken" in ZeroGBridge.json (1.4+).
                     -gents $\rightarrow$ Global structure and entity querying (ENTITY_LIST) via CmdId.-Request_GlobalStructure_List.
                     -save / backup $\rightarrow$ Immediate world state disk flush.
                     -restart $\rightarrow$ Graceful server restart notification and shutdown.-cmd:<command> $\rightarrow$ Dedicated engine console command execution proxy.
