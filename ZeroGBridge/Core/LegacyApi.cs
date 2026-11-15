@@ -43,6 +43,19 @@ namespace ZeroGBridge
         private static int _unavailableWarned;
         private static PlayerCache _playerCache;
 
+        // Faction list refresh: an immediate Id(1) request at start can return only a handful
+        // of factions before the world is loaded. Re-request once after 20 s, then every 5 min.
+        public const int DefaultInitialFactionRefreshDelayMs = 20000;
+        public const int DefaultFactionRefreshIntervalMs = 5 * 60 * 1000;
+        public static int InitialFactionRefreshDelayMs = DefaultInitialFactionRefreshDelayMs;
+        public static int FactionRefreshIntervalMs = DefaultFactionRefreshIntervalMs;
+
+        private static readonly object RefreshLock = new object();
+        private static Timer _refreshTimer;
+        private static int _loggedFactionCount = -1; // -1 = never logged
+        private static long _lastFactionRequestTicks;
+        private const int FactionChangedDebounceMs = 2000;
+
         public static bool IsAvailable => _api != null;
         public static int MainThreadId { get; private set; }
         public static int LastExecThreadId { get; private set; }
@@ -64,10 +77,12 @@ namespace ZeroGBridge
             Interlocked.Exchange(ref _unavailableWarned, 0);
             ZgbLog.Write("[ZGB] -SUCCESS- Legacy ModInterface attached (Game_Start); in-game alerts available.");
             RequestFactions();
+            StartFactionRefresh();
         }
 
         public static void OnGameExit()
         {
+            StopFactionRefresh();
             _api = null;
             Interlocked.Exchange(ref _lastUpdateTicks, 0);
             // Fail anything still queued
@@ -105,14 +120,16 @@ namespace ZeroGBridge
                         var list = data as FactionInfoList;
                         if (list?.factions != null && _playerCache != null)
                         {
-                            int n = 0;
                             foreach (var f in list.factions)
-                            {
                                 _playerCache.UpsertFaction(f.factionId, f.abbrev, f.name);
-                                n++;
-                            }
-                            ZgbLog.Write($"[ZGB] -INFO- Legacy Event_Get_Factions: {n} faction(s) cached for alert targeting.");
+                            int total = _playerCache.FactionCount;
+                            int prev = Interlocked.Exchange(ref _loggedFactionCount, total);
+                            if (prev != total)
+                                ZgbLog.Write($"[ZGB] -INFO- Legacy Event_Get_Factions: {total} faction(s) cached for alert targeting.");
                         }
+                        break;
+                    case CmdId.Event_Faction_Changed:
+                        RequestFactionsDebounced();
                         break;
                     case CmdId.Event_Error:
                         var err = data as ErrorInfo;
@@ -145,8 +162,56 @@ namespace ZeroGBridge
         {
             var api = _api;
             if (api == null) return;
+            Interlocked.Exchange(ref _lastFactionRequestTicks, DateTime.UtcNow.Ticks);
             try { api.Game_Request(CmdId.Request_Get_Factions, NextSeq(), new Id(1)); }
             catch (Exception ex) { ZgbLog.Write($"[ZGB] -WARN- Request_Get_Factions failed: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Starts (or restarts) the delayed faction refresh timer using the current
+        /// InitialFactionRefreshDelayMs / FactionRefreshIntervalMs values.
+        /// A delay of Timeout.Infinite or a negative value disables the timer.
+        /// </summary>
+        public static void StartFactionRefresh()
+        {
+            StopFactionRefresh();
+            if (_api == null) return;
+            int due = InitialFactionRefreshDelayMs;
+            int period = FactionRefreshIntervalMs;
+            if (due < 0 || due == Timeout.Infinite) return;
+            if (period <= 0 || period == Timeout.Infinite)
+                period = Timeout.Infinite;
+            lock (RefreshLock)
+            {
+                _refreshTimer = new Timer(OnFactionRefreshTick, null, due, period);
+            }
+        }
+
+        public static void StopFactionRefresh()
+        {
+            lock (RefreshLock)
+            {
+                var t = _refreshTimer;
+                _refreshTimer = null;
+                if (t != null)
+                {
+                    try { t.Dispose(); } catch { }
+                }
+            }
+        }
+
+        private static void OnFactionRefreshTick(object _)
+        {
+            try { RequestFactions(); }
+            catch { /* never throw from a timer */ }
+        }
+
+        private static void RequestFactionsDebounced()
+        {
+            long last = Interlocked.Read(ref _lastFactionRequestTicks);
+            if (last != 0 && (DateTime.UtcNow.Ticks - last) < TimeSpan.FromMilliseconds(FactionChangedDebounceMs).Ticks)
+                return;
+            RequestFactions();
         }
 
         /// <summary>

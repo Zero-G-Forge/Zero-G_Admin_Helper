@@ -63,5 +63,7 @@ Ack, exactly one line per request:
 Rate limit: at most 5 alerts per second across all clients. Extra alerts wait for a free slot (each still gets its own ack).
 Threading: while the game's `Game_Update` is ticking, alert calls run on the game main thread. Otherwise they run directly.
 
-Faction targets resolve from the bridge's built-in faction list, plus the factions returned by the legacy
-`Request_Get_Factions` at startup.
+Faction targets resolve from the bridge's built-in faction list, plus factions from the legacy
+`Request_Get_Factions` (at startup, again about 20 seconds later, then every 5 minutes, and when
+a faction changes). Other mods' faction replies are merged in; the cache never shrinks. The total
+is logged only when it changes.
