@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import QDialog, QLabel, QLineEdit, QPushButton
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt
 
-from features.paths import data_path
+from features.network.server_config import add_server_profile, get_active_profile
 
 # ---------------------------------------------------
 # Network Configuration Validation Function (Ping Check + Config File Integrity)
@@ -18,24 +18,27 @@ def is_network_ready(config_path=None, timeout=5.0):
     """
     Performs a diagnostic ping to verify connectivity.
     Returns True if the server responds, False otherwise.
+    Reads the active profile, including a server_config.json that was just
+    migrated from the single-server format.
     """
-    if config_path is None:
-        config_path = data_path("server_config.json")
-    if not os.path.exists(config_path):
-        return False
-        
     try:
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-            
-        # Ensure keys match the ones written in accept_action_callback
-        raw_ip = config.get("input_ip")
-        raw_port = config.get("input_port") or 30500
-        
-        if not raw_ip or not raw_port:
-            print("[DEBUG] Config exists but fields are empty or missing.")
-            return False
-            
+        config = get_active_profile(config_path)
+    except Exception as err:
+        print(f"[WARNING] Ping diagnostic failed: {err}")
+        return False
+
+    if not config:
+        return False
+
+    # Ensure keys match the ones written in accept_action_callback
+    raw_ip = config.get("input_ip")
+    raw_port = config.get("input_port") or 30500
+
+    if not raw_ip or not raw_port:
+        print("[DEBUG] Config exists but fields are empty or missing.")
+        return False
+
+    try:
         ip = str(raw_ip)
         port = int(raw_port)
         
@@ -55,8 +58,13 @@ def is_network_ready(config_path=None, timeout=5.0):
 # ---------------------------------------------------
 
 class NetworkWizardOverlay(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, persist_profile=True):
         super().__init__(parent)
+        # Accept writes the server into server_config.json when this is set.
+        # File -> Log into another server passes False and stores the profile
+        # only after the bridge accepts the auth handshake.
+        self.persist_profile = persist_profile
+        self.entered_profile = None
         
         # Enforce strict 512x512 square viewport bounds
         self.win_size = 512
@@ -177,7 +185,7 @@ class NetworkWizardOverlay(QDialog):
         print("==========================================")
         print(f"IP Target     : {self.input_ip.text() if self.input_ip.text() else 'BLANK'}")
         print(f"Port Target   : {self.input_port.text() if self.input_port.text() else 'BLANK'}")
-        print(f"Auth Token    : {self.input_pass.text() if self.input_pass.text() else 'BLANK'}")
+        print(f"Auth Token    : {'SET' if self.input_pass.text() else 'BLANK'}")
         print("==================================================")
 
         # 1. Capture Data - Keys MUST match is_network_ready() dictionary lookup
@@ -186,16 +194,16 @@ class NetworkWizardOverlay(QDialog):
             "input_port": self.input_port.text().strip(),
             "input_pass": self.input_pass.text().strip(),
         }
-        
-        # 2. Persistence - Force indentation and line breaks
-        config_path = data_path("server_config.json")  # app root, data/ created if missing
-        
-        # 3. Explicit multiline serialization
-        formatted_json = json.dumps(config_data, indent=4)
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(formatted_json + "\n")
-            
-        # 4. Handoff
-        print(f"[SUCCESS] Network configuration saved to {config_path}:")
-        print(formatted_json)
+        self.entered_profile = config_data
+
+        # 2. Persistence - add or update this server and keep every other profile
+        if self.persist_profile:
+            add_server_profile(
+                config_data["input_ip"],
+                config_data["input_port"],
+                config_data["input_pass"],
+            )
+            print("[SUCCESS] Network configuration saved as a server profile.")
+
+        # 3. Handoff
         self.accept()
