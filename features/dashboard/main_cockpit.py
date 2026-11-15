@@ -19,6 +19,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QPixmap, QAction, QKeySequence
 
 # Core background workers, database manager, and popup modal imports
+from features.auth.persistence import clear_login_session
 from features.dashboard.player_manager import PlayerManager
 from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.popups.active_entities_popup import ActiveEntitiesPopup
@@ -162,6 +163,7 @@ class MainCockpit(QMainWindow):
         logout_action = QAction("&Log Out of ZAH", self)
         logout_action.setShortcut("Ctrl+Shift+L")
         logout_action.setStatusTip("Logs you out and back to main login screen")
+        logout_action.triggered.connect(self._on_log_out)
 
         exit_action = QAction("&Exit ZAH", self)
         exit_action.setShortcut("Ctrl+Q")
@@ -644,6 +646,68 @@ class MainCockpit(QMainWindow):
             print("[STATUS] Server switch canceled.")
             return
         self._switch_to_saved_profile(dialog.selected_profile)
+
+    def _on_log_out(self):
+        """
+        Closes the ZeroGBridge session and returns to the startup login flow.
+        Saved server profiles and auth tokens stay on disk.
+        """
+        print("[UI EVENT] Log Out of ZAH requested.")
+        self._stop_telemetry_worker()
+        self._clear_dashboard_session()
+        clear_login_session()
+        self._return_to_start_screen()
+
+    def _clear_dashboard_session(self):
+        """Clears the live dashboard. Saved server profiles are left on disk."""
+        self._reset_metric_readouts()
+        self.telemetry_widget.lbl_server_status.setText("Server Status: OFFLINE")
+        self.telemetry_widget.lbl_server_status.setStyleSheet("color: #ff3355; font-weight: bold;")
+        self.telemetry_widget.lbl_target_ip.setText("Target IP: Not Configured")
+        self.setWindowTitle("Zero-G Admin Helper - Dashboard")
+        self.console.clear()
+        self.global_chat_box.clear()
+        self.faction_chat_box.clear()
+        self.system_logs_box.clear()
+        self.cmd_input.clear()
+        self.player_table.setRowCount(0)
+        self.lbl_players_header.setText("Players on Server Within the Past 2 Weeks")
+        print("[STATUS] Dashboard session cleared.")
+
+    def _return_to_start_screen(self):
+        """
+        Hides the dashboard and runs the startup loader.
+        The loader opens the login window, then the network check.
+        """
+        print("[STATUS] Returning to the login screen.")
+        self.hide()
+        loader = None
+        result = QDialog.DialogCode.Rejected
+        try:
+            from features.loading.loading_screen import ApplicationLoader
+            loader = ApplicationLoader()
+            loader.start_boot_sequence()
+            result = loader.exec()
+        except Exception as err:
+            print(f"[ERROR] Login flow failed after logout: {err}")
+            self.close()
+            return
+        finally:
+            if loader is not None:
+                loader.deleteLater()
+
+        if result == QDialog.DialogCode.Accepted:
+            print("[SUCCESS] Login verified after logout. Restoring the dashboard.")
+            try:
+                self.config = get_active_profile()
+            except Exception as err:
+                print(f"[WARNING] Could not reload the active server profile: {err}")
+            self._init_network_services()
+            self.show()
+            return
+
+        print("[STATUS] Login canceled after logout. Shutting down.")
+        self.close()
 
     # -------------------------------------------------------------------------
     # Determines if Server is ONLINE/OFFLINE
