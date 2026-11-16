@@ -209,3 +209,91 @@ def test_source_toggle_and_bridge_tab_live_reads(qapp, bridge):
     finally:
         portal.close()
         wait_for_tasks()
+
+
+def _fill(panel, name, message):
+    from PyQt6.QtWidgets import QLineEdit
+    for key, w in panel.param_widgets.items():
+        if key == "name":
+            w.setText(name)
+        elif key == "message":
+            w.setText(message)
+    QApplication.processEvents()
+
+
+def test_message_player_live(qapp, bridge, monkeypatch):
+    del qapp
+    portal = ZeroGBridgePortal(profile_provider=bridge.profile)
+    try:
+        portal.show()
+        assert _pump(lambda: portal.loader.state.connection == "Online")
+        b = portal.bridge
+        b._select_command("Players", "Message player")
+        # Live form starts empty (no sample name) and Run stays off until both fields are filled.
+        assert not b.btn_run.isEnabled()
+        _fill(b, "E21L", "")
+        assert not b.btn_run.isEnabled()
+        _fill(b, "", "Testing Message system")
+        assert not b.btn_run.isEnabled()
+        _fill(b, "E21L", "Testing Message system")
+        assert b.btn_run.isEnabled()
+
+        # Cancel: the player lookup (plys) is fine, but no alert line is sent.
+        asked = []
+        monkeypatch.setattr(b, "_confirm_message", lambda server, player, text: asked.append((server, player, text)) or False)
+        b.btn_run.click()
+        assert _pump(lambda: "Cancelled" in b.result.toPlainText())
+        assert asked and asked[0][0] == "Fake Server"
+        assert asked[0][1]["name"] == "E21L" and asked[0][2] == "Testing Message system"
+        assert bridge.alerts() == []
+        assert b.btn_run.isEnabled()
+
+        # Confirm: exactly one alert:{"target":"player"} with the entity id from plys.
+        monkeypatch.setattr(b, "_confirm_message", lambda *a: True)
+        b.btn_run.click()
+        assert _pump(lambda: "ALERT_ACK status=sent" in b.result.toPlainText())
+        alerts = bridge.alerts()
+        assert len(alerts) == 1
+        a = alerts[0]
+        assert a["target"] == "player" and a["id"] == "101" and a["text"] == "Testing Message system"
+        assert a["req_id"].startswith("zah-msg-")
+        assert set(a) == {"req_id", "target", "id", "text"}
+        assert bridge.token not in b.result.toPlainText()
+
+        # Unknown player: lookup fails, nothing is sent, no confirm shown.
+        monkeypatch.setattr(b, "_confirm_message", lambda *a: pytest.fail("confirm must not open"))
+        _fill(b, "Nobody", "hi")
+        b.btn_run.click()
+        assert _pump(lambda: "No player named Nobody" in b.result.toPlainText())
+        assert len(bridge.alerts()) == 1
+        assert not [c for c in bridge.hot_commands() if c["cmd"] in ("reload", "rollback")]
+    finally:
+        portal.close()
+        wait_for_tasks()
+
+
+def test_confirm_message_dialog_text(qapp, bridge, monkeypatch):
+    del qapp
+    from features.dashboard.zgb_portal import bridge_panel as bp
+    seen = {}
+
+    class FakeDialog:
+        class DialogCode:
+            Accepted = 1
+
+        def __init__(self, title, body, action, parent=None):
+            seen.update(title=title, body=body, action=action)
+
+        def exec(self):
+            return 0
+
+    monkeypatch.setattr(hot_reload_panel, "ConfirmDialog", FakeDialog)
+    portal = ZeroGBridgePortal(profile_provider=bridge.profile)
+    try:
+        ok = portal.bridge._confirm_message("Fake Server", {"name": "Clovis-d", "entityId": 102, "status": "Offline"}, "hello")
+        assert ok is False
+        assert "Fake Server" in seen["body"] and "Clovis-d" in seen["body"] and "hello" in seen["body"]
+        assert "not online" in seen["body"]
+    finally:
+        portal.close()
+        wait_for_tasks()

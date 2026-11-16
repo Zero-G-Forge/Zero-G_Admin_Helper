@@ -450,6 +450,16 @@ class LiveDataSource(PortalDataSource):
         from .live_client import send_rollback
         return send_rollback(self.profile(), core_id)
 
+    def find_player(self, name_or_id: str) -> dict:
+        """Read-only: plys, then pick one player by name / entityId / steamId."""
+        from .live_client import fetch_players, resolve_player
+        return resolve_player(fetch_players(self.profile()), name_or_id)
+
+    def message_player(self, entity_id, text: str) -> dict:
+        """Sends alert:{target:player}. The panel only calls this after a confirm dialog."""
+        from .live_client import send_player_alert
+        return send_player_alert(self.profile(), entity_id, text)
+
     # Scripts have no live listing command yet: show the local examples.
     def scripts(self) -> list[Script]:
         return SampleDataSource().scripts()

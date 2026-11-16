@@ -82,6 +82,9 @@ class FakeHotBridge:
         return {"input_ip": "127.0.0.1", "input_port": "9", "bridge_port": str(self.port),
                 "input_pass": self.token if token is None else token, "server_name": name}
 
+    def alerts(self):
+        return [json.loads(l[6:]) for l in self.received if l.lower().startswith("alert:")]
+
     def hot_commands(self):
         out = []
         for line in self.received:
@@ -122,6 +125,17 @@ class FakeHotBridge:
                 conn.sendall(b"METRIC cpu=3\n")
                 if line == "plys":
                     self._send(conn, PLAYERS)
+                elif line.lower().startswith("alert:"):
+                    # Same shape as ZeroGBridge/Network/AlertService.cs Ack().
+                    body = json.loads(line[6:])
+                    known = {str(p["entityId"]) for p in PLAYERS["player_list"]} | \
+                            {str(p["steamId"]) for p in PLAYERS["player_list"]}
+                    self._send(conn, {"type": "ALERT_ACK", "req_id": "someone-else", "status": "sent"})
+                    if body.get("target") == "player" and str(body.get("id")) not in known:
+                        self._send(conn, {"type": "ALERT_ACK", "req_id": body.get("req_id"),
+                                          "status": "failed", "error": "unknown_target"})
+                    else:
+                        self._send(conn, {"type": "ALERT_ACK", "req_id": body.get("req_id"), "status": "sent"})
                 elif line.startswith("hot:"):
                     body = json.loads(line[4:])
                     cmd = body.get("cmd")

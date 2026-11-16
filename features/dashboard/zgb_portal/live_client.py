@@ -141,6 +141,41 @@ def send_rollback(profile: dict, core_id: str | None = None) -> dict:
     return hot_request(profile, "rollback", timeout=RELOAD_TIMEOUT, **extra)
 
 
+def build_player_alert(entity_id, text: str, req_id: str) -> str:
+    """
+    The bridge's single-player message line, exactly as AlertService parses it:
+      alert:{"req_id":"..","target":"player","id":"<entityId or steamId>","text":".."}
+    (ZeroGBridge/Network/AlertService.cs, Handle(); routed by Core/ModMain.cs HandleLine).
+    prio/duration are left out so the bridge defaults apply (prio 0, 10 s). Text is capped at 200.
+    """
+    body = {"req_id": req_id, "target": "player", "id": str(entity_id), "text": str(text)[:200]}
+    return "alert:" + json.dumps(body)
+
+
+def send_player_alert(profile: dict, entity_id, text: str) -> dict:
+    """Sends one in-game message to one player. Only call after the user confirmed it."""
+    req_id = f"zah-msg-{uuid.uuid4().hex[:8]}"
+    return bridge_request(profile, build_player_alert(entity_id, text, req_id), "ALERT_ACK", req_id=req_id)
+
+
+def resolve_player(players_payload: dict, name_or_id: str) -> dict:
+    """
+    Finds one player in a PLAYER_CACHE reply by exact name (case-insensitive),
+    entityId or steamId. Raises PortalBridgeError('not_found' / 'ambiguous').
+    """
+    key = str(name_or_id or "").strip()
+    rows = [p for p in (players_payload or {}).get("player_list") or [] if isinstance(p, dict)]
+    by_id = [p for p in rows if key and key in (str(p.get("entityId", "")), str(p.get("steamId", "")))]
+    if len(by_id) == 1:
+        return by_id[0]
+    by_name = [p for p in rows if str(p.get("name", "")).strip().lower() == key.lower()]
+    if len(by_name) == 1:
+        return by_name[0]
+    if len(by_name) > 1:
+        raise PortalBridgeError("ambiguous", f"More than one player is named {key}. Use the entity id instead.")
+    raise PortalBridgeError("not_found", f"No player named {key} in the bridge's player cache.")
+
+
 # ---------------------------------------------------------------------------
 # Worker-thread helper so the GUI never blocks
 # ---------------------------------------------------------------------------

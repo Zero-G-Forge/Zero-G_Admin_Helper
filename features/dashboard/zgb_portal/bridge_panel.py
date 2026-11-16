@@ -18,10 +18,12 @@ from .data_source import Script, format_players, format_status
 LIVE_COMMANDS = {
     ("Server", "Get status"): "status",
     ("Players", "List players"): "plys",
+    ("Players", "Message player"): "message",   # alert:{"target":"player",...} after a confirm
 }
+MESSAGE_KEY = ("Players", "Message player")
 LIVE_ONLY_READS_TIP = (
-    "Not available on live data yet. Only Server › Get status and Players › List players "
-    "are wired to the bridge (read-only). Switch Data source to Examples to try the rest."
+    "Not available on live data yet. Only Server › Get status, Players › List players and "
+    "Players › Message player are wired to the bridge. Switch Data source to Examples to try the rest."
 )
 LIVE_PUSH_TIP = (
     "Not available on live data: the bridge has no script upload command. Put the script in the "
@@ -850,7 +852,14 @@ class BridgePanel(QWidget):
             else:
                 w = QLineEdit()
                 w.setObjectName("CommandInput")
-                w.setText(str(p.default or ""))
+                live_msg = getattr(self.source, "is_live", False) and (cmd.category, cmd.name) == MESSAGE_KEY
+                w.setText("" if live_msg else str(p.default or ""))
+                if live_msg:
+                    w.setPlaceholderText("Exact in-game name or entity id" if p.key == "name"
+                                         else "Up to 200 characters")
+                    if p.key == "message":
+                        w.setMaxLength(200)
+                w.textChanged.connect(self._update_run_button)
             self.form.addRow(label, w)
             self.param_widgets[p.key] = w
 
@@ -871,6 +880,7 @@ class BridgePanel(QWidget):
 
     def set_source(self, source) -> None:
         self.source = source
+        self._msg_busy = False
         self.scripts = source.scripts()
         self.current_script = None
         self._refresh_script_list()
@@ -887,7 +897,7 @@ class BridgePanel(QWidget):
                 "Other commands and Push live are off on live data. Scripts below are local examples."
             )
             self.footer.setText("Live data. Only read-only bridge calls are enabled.")
-            self.result.setPlaceholderText("Run Get status or List players to read the live server…")
+            self.result.setPlaceholderText("Run Get status or List players to read the live server, or Message player to send one…")
             self.badge.setText("LIVE · READ-ONLY")
         else:
             self.subtitle.setText(
@@ -901,12 +911,20 @@ class BridgePanel(QWidget):
         self.btn_push.setToolTip(LIVE_PUSH_TIP if live else "")
         self._update_run_button()
 
-    def _update_run_button(self) -> None:
+    def _update_run_button(self, *_args) -> None:
         cmd = self.current_cmd
         live = getattr(self.source, "is_live", False)
         if live and cmd and (cmd.category, cmd.name) not in LIVE_COMMANDS:
             self.btn_run.setEnabled(False)
             self.btn_run.setToolTip(LIVE_ONLY_READS_TIP)
+        elif live and cmd and (cmd.category, cmd.name) == MESSAGE_KEY:
+            values = self._param_values()
+            filled = bool(str(values.get("name", "")).strip()) and bool(str(values.get("message", "")).strip())
+            busy = getattr(self, "_msg_busy", False)
+            self.btn_run.setEnabled(filled and not busy)
+            self.btn_run.setToolTip(
+                "Looks the player up, then asks you to confirm before the message is sent."
+                if filled else "Fill in the player name and the message.")
         else:
             self.btn_run.setEnabled(True)
             self.btn_run.setToolTip("Read-only bridge call." if live else "")
@@ -916,6 +934,10 @@ class BridgePanel(QWidget):
         if not what:
             return
         from .live_client import run_async
+
+        if what == "message":
+            self._start_live_message(values)
+            return
 
         src = self.source
         self.btn_run.setEnabled(False)
@@ -943,6 +965,81 @@ class BridgePanel(QWidget):
             self._update_run_button()
 
         run_async(fn, done, failed)
+
+    # ----- live: message one player (confirmed) ----------------------------
+
+    def _confirm_message(self, server: str, player: dict, text: str) -> bool:
+        from .hot_reload_panel import ConfirmDialog
+
+        status = str(player.get("status") or "unknown")
+        body = (
+            "Send this in-game message?\n\n"
+            "Server:   {0}\n"
+            "Player:   {1}  (entity {2}, {3})\n"
+            "Message:  {4}"
+        ).format(server, player.get("name") or "?", player.get("entityId") or "?", status, text)
+        if status.lower() != "online":
+            body += "\n\nThis player is not online right now, so the game may not show it."
+        dlg = ConfirmDialog("Confirm message to " + str(player.get("name") or "player"), body, "Send message", parent=self)
+        return dlg.exec() == dlg.DialogCode.Accepted
+
+    def _set_msg_busy(self, busy: bool) -> None:
+        self._msg_busy = busy
+        self._update_run_button()
+
+    def _start_live_message(self, values: dict) -> None:
+        from .live_client import run_async
+
+        src = self.source
+        name = str(values.get("name", "")).strip()
+        text = str(values.get("message", "")).strip()
+        if not name or not text:
+            return
+        self._set_msg_busy(True)
+        self.result.setPlainText("Looking up {0} in the player cache (plys)…".format(name))
+
+        def found(player, src=src, text=text):
+            if sip.isdeleted(self) or src is not self.source:
+                return
+            server = src.server_label()
+            if not self._confirm_message(server, player, text):
+                self._set_msg_busy(False)
+                self.result.setPlainText("Cancelled. Nothing was sent to {0}.".format(server))
+                self.footer.setText("Message cancelled.")
+                return
+            eid = player.get("entityId") or player.get("steamId")
+            self.result.setPlainText("Sending to {0} on {1}…".format(player.get("name"), server))
+            run_async(
+                lambda: src.message_player(eid, text),
+                lambda ack, p=player, srv=server: self._on_message_ack(src, p, srv, ack),
+                lambda kind, msg: self._on_message_failed(src, msg),
+            )
+
+        run_async(lambda: src.find_player(name), found,
+                  lambda kind, msg, src=src: self._on_message_failed(src, msg))
+
+    def _on_message_ack(self, src, player: dict, server: str, ack: dict) -> None:
+        if sip.isdeleted(self) or src is not self.source:
+            return
+        self._set_msg_busy(False)
+        ack = ack if isinstance(ack, dict) else {}
+        status = str(ack.get("status") or "?")
+        ok = status == "sent"
+        lines = [
+            "{0}  alert:target=player  (live: {1})".format("OK" if ok else "FAILED", server),
+            "",
+            "Player:  {0}  (entity {1})".format(player.get("name"), player.get("entityId")),
+            "Bridge:  ALERT_ACK status={0}{1}".format(status, "  error=" + str(ack.get("error")) if ack.get("error") else ""),
+        ]
+        self.result.setPlainText("\n".join(lines))
+        self.footer.setText("Message to {0}: {1}.".format(player.get("name"), "sent" if ok else "failed"))
+
+    def _on_message_failed(self, src, message: str) -> None:
+        if sip.isdeleted(self) or src is not self.source:
+            return
+        self._set_msg_busy(False)
+        self.result.setPlainText("FAILED  message player\n\n{0}".format(message))
+        self.footer.setText("Message not sent: {0}".format(message))
 
     def _on_run_command(self) -> None:
         cmd = self.current_cmd
