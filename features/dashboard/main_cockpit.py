@@ -39,8 +39,10 @@ from features.network.server_config import (
     profile_label,
     registry_cache_for,
     set_active_server,
+    set_server_name,
+    switch_list_label,
 )
-from features.network.server_switch import ServerLoginDialog, ServerSwitchDialog
+from features.network.server_switch import ServerLoginDialog, ServerNameDialog, ServerSwitchDialog
 
 class TelemetryWidget(QFrame):
     """
@@ -495,7 +497,7 @@ class MainCockpit(QMainWindow):
         game = game_endpoint(profile)
         bridge = bridge_port_of(profile)
         ip = str(profile.get("input_ip", "")).strip() if isinstance(profile, dict) else ""
-        self.setWindowTitle(f"Zero-G Admin Helper - Dashboard ({game})")
+        self.setWindowTitle(f"Zero-G Admin Helper - Dashboard ({switch_list_label(profile)})")
         self.telemetry_widget.lbl_target_ip.setText(f"Game: {game} | Bridge: {ip}:{bridge}")
         print(f"[STATUS] Active game server: {game}. ZeroGBridge target: {ip}:{bridge}.")
 
@@ -616,6 +618,21 @@ class MainCockpit(QMainWindow):
             self._show_server_login_dialog(f"Could not save game server {ip}:{port_text}: {err}")
             return None
 
+    def _apply_optional_server_name(self, saved):
+        """Asks for a display name after a profile is saved. Cancel leaves the name blank."""
+        if not saved:
+            return saved
+        ip = str(saved.get("input_ip", "")).strip()
+        print(f"[STATUS] Asking for a display name for {ip}.")
+        dialog = ServerNameDialog(initial=saved.get("server_name", ""), parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            print("[STATUS] Server name was left unset.")
+            return saved
+        updated = set_server_name(ip, saved.get("input_port", ""), dialog.entered_name)
+        if updated:
+            return updated
+        return saved
+
     def _on_log_into_another_server(self):
         """
         Opens the network wizard for another game server.
@@ -659,6 +676,7 @@ class MainCockpit(QMainWindow):
             saved = self._save_entered_server(ip, port_text, token, make_active=True)
             if not saved:
                 return
+            saved = self._apply_optional_server_name(saved)
             print(
                 f"[STATUS] Saved game server {ip}:{port} after a failed live check. "
                 f"ZeroGBridge {ip}:{bridge_port_of(saved)} will keep trying in the background."
@@ -672,6 +690,7 @@ class MainCockpit(QMainWindow):
         saved = self._save_entered_server(ip, port_text, token, make_active=True)
         if not saved:
             return
+        saved = self._apply_optional_server_name(saved)
         bridge = bridge_port_of(saved)
         print(f"[STATUS] Saved game server {ip}:{port}. ZeroGBridge {ip}:{bridge} connects in the background.")
         self._switch_to_saved_profile(saved)

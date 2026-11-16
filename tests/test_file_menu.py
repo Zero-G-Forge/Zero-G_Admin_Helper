@@ -82,7 +82,7 @@ def test_file_menu_lists_server_actions(qapp, monkeypatch):
         labels = [_visible(action.text()) for action in file_menu.actions() if action.text()]
         assert "Log into another server" in labels
         assert "Switch servers" in labels
-        assert window.windowTitle() == "Zero-G Admin Helper - Dashboard (127.0.0.1:9)"
+        assert window.windowTitle() == "Zero-G Admin Helper - Dashboard (127.0.0.1)"
         assert "127.0.0.1:9" in window.telemetry_widget.lbl_target_ip.text()
         print("[SUCCESS] File menu built with Log into another server and Switch servers.")
     finally:

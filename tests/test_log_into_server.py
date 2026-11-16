@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import QApplication
 from features.dashboard.main_cockpit import MainCockpit
 from features.network.connection import NetworkWizardOverlay
 from features.network.server_config import list_server_profiles
-from features.network.server_switch import ServerLoginDialog, ServerSwitchDialog
+from features.network.server_switch import ServerLoginDialog, ServerNameDialog, ServerSwitchDialog
 from features.paths import DATA_DIR
 from tests.mock_bridge import MockBridge
 
@@ -83,6 +83,13 @@ def _start_driver(state):
                 widget.input_port.setText(state["port"])
                 widget.input_pass.setText(state["token"])
                 widget.btn_accept.click()
+            elif isinstance(widget, ServerNameDialog) and widget.isVisible():
+                if widget.property("test_handled"):
+                    continue
+                widget.setProperty("test_handled", True)
+                if state.get("server_name"):
+                    widget.name_input.setText(state["server_name"])
+                widget.btn_save.click()
             elif isinstance(widget, ServerLoginDialog) and widget.isVisible():
                 if widget.property("test_handled"):
                     continue
@@ -117,7 +124,7 @@ def _start_driver(state):
     return timer
 
 
-def _login_then_list_switch(qapp, tmp_path, monkeypatch, ip, port, token, save_anyway):
+def _login_then_list_switch(qapp, tmp_path, monkeypatch, ip, port, token, save_anyway, server_name=""):
     """
     Opens the real File actions against a home bridge on bridge_port.
     The wizard port is the game port and is not used for the bridge handshake.
@@ -152,6 +159,7 @@ def _login_then_list_switch(qapp, tmp_path, monkeypatch, ip, port, token, save_a
             "port": str(port),
             "token": token,
             "save_anyway": save_anyway,
+            "server_name": server_name,
             "messages": [],
             "questions": [],
             "labels": [],
@@ -179,15 +187,15 @@ def test_login_success_saves_game_port_and_lists_it(qapp, tmp_path, monkeypatch)
     game = GamePort()
     try:
         state = _login_then_list_switch(
-            qapp, tmp_path, monkeypatch, "127.0.0.1", game.port, "beta-token", True
+            qapp, tmp_path, monkeypatch, "127.0.0.1", game.port, "beta-token", True, server_name="Beta"
         )
         expected = (
             f"Game server 127.0.0.1:{game.port} is up. The profile was saved. "
             f"ZeroGBridge will connect to 127.0.0.1:30500 in the background."
         )
         assert expected in state["messages"]
-        assert any(f"127.0.0.1:{game.port}" in label for label in state["labels"])
-        assert any("bridge 30500" in label for label in state["labels"])
+        assert any(label.replace(" (active)", "") == "Beta - 127.0.0.1" for label in state["labels"])
+        assert all(str(game.port) not in label and "30500" not in label for label in state["labels"])
         saved, _active = list_server_profiles()
         match = [
             entry for entry in saved
@@ -196,6 +204,7 @@ def test_login_success_saves_game_port_and_lists_it(qapp, tmp_path, monkeypatch)
         assert match
         assert match[0]["bridge_port"] == "30500"
         assert match[0]["input_pass"] == "beta-token"
+        assert match[0]["server_name"] == "Beta"
         print("[SUCCESS] Game port check saved the profile and Switch servers listed it.")
     finally:
         game.stop()
@@ -211,7 +220,8 @@ def test_login_game_port_refused_save_anyway_lists_the_server(qapp, tmp_path, mo
     )
     assert f"Could not reach game server 127.0.0.1:{refused_port}: host unreachable" in state["messages"]
     assert "Save this server anyway?" in state["questions"]
-    assert any(f"127.0.0.1:{refused_port}" in label for label in state["labels"])
+    assert any(label.replace(" (active)", "") == "127.0.0.1" for label in state["labels"])
+    assert all(str(refused_port) not in label and "30500" not in label for label in state["labels"])
     saved, _active = list_server_profiles()
     match = [entry for entry in saved if entry.get("input_port") == str(refused_port)]
     assert match
@@ -226,7 +236,8 @@ def test_login_game_port_timeout_save_anyway_lists_the_server(qapp, tmp_path, mo
     )
     assert "Could not reach game server 192.0.2.1:9: connection timed out" in state["messages"]
     assert "Save this server anyway?" in state["questions"]
-    assert any("192.0.2.1:9" in label for label in state["labels"])
+    assert any(label.replace(" (active)", "") == "192.0.2.1" for label in state["labels"])
+    assert all(":9" not in label and "30500" not in label for label in state["labels"])
     saved, _active = list_server_profiles()
     match = [entry for entry in saved if entry.get("input_ip") == "192.0.2.1"]
     assert match
