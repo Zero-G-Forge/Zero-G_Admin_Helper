@@ -16,10 +16,12 @@ import time
 class MockBridge:
     """Tiny auth-gated bridge bound to localhost."""
 
-    def __init__(self, token, host="127.0.0.1", port=0):
+    def __init__(self, token, host="127.0.0.1", port=0, silent=False):
         self.token = token
         self.host = host
         self.port = port
+        # Accept the TCP connection and never send a reply. Used to force a client timeout.
+        self.silent = silent
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._clients = []
@@ -129,11 +131,18 @@ class MockBridge:
             record["closed"] = True
             return
         try:
+            if self.silent:
+                print("[MockBridge] -INFO- Holding the client open with no reply.")
+                while not self._stop.is_set():
+                    time.sleep(0.05)
+                return
             while not self._stop.is_set():
                 try:
                     chunk = conn.recv(4096)
                 except socket.timeout:
                     continue
+                except OSError:
+                    break
                 if not chunk:
                     break
                 buf += chunk

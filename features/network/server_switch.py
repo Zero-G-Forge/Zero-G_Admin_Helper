@@ -9,6 +9,90 @@ from features.network.server_config import profile_label
 from features.paths import asset_path
 
 
+class ServerLoginDialog(QDialog):
+    """
+    Result of File > Log into another server.
+    ask_to_save adds the "Save this server anyway?" question.
+    """
+
+    def __init__(self, message, ask_to_save=False, parent=None):
+        super().__init__(parent)
+        self.ask_to_save = ask_to_save
+        self.setObjectName("ServerLoginDialog")
+        self.setWindowTitle("Zero-G Admin Helper - Server Login")
+        self.setFixedSize(520, 260)
+        self.setModal(True)
+
+        print("[DEBUG] ServerLoginDialog: Showing server login result...")
+        self._build_form(message, ask_to_save)
+        self._apply_theme()
+
+    def _build_form(self, message, ask_to_save):
+        """Builds the result text and Save / Cancel or OK."""
+        self.master_layout = QVBoxLayout(self)
+        self.master_layout.setContentsMargins(18, 18, 18, 18)
+        self.master_layout.setSpacing(12)
+
+        self.lbl_title = QLabel("SERVER LOGIN", self)
+        self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_title.setStyleSheet(
+            "QLabel { color: #00ffff; font-family: 'Courier New'; font-weight: bold; font-size: 14px; }"
+        )
+        self.master_layout.addWidget(self.lbl_title)
+
+        self.lbl_message = QLabel(message, self)
+        self.lbl_message.setObjectName("LoginResultMessage")
+        self.lbl_message.setWordWrap(True)
+        self.lbl_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_message.setStyleSheet(
+            "QLabel { color: #e0e0e0; font-family: 'Courier New'; font-size: 12px; }"
+        )
+        self.master_layout.addWidget(self.lbl_message)
+
+        self.lbl_question = None
+        self.btn_save = None
+        self.btn_ok = None
+        self.button_row = QHBoxLayout()
+
+        if ask_to_save:
+            self.lbl_question = QLabel("Save this server anyway?", self)
+            self.lbl_question.setObjectName("SaveAnywayQuestion")
+            self.lbl_question.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.lbl_question.setStyleSheet(
+                "QLabel { color: #00ffff; font-family: 'Courier New'; font-weight: bold; font-size: 13px; }"
+            )
+            self.master_layout.addWidget(self.lbl_question)
+
+            self.btn_save = QPushButton("Save", self)
+            self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.btn_save.clicked.connect(self.accept)
+            self.btn_cancel = QPushButton("Cancel", self)
+            self.btn_cancel.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.btn_cancel.clicked.connect(self.reject)
+            self.button_row.addWidget(self.btn_save)
+            self.button_row.addWidget(self.btn_cancel)
+        else:
+            self.btn_ok = QPushButton("OK", self)
+            self.btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.btn_ok.clicked.connect(self.accept)
+            self.button_row.addWidget(self.btn_ok)
+
+        self.master_layout.addLayout(self.button_row)
+
+    def _apply_theme(self):
+        """Loads assets/ZAH.css when it is present."""
+        try:
+            css_path = asset_path("ZAH.css")
+            if os.path.exists(css_path):
+                with open(css_path, "r", encoding="utf-8") as handle:
+                    self.setStyleSheet(handle.read())
+                print(f"[SUCCESS] ServerLoginDialog: Applied theme stylesheet from {css_path}")
+            else:
+                print(f"[WARNING] ServerLoginDialog: Stylesheet not found at {css_path}")
+        except Exception as err:
+            print(f"[ERROR] ServerLoginDialog: Failed to load stylesheet: {err}")
+
+
 class ServerSwitchDialog(QDialog):
     """Lets the operator pick a saved ZeroGBridge server profile."""
 

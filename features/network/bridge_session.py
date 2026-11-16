@@ -12,6 +12,10 @@ import json
 import socket
 
 
+# Keep the GUI thread from sitting on a dead host. The cockpit logs this value.
+BRIDGE_LOGIN_TIMEOUT = 5.0
+
+
 class BridgeAuthError(Exception):
     """ZeroGBridge refused the auth:<token> handshake."""
 
@@ -19,6 +23,23 @@ class BridgeAuthError(Exception):
         self.status = status or "Denied"
         detail = message or self.status
         super().__init__(f"{self.status}: {detail}")
+
+
+def login_failure_message(host, port, err):
+    """Short reason shown in the server-login dialog and the [ERROR] log."""
+    label = f"{host}:{port}"
+    if isinstance(err, BridgeAuthError):
+        return f"Authentication was rejected for {label}."
+    if isinstance(err, (TimeoutError, socket.timeout)):
+        return f"Could not reach {label}: connection timed out"
+    if isinstance(err, (ConnectionRefusedError, socket.gaierror)):
+        return f"Could not reach {label}: host unreachable"
+    text = str(err).lower()
+    if "timed out" in text:
+        return f"Could not reach {label}: connection timed out"
+    if "refused" in text or "unreachable" in text or "no route" in text:
+        return f"Could not reach {label}: host unreachable"
+    return f"Could not reach {label}: {err}"
 
 
 def close_bridge_socket(sock):
@@ -64,7 +85,7 @@ def _read_auth_line(sock, timeout):
     return b"".join(pieces).decode("utf-8", errors="replace").strip().lstrip("\ufeff").strip()
 
 
-def open_authenticated_socket(host, port, token, timeout=5.0):
+def open_authenticated_socket(host, port, token, timeout=BRIDGE_LOGIN_TIMEOUT):
     """
     Opens a TCP session and completes auth:<token>.
     Returns the open socket after an Authenticated reply. Any other result
@@ -96,15 +117,17 @@ def open_authenticated_socket(host, port, token, timeout=5.0):
         message = str(payload.get("message", "Authentication failed"))
         print(f"[BridgeSession] -WARN- Authentication {status or 'failed'} on {host}:{port}.")
         raise BridgeAuthError(status or "Denied", message)
-    except BridgeAuthError:
+    except BridgeAuthError as err:
         close_bridge_socket(sock)
+        print(f"[ERROR] {login_failure_message(host, port, err)}")
         raise
-    except Exception:
+    except Exception as err:
         close_bridge_socket(sock)
+        print(f"[ERROR] {login_failure_message(host, port, err)}")
         raise
 
 
-def switch_authenticated_socket(current_sock, host, port, token, timeout=5.0):
+def switch_authenticated_socket(current_sock, host, port, token, timeout=BRIDGE_LOGIN_TIMEOUT):
     """
     Closes the current ZeroGBridge session first, then authenticates to host:port.
     The closed socket is not reused. On auth failure the new socket is closed too.

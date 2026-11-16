@@ -24,7 +24,13 @@ from features.dashboard.player_manager import PlayerManager
 from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.popups.active_entities_popup import ActiveEntitiesPopup
 from features.dashboard.popups.player_registry_popup import PlayerRegistryPopup
-from features.network.bridge_session import open_authenticated_socket, close_bridge_socket, switch_authenticated_socket
+from features.network.bridge_session import (
+    BRIDGE_LOGIN_TIMEOUT,
+    close_bridge_socket,
+    login_failure_message,
+    open_authenticated_socket,
+    switch_authenticated_socket,
+)
 from features.network.connection import NetworkWizardOverlay
 from features.network.server_config import (
     add_server_profile,
@@ -34,7 +40,7 @@ from features.network.server_config import (
     registry_cache_for,
     set_active_server,
 )
-from features.network.server_switch import ServerSwitchDialog
+from features.network.server_switch import ServerLoginDialog, ServerSwitchDialog
 
 class TelemetryWidget(QFrame):
     """
@@ -589,11 +595,33 @@ class MainCockpit(QMainWindow):
         self._refresh_after_server_switch(self.config)
         return True
 
+    def _show_server_login_dialog(self, message, ask_to_save=False):
+        """Modal result for File > Log into another server. Returns True when accepted."""
+        print(f"[STATUS] Server login dialog: {message}")
+        if ask_to_save:
+            print("[STATUS] Save this server anyway?")
+        dialog = ServerLoginDialog(message, ask_to_save=ask_to_save, parent=self)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        if ask_to_save:
+            print(f"[STATUS] Save this server anyway? {'yes' if accepted else 'no'}")
+        return accepted
+
+    def _save_entered_server(self, ip, port_text, token, make_active):
+        """Writes one profile. Logs [ERROR] and shows a dialog when the write fails."""
+        try:
+            add_server_profile(ip, port_text, token, make_active=make_active)
+        except Exception as err:
+            print(f"[ERROR] Could not write server profile {ip}:{port_text}: {err}")
+            self.system_logs_box.append(f"[ERROR] Could not write server profile {ip}:{port_text}: {err}")
+            self._show_server_login_dialog(f"Could not save {ip}:{port_text}: {err}")
+            return False
+        return True
+
     def _on_log_into_another_server(self):
         """
         Opens the network wizard for another host, port, and auth token.
-        The profile is saved only after that bridge accepts the handshake,
-        and the other saved servers are left in place.
+        A failed handshake still offers to save the profile so Switch servers can list it.
+        The current session stays up when the new server is only saved.
         """
         print("[UI EVENT] Log into another server requested.")
         wizard = NetworkWizardOverlay(self, persist_profile=False)
@@ -606,36 +634,63 @@ class MainCockpit(QMainWindow):
         port_text = str(profile.get("input_port", "")).strip()
         token = str(profile.get("input_pass", "") or "")
         if not ip or not port_text:
-            self.system_logs_box.append("[NETWORK WARNING] Server host and port are required.")
+            print("[ERROR] Server host and port are required.")
+            self.system_logs_box.append("[ERROR] Server host and port are required.")
+            self._show_server_login_dialog("Server host and port are required.")
             return
         try:
             port = int(port_text)
         except (TypeError, ValueError):
-            self.system_logs_box.append("[NETWORK WARNING] Server port is not a number.")
+            print(f"[ERROR] Server port is not a number: {port_text}")
+            self.system_logs_box.append(f"[ERROR] Server port is not a number: {port_text}")
+            self._show_server_login_dialog(f"Server port is not a number: {port_text}")
             return
 
-        print(f"[STATUS] Checking auth for additional server {ip}:{port}...")
+        print(
+            f"[STATUS] Checking auth for additional server {ip}:{port} "
+            f"(timeout {BRIDGE_LOGIN_TIMEOUT:.0f}s)..."
+        )
         try:
-            probe = open_authenticated_socket(ip, port, token)
+            probe = open_authenticated_socket(ip, port, token, timeout=BRIDGE_LOGIN_TIMEOUT)
             close_bridge_socket(probe)
         except Exception as err:
-            print(f"[WARNING] Additional server login failed: {err}")
-            self.system_logs_box.append(
-                f"[NETWORK WARNING] Login failed for {ip}:{port}. Current session was left open. {err}"
-            )
+            reason = login_failure_message(ip, port, err)
+            print(f"[STATUS] Handshake failed for {ip}:{port}. The current session was left open.")
+            self.system_logs_box.append(f"[ERROR] {reason}")
+            if not self._show_server_login_dialog(reason, ask_to_save=True):
+                print(f"[STATUS] Server profile {ip}:{port} was not saved.")
+                self.system_logs_box.append(f"[STATUS] Server profile {ip}:{port} was not saved.")
+                return
+            if self._save_entered_server(ip, port_text, token, make_active=False):
+                print(f"[STATUS] Saved server profile {ip}:{port} after a failed handshake.")
+                self.system_logs_box.append(
+                    f"[STATUS] Saved server profile {ip}:{port} after a failed handshake."
+                )
             return
 
-        add_server_profile(ip, port_text, token, make_active=False)
-        self._switch_to_saved_profile({
+        print(f"[STATUS] Additional server {ip}:{port} authenticated.")
+        if not self._save_entered_server(ip, port_text, token, make_active=False):
+            return
+        print(f"[STATUS] Saved server profile {ip}:{port}.")
+        switched = self._switch_to_saved_profile({
             "input_ip": ip,
             "input_port": port_text,
             "input_pass": token,
         })
+        if switched:
+            message = f"Connected to {ip}:{port}. The server profile was saved."
+        else:
+            message = f"Saved {ip}:{port}. The live session could not switch to that server."
+        print(f"[STATUS] {message}")
+        self.system_logs_box.append(f"[STATUS] {message}")
+        self._show_server_login_dialog(message)
 
     def _on_switch_servers(self):
         """Opens the saved-server list and reconnects to the operator's choice."""
         print("[UI EVENT] Switch servers requested.")
+        print("[STATUS] Reloading saved servers from disk.")
         servers, active_index = list_server_profiles()
+        print(f"[STATUS] Loaded {len(servers)} saved server profile(s) from disk.")
         if not servers:
             self.system_logs_box.append("[NETWORK WARNING] No saved servers yet. Use Log into another server first.")
             print("[WARNING] Switch servers opened with an empty profile list.")

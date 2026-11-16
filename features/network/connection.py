@@ -195,8 +195,14 @@ class NetworkWizardOverlay(QDialog):
             "input_pass": self.input_pass.text().strip(),
         }
         self.entered_profile = config_data
+        print(
+            f"[STATUS] Network wizard accepted for "
+            f"{config_data['input_ip'] or 'BLANK'}:{config_data['input_port'] or 'BLANK'}."
+        )
 
-        # 2. Persistence - add or update this server and keep every other profile
+        # 2. Persistence - add or update this server and keep every other profile.
+        # File > Log into another server leaves this False and saves after the
+        # cockpit shows the result dialog.
         if self.persist_profile:
             add_server_profile(
                 config_data["input_ip"],
@@ -204,6 +210,8 @@ class NetworkWizardOverlay(QDialog):
                 config_data["input_pass"],
             )
             print("[SUCCESS] Network configuration saved as a server profile.")
+        else:
+            print("[STATUS] Wizard handed the server to the cockpit. It is not saved yet.")
 
         # 3. Handoff
         self.accept()
