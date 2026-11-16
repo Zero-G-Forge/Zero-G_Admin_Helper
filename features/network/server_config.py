@@ -48,6 +48,7 @@ def _profile_from_mapping(raw):
         "input_port": str(raw.get("input_port", "")).strip(),
         "input_pass": str(raw.get("input_pass", "")).strip(),
         "bridge_port": bridge_port_of(raw),
+        "server_name": str(raw.get("server_name", "") or "").strip(),
     }
 
 
@@ -71,6 +72,38 @@ def _filename_piece(value):
     return "".join(cleaned) or "x"
 
 
+def _coerce_active_index(value, count):
+    """Turns active_index into an in-range int. Bad values fall back to the first profile."""
+    if isinstance(value, bool) or value is None:
+        index = 0
+    else:
+        try:
+            index = int(value)
+        except (TypeError, ValueError):
+            print(f"[WARNING] active_index {value!r} is not a number. Using the first profile.")
+            index = 0
+    if count <= 0:
+        return 0
+    if index < 0 or index >= count:
+        print(f"[WARNING] active_index {index} is outside the saved server list. Using the first profile.")
+        return 0
+    return index
+
+
+def switch_list_label(profile):
+    """
+    Switch Servers row: '<server_name> - <ip>' or just '<ip>'.
+    Ports are intentionally left out of this label.
+    """
+    if not isinstance(profile, dict):
+        return "unknown"
+    ip = str(profile.get("input_ip", "")).strip() or "unknown"
+    name = str(profile.get("server_name", "") or "").strip()
+    if name:
+        return f"{name} - {ip}"
+    return ip
+
+
 def game_endpoint(profile):
     """Game server ip:port. This is the port the operator typed, not bridge_port."""
     if not isinstance(profile, dict):
@@ -81,8 +114,9 @@ def game_endpoint(profile):
 
 
 def profile_label(profile):
-    """Switch-list text: game endpoint, then the ZeroGBridge port."""
-    return f"{game_endpoint(profile)} (bridge {bridge_port_of(profile)})"
+    """Log text. Keeps the game port and bridge port. The switch list uses switch_list_label."""
+    named = switch_list_label(profile)
+    return f"{named} [{game_endpoint(profile)} bridge {bridge_port_of(profile)}]"
 
 
 def same_server_endpoint(left, right):
@@ -130,9 +164,7 @@ def load_server_store(config_path=None):
                 needs_bridge_port = True
             servers.append(_profile_from_mapping(entry))
 
-    active_index = data.get("active_index", 0)
-    if not isinstance(active_index, int) or active_index < 0 or (servers and active_index >= len(servers)):
-        active_index = 0
+    active_index = _coerce_active_index(data.get("active_index", 0), len(servers))
 
     store = {"active_index": active_index, "servers": servers}
     if needs_bridge_port:
@@ -167,9 +199,7 @@ def get_active_profile(config_path=None):
     if not servers:
         return {}
 
-    active_index = store.get("active_index", 0)
-    if not isinstance(active_index, int) or active_index < 0 or active_index >= len(servers):
-        active_index = 0
+    active_index = _coerce_active_index(store.get("active_index", 0), len(servers))
     return dict(servers[active_index])
 
 
@@ -177,9 +207,7 @@ def list_server_profiles(config_path=None):
     """Returns (profiles, active_index). Profiles are copies."""
     store = load_server_store(config_path)
     servers = [dict(entry) for entry in (store.get("servers") or [])]
-    active_index = store.get("active_index", 0)
-    if not isinstance(active_index, int) or active_index < 0 or active_index >= len(servers):
-        active_index = 0
+    active_index = _coerce_active_index(store.get("active_index", 0), len(servers))
     return servers, active_index
 
 
@@ -231,6 +259,24 @@ def set_active_server(ip, port, config_path=None):
             return dict(server)
 
     print(f"[WARNING] No saved server profile for {profile_label(target)}")
+    return None
+
+
+def set_server_name(ip, port, server_name, config_path=None):
+    """Stores a display name on one profile. A blank name clears it. The token is not logged."""
+    store = load_server_store(config_path)
+    servers = list(store.get("servers") or [])
+    target = {"input_ip": ip, "input_port": port}
+    name = str(server_name or "").strip()
+    for server in servers:
+        if same_server_endpoint(server, target):
+            server["server_name"] = name
+            store["servers"] = servers
+            save_server_store(store, config_path)
+            print(f"[SUCCESS] Server display name for {ip} set to {name or '(blank)'}.")
+            return dict(server)
+
+    print(f"[WARNING] No saved server profile to rename at {ip}.")
     return None
 
 
