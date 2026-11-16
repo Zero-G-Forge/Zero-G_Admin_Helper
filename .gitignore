@@ -38,3 +38,6 @@ ZeroGBridge/obj/
 *.suo
 *.csproj.user
 EOF
+
+# ZGB Portal example data (tracked)
+!Examples/**/*.json

@@ -1,0 +1,8 @@
+{
+  "_comment": "Example IronPython scripts for the ZeroGBridge Portal BRIDGE tab. Order = list order.",
+  "scripts": [
+    {"file": "greet_on_join.py", "hook": "player_joined", "enabled": true, "time_limit_ms": 50, "live": true},
+    {"file": "death_notice.py", "hook": "player_died", "enabled": true, "time_limit_ms": 50, "live": true},
+    {"file": "starter_kit.py", "hook": "player_joined", "enabled": false, "time_limit_ms": 80, "live": false}
+  ]
+}

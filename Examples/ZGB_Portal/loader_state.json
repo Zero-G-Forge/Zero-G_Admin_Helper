@@ -1,0 +1,19 @@
+{
+  "_comment": "Example data for the ZeroGBridge Portal LOADER tab. Not live. Times are America/Chicago.",
+  "server_name": "Zero-G Reborn (GTX)",
+  "loader_version": "1.0.0",
+  "core_version": "1.4.2",
+  "loaded_since": "2026-11-16T10:42:00",
+  "last_result": "OK — 1.4.2 self-test passed",
+  "last_ok": true,
+  "players_online": 2,
+  "port": 30500,
+  "default_core": "ZeroGBridge.Core.1.4.3.dll",
+  "drop_core": "ZeroGBridge.Core.1.4.4.dll",
+  "history": [
+    {"version": "1.4.2", "when": "2026-11-16T10:42:00", "result": "OK", "note": "Current core"},
+    {"version": "1.4.1", "when": "2026-11-15T03:18:00", "result": "OK", "note": ""},
+    {"version": "1.4.0", "when": "2026-11-12T23:05:00", "result": "OK", "note": ""},
+    {"version": "1.3.9", "when": "2026-11-10T20:22:00", "result": "Failed", "note": "Rolled back to 1.3.8"}
+  ]
+}

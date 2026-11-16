@@ -43,6 +43,7 @@ from features.network.server_config import (
     switch_list_label,
 )
 from features.network.server_switch import ServerLoginDialog, ServerNameDialog, ServerSwitchDialog
+from features.dashboard.zgb_portal import ZeroGBridgePortal
 
 class TelemetryWidget(QFrame):
     """
@@ -109,6 +110,7 @@ class MainCockpit(QMainWindow):
         # Instantiate local database manager backed by data/player_registry_cache.json
         self.player_manager = PlayerManager()
         self.config = config
+        self.zgb_portal = None
 
         # 1. Base UI Setup
         print("[DEBUG] MainCockpit: Initializing Structural Window...")
@@ -186,6 +188,30 @@ class MainCockpit(QMainWindow):
         file_menu.addAction(logout_action)
         file_menu.addSeparator()  # Native visual divider line
         file_menu.addAction(exit_action)
+
+        # 5. View menu, directly to the right of File
+        view_menu = menu_bar.addMenu("&View")
+
+        portal_action = QAction("ZeroGBridge &Portal", self)
+        portal_action.setStatusTip("Open the ZeroGBridge Loader and Bridge viewer (simulated, no server commands)")
+        portal_action.triggered.connect(self._on_open_zgb_portal)
+        view_menu.addAction(portal_action)
+
+    def _on_open_zgb_portal(self):
+        """Opens the ZeroGBridge Portal window, or raises it if it is already open."""
+        portal = getattr(self, "zgb_portal", None)
+        if portal is None:
+            portal = ZeroGBridgePortal(parent=self)
+            portal.destroyed.connect(self._on_zgb_portal_closed)
+            self.zgb_portal = portal
+            print("[DEBUG] MainCockpit: ZeroGBridge Portal opened.")
+        portal.show()
+        portal.raise_()
+        portal.activateWindow()
+        return portal
+
+    def _on_zgb_portal_closed(self, *_):
+        self.zgb_portal = None
 
     def setup_zones(self):
         """Constructs layout zones across the central dashboard canvas."""
