@@ -94,3 +94,28 @@ def test_view_menu_opens_zgb_portal(qapp, monkeypatch):
         assert window.zgb_portal is None
     finally:
         window.close()
+
+
+def test_portal_borders_are_muted():
+    """Portal styles only: no neon-cyan borders (ZAH.css is left alone)."""
+    import re
+
+    for line in hot_reload_panel.PANEL_QSS.splitlines():
+        if re.search(r"\bborder(-[a-z]+)?\s*:", line):
+            assert "#00d4ff" not in line.lower(), line
+            assert "#00ffff" not in line.lower(), line
+
+
+def test_portal_tabs_scroll_when_window_is_small(qapp):
+    del qapp
+    portal = ZeroGBridgePortal()
+    try:
+        portal.resize(900, 600)
+        portal.show()
+        portal.tabs.setCurrentIndex(0)
+        QApplication.processEvents()
+        area = portal.tabs.widget(0)
+        assert area.widget() is portal.loader
+        assert area.verticalScrollBar().maximum() > 0
+    finally:
+        portal.close()

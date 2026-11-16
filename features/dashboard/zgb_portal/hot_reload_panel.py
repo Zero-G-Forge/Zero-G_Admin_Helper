@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -69,7 +70,17 @@ COLOR_FAIL = "#ff3355"
 COLOR_WARN = "#ffaa33"
 COLOR_CYAN = "#00d4ff"
 COLOR_TEXT = "#e0e0e0"
-COLOR_DIM = "#7aa0b0"
+COLOR_DIM = "#a8c2cf"      # help text / dim log lines (brightened for readability)
+COLOR_LABEL = "#c3d6e0"    # field labels (Server, Loader version, ...)
+
+# Portal-only border palette: muted teal-grey instead of neon cyan.
+BORDER = "#335a66"
+BORDER_SOFT = "#26424c"
+BORDER_HOVER = "#5d8f9c"
+
+# Sans for labels/body, monospace for logs, paths, versions and code.
+UI_FONT = '"Noto Sans", "DejaVu Sans", "Segoe UI", sans-serif'
+MONO_FONT = FONT_FAMILY
 
 PANEL_QSS = f"""
 /* Supplemental theme for the ZeroGBridge Portal. ZAH.css assumes the cockpit
@@ -84,7 +95,7 @@ QWidget#HotReloadCanvas {{
 
 QFrame#TelemetryPanel, QFrame#ControlPanel, QFrame#PlayerRegistry, QFrame#ConsoleFrame {{
     background-color: rgba(15, 25, 35, 220);
-    border: 1px solid #00d4ff;
+    border: 1px solid {BORDER};
     border-radius: 5px;
 }}
 
@@ -143,7 +154,7 @@ QLabel#PopupFooterLabel {{
 QLineEdit#CommandInput {{
     background-color: rgba(15, 25, 35, 220);
     color: #00ffff;
-    border: 1px solid #00d4ff;
+    border: 1px solid {BORDER};
     border-radius: 3px;
     padding: 4px 8px;
     font-family: {FONT_FAMILY};
@@ -154,7 +165,7 @@ QLineEdit#CommandInput {{
 QTextEdit#ConsoleDisplay {{
     background-color: rgba(10, 15, 25, 230);
     color: {COLOR_TEXT};
-    border: 1px solid #005577;
+    border: 1px solid {BORDER_SOFT};
     border-radius: 3px;
     font-family: {FONT_FAMILY};
     font-size: 11px;
@@ -164,7 +175,7 @@ QTextEdit#ConsoleDisplay {{
 QTableWidget#PlayerRegistryTable {{
     background-color: rgba(10, 15, 25, 230);
     color: {COLOR_TEXT};
-    border: 1px solid #005577;
+    border: 1px solid {BORDER_SOFT};
     border-radius: 3px;
     gridline-color: #1a3344;
     font-family: {FONT_FAMILY};
@@ -180,7 +191,7 @@ QTableWidget#PlayerRegistryTable::item {{
 QHeaderView::section, QTableWidget#PlayerRegistryTable QHeaderView::section {{
     background-color: #141e2d;
     color: #00d4ff;
-    border: 1px solid #005577;
+    border: 1px solid {BORDER_SOFT};
     font-weight: bold;
     font-family: {FONT_FAMILY};
     padding: 5px 6px;
@@ -188,13 +199,13 @@ QHeaderView::section, QTableWidget#PlayerRegistryTable QHeaderView::section {{
 
 QTableCornerButton::section {{
     background-color: #141e2d;
-    border: 1px solid #005577;
+    border: 1px solid {BORDER_SOFT};
 }}
 
 QPushButton#ExecuteButton, QPushButton#MatrixButton, QPushButton#DangerButton {{
     background-color: rgba(0, 85, 119, 180);
     color: #ffffff;
-    border: 1px solid #00d4ff;
+    border: 1px solid {BORDER};
     border-radius: 3px;
     font-family: {FONT_FAMILY};
     font-weight: bold;
@@ -205,7 +216,7 @@ QPushButton#ExecuteButton, QPushButton#MatrixButton, QPushButton#DangerButton {{
 
 QPushButton#ExecuteButton:hover, QPushButton#MatrixButton:hover {{
     background-color: rgba(0, 150, 200, 190);
-    border: 1px solid #ffffff;
+    border: 1px solid {BORDER_HOVER};
     color: #00ffff;
 }}
 
@@ -223,7 +234,7 @@ QPushButton#DangerButton {{
 
 QPushButton#DangerButton:hover {{
     background-color: rgba(180, 90, 0, 200);
-    border: 1px solid #ffffff;
+    border: 1px solid {BORDER_HOVER};
     color: {COLOR_WARN};
 }}
 
@@ -237,7 +248,7 @@ QCheckBox {{
 QCheckBox::indicator {{
     width: 14px;
     height: 14px;
-    border: 1px solid #00d4ff;
+    border: 1px solid {BORDER};
     border-radius: 2px;
     background-color: rgba(15, 25, 35, 220);
 }}
@@ -248,7 +259,7 @@ QCheckBox::indicator:checked {{
 
 QProgressBar#ReloadProgress {{
     background-color: rgba(10, 15, 25, 230);
-    border: 1px solid #005577;
+    border: 1px solid {BORDER_SOFT};
     border-radius: 3px;
     color: #00ffff;
     font-family: {FONT_FAMILY};
@@ -279,7 +290,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
 }}
 
 QTabWidget::pane {{
-    border: 1px solid #00d4ff;
+    border: 1px solid {BORDER};
     border-radius: 5px;
     background-color: #0c1020;
     top: -1px;
@@ -288,7 +299,7 @@ QTabWidget::pane {{
 QTabBar::tab {{
     background-color: rgba(15, 25, 35, 220);
     color: #00d4ff;
-    border: 1px solid #005577;
+    border: 1px solid {BORDER_SOFT};
     border-bottom: none;
     border-top-left-radius: 3px;
     border-top-right-radius: 3px;
@@ -302,7 +313,7 @@ QTabBar::tab {{
 QTabBar::tab:selected {{
     background-color: rgba(0, 85, 119, 200);
     color: #00ffff;
-    border: 1px solid #00d4ff;
+    border: 1px solid {BORDER};
     border-bottom: 1px solid #0c1020;
 }}
 
@@ -314,7 +325,7 @@ QTabBar::tab:hover {{
 QTreeWidget#ApiTree, QListWidget#ScriptList {{
     background-color: rgba(10, 15, 25, 230);
     color: {COLOR_TEXT};
-    border: 1px solid #005577;
+    border: 1px solid {BORDER_SOFT};
     border-radius: 3px;
     font-family: {FONT_FAMILY};
     font-size: 11px;
@@ -333,7 +344,7 @@ QTreeWidget#ApiTree::item:selected, QListWidget#ScriptList::item:selected {{
 QPlainTextEdit#ScriptEditor {{
     background-color: rgba(10, 15, 25, 240);
     color: {COLOR_TEXT};
-    border: 1px solid #005577;
+    border: 1px solid {BORDER_SOFT};
     border-radius: 3px;
     font-family: {FONT_FAMILY};
     font-size: 11px;
@@ -345,7 +356,7 @@ QPlainTextEdit#ScriptEditor {{
 QComboBox, QSpinBox {{
     background-color: rgba(15, 25, 35, 220);
     color: #00ffff;
-    border: 1px solid #00d4ff;
+    border: 1px solid {BORDER};
     border-radius: 3px;
     padding: 3px 6px;
     font-family: {FONT_FAMILY};
@@ -362,11 +373,11 @@ QComboBox QAbstractItemView {{
     background-color: #0c1020;
     color: #00ffff;
     selection-background-color: #005577;
-    border: 1px solid #00d4ff;
+    border: 1px solid {BORDER};
 }}
 
 QSplitter::handle {{
-    background-color: #005577;
+    background-color: {BORDER_SOFT};
 }}
 
 QSplitter::handle:horizontal {{
@@ -375,6 +386,157 @@ QSplitter::handle:horizontal {{
 
 QSplitter::handle:vertical {{
     height: 3px;
+}}
+
+/* ---- Readability pass (portal only) ---------------------------------- */
+
+QWidget#HotReloadCanvas {{
+    font-family: {UI_FONT};
+    font-size: 14px;
+}}
+
+QScrollArea#PortalScroll, QScrollArea#PortalScroll > QWidget > QWidget {{
+    background-color: #0c1020;
+    border: none;
+}}
+
+QLabel {{
+    font-family: {UI_FONT};
+    font-size: 14px;
+}}
+
+QLabel#PopupHeaderLabel {{
+    font-size: 20px;
+}}
+
+QLabel#SectionHeader {{
+    color: #4fe0ff;
+    font-size: 15px;
+    letter-spacing: 1px;
+    padding-bottom: 2px;
+}}
+
+QLabel#FieldLabel {{
+    color: {COLOR_LABEL};
+    font-size: 14px;
+}}
+
+QLabel#FieldValue {{
+    color: #7ff4ff;
+    font-family: {MONO_FONT};
+    font-size: 15px;
+}}
+
+QLabel#SubtitleLabel {{
+    color: {COLOR_DIM};
+    font-size: 13px;
+}}
+
+QLabel#PopupFooterLabel {{
+    color: #bfefff;
+    font-size: 13px;
+}}
+
+QLineEdit#CommandInput {{
+    font-family: {MONO_FONT};
+    font-size: 13px;
+    padding: 6px 10px;
+    min-height: 24px;
+}}
+
+QTextEdit#ConsoleDisplay {{
+    color: #e8f1f5;
+    font-family: {MONO_FONT};
+    font-size: 14px;
+    padding: 8px;
+}}
+
+QPlainTextEdit#ScriptEditor {{
+    font-family: {MONO_FONT};
+    font-size: 14px;
+    padding: 8px;
+}}
+
+QTableWidget#PlayerRegistryTable {{
+    color: #dfeaf0;
+    font-family: {UI_FONT};
+    font-size: 14px;
+    gridline-color: #1f3540;
+    background-color: #0d1622;
+    alternate-background-color: #142230;
+}}
+
+QTableWidget#PlayerRegistryTable::item {{
+    padding: 6px 8px;
+}}
+
+QHeaderView::section, QTableWidget#PlayerRegistryTable QHeaderView::section {{
+    background-color: #17283a;
+    color: #7fe6ff;
+    border: 1px solid {BORDER_SOFT};
+    font-family: {UI_FONT};
+    font-size: 14px;
+    font-weight: bold;
+    padding: 8px 8px;
+}}
+
+QTreeWidget#ApiTree {{
+    color: #dfeaf0;
+    font-family: {UI_FONT};
+    font-size: 14px;
+}}
+
+QTreeWidget#ApiTree::item {{
+    padding: 5px 4px;
+}}
+
+QPushButton#ExecuteButton, QPushButton#MatrixButton, QPushButton#DangerButton {{
+    font-family: {UI_FONT};
+    font-size: 14px;
+    padding: 8px 16px;
+    min-height: 32px;
+}}
+
+QPushButton#ExecuteButton:disabled, QPushButton#MatrixButton:disabled, QPushButton#DangerButton:disabled {{
+    background-color: rgba(30, 42, 54, 200);
+    color: #8a9aa6;
+    border: 1px dashed #4a5c66;
+}}
+
+QCheckBox {{
+    color: #cfeef8;
+    font-family: {UI_FONT};
+    font-size: 14px;
+}}
+
+QCheckBox:disabled {{
+    color: #7d8d98;
+}}
+
+QCheckBox::indicator {{
+    width: 16px;
+    height: 16px;
+}}
+
+QComboBox, QSpinBox {{
+    font-family: {MONO_FONT};
+    font-size: 14px;
+    min-height: 28px;
+}}
+
+QProgressBar#ReloadProgress {{
+    font-size: 12px;
+    min-height: 20px;
+}}
+
+QTabBar::tab {{
+    font-family: {UI_FONT};
+    font-size: 14px;
+    padding: 8px 32px;
+}}
+
+QScrollBar:vertical {{
+    width: 12px;
 }}
 """
 
@@ -447,7 +609,7 @@ class ConfirmDialog(QDialog):
         self.setObjectName("HotReloadCanvas")
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setFixedSize(520, 240)
+        self.setFixedSize(620, 300)
         self.setStyleSheet(load_stylesheet())
 
         layout = QVBoxLayout(self)
@@ -460,7 +622,7 @@ class ConfirmDialog(QDialog):
 
         msg = QLabel(body)
         msg.setWordWrap(True)
-        msg.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 12px;")
+        msg.setStyleSheet(f"color: {COLOR_TEXT}; font-size: 14px;")
         layout.addWidget(msg, stretch=1)
 
         buttons = QHBoxLayout()
@@ -523,16 +685,16 @@ class HotReloadPanel(QWidget):
     def _init_ui(self) -> None:
         root = QVBoxLayout(self)
         if self.embedded:
-            root.setContentsMargins(12, 10, 12, 10)
+            root.setContentsMargins(12, 8, 12, 8)
         else:
             root.setContentsMargins(18, 16, 18, 14)
-        root.setSpacing(10)
+        root.setSpacing(8)
 
         root.addLayout(self._build_header())
         root.addWidget(self._build_status_frame())
         root.addWidget(self._build_actions_frame())
         root.addWidget(self._build_history_frame(), stretch=3)
-        root.addWidget(self._build_log_frame(), stretch=2)
+        root.addWidget(self._build_log_frame(), stretch=0)
 
         self.progress = QProgressBar()
         self.progress.setObjectName("ReloadProgress")
@@ -540,15 +702,20 @@ class HotReloadPanel(QWidget):
         self.progress.setValue(0)
         self.progress.setFormat("Idle")
         self.progress.setVisible(True)
-        root.addWidget(self.progress)
+        self.progress.setFixedWidth(360)
 
         self.footer = QLabel("Ready. Port 30500 is held by the loader.")
         self.footer.setObjectName("PopupFooterLabel")
-        root.addWidget(self.footer)
+
+        bottom = QHBoxLayout()
+        bottom.addWidget(self.footer, stretch=1)
+        bottom.addWidget(self.progress)
+        root.addLayout(bottom)
 
     def _build_header(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        titles = QVBoxLayout()
+        titles = QHBoxLayout()
+        titles.setSpacing(16)
         title = QLabel("ZeroGBridge Hot Reload")
         title.setObjectName("PopupHeaderLabel")
         subtitle = QLabel(
@@ -558,13 +725,13 @@ class HotReloadPanel(QWidget):
         subtitle.setObjectName("SubtitleLabel")
         subtitle.setWordWrap(True)
         titles.addWidget(title)
-        titles.addWidget(subtitle)
+        titles.addWidget(subtitle, stretch=1)
         row.addLayout(titles, stretch=1)
 
         self.badge = QLabel("LOADER ACTIVE")
         self.badge.setObjectName("StatusBadge")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.badge.setFixedHeight(28)
+        self.badge.setFixedHeight(34)
         row.addWidget(self.badge, alignment=Qt.AlignmentFlag.AlignTop)
         return row
 
@@ -580,8 +747,8 @@ class HotReloadPanel(QWidget):
         frame = QFrame()
         frame.setObjectName("TelemetryPanel")
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 8, 12, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(14, 10, 14, 12)
+        layout.setSpacing(8)
 
         hdr = QLabel("CONNECTION / STATUS")
         hdr.setObjectName("SectionHeader")
@@ -589,7 +756,7 @@ class HotReloadPanel(QWidget):
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(24)
-        grid.setVerticalSpacing(4)
+        grid.setVerticalSpacing(3)
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
 
@@ -623,7 +790,7 @@ class HotReloadPanel(QWidget):
         frame = QFrame()
         frame.setObjectName("ControlPanel")
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 8, 12, 10)
+        layout.setContentsMargins(14, 10, 14, 12)
         layout.setSpacing(8)
 
         hdr = QLabel("ACTIONS")
@@ -684,8 +851,8 @@ class HotReloadPanel(QWidget):
         frame = QFrame()
         frame.setObjectName("PlayerRegistry")
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 8, 12, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(14, 10, 14, 12)
+        layout.setSpacing(8)
 
         header = QHBoxLayout()
         hdr = QLabel("VERSION HISTORY")
@@ -707,15 +874,15 @@ class HotReloadPanel(QWidget):
         self.history.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.history.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.history.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.history.setAlternatingRowColors(False)
+        self.history.setAlternatingRowColors(True)
         hdr_view = self.history.horizontalHeader()
         hdr_view.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hdr_view.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         hdr_view.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         hdr_view.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.history.itemSelectionChanged.connect(self._on_history_selection)
-        self.history.setMinimumHeight(200)
-        self.history.verticalHeader().setDefaultSectionSize(26)
+        self.history.setMinimumHeight(154)
+        self.history.verticalHeader().setDefaultSectionSize(27)
         self.history.setCornerButtonEnabled(False)
         self.history.setShowGrid(True)
         layout.addWidget(self.history)
@@ -725,8 +892,8 @@ class HotReloadPanel(QWidget):
         frame = QFrame()
         frame.setObjectName("ConsoleFrame")
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 8, 12, 10)
-        layout.setSpacing(6)
+        layout.setContentsMargins(14, 10, 14, 12)
+        layout.setSpacing(8)
 
         hdr = QLabel("LOADER LOG")
         hdr.setObjectName("SectionHeader")
@@ -736,6 +903,8 @@ class HotReloadPanel(QWidget):
         self.log.setObjectName("ConsoleDisplay")
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("Loader events will appear here…")
+        self.log.setMinimumHeight(82)
+        self.log.setMaximumHeight(84)
         layout.addWidget(self.log)
         return frame
 
@@ -745,7 +914,7 @@ class HotReloadPanel(QWidget):
         self.badge.setText(text)
         self.badge.setStyleSheet(
             f"QLabel#StatusBadge {{"
-            f"  font-size: 11px; font-weight: bold; padding: 3px 10px;"
+            f"  font-size: 13px; font-weight: bold; padding: 4px 12px;"
             f"  border-radius: 3px; border: 1px solid {color}; color: {color};"
             f"  background-color: rgba(0, 0, 0, 80);"
             f"}}"
@@ -759,7 +928,7 @@ class HotReloadPanel(QWidget):
         self.lbl_since.setText(fmt_time(s.loaded_since))
         self.lbl_result.setText(s.last_result)
         self.lbl_result.setStyleSheet(
-            f"color: {COLOR_OK if s.last_ok else COLOR_FAIL}; font-size: 12px; font-weight: bold;"
+            f"color: {COLOR_OK if s.last_ok else COLOR_FAIL}; font-size: 15px; font-weight: bold;"
         )
         self.lbl_players.setText(str(s.players_online))
         self.lbl_port.setText(f"{s.port}  (held by loader)")
@@ -796,7 +965,9 @@ class HotReloadPanel(QWidget):
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 if col == 2:
                     item.setForeground(QColor(color))
-                elif current:
+                elif not current:
+                    item.setForeground(QColor("#d6e4ec"))
+                else:
                     item.setForeground(QColor("#00ffff"))
                     font = item.font()
                     font.setBold(True)
@@ -1117,6 +1288,40 @@ def _escape(text: str) -> str:
     )
 
 
+class _FitScrollArea(QScrollArea):
+    """Fills the viewport, and only scrolls when the window is smaller than
+    the panel's minimum size (plain widgetResizable grows to sizeHint, which
+    adds a scrollbar even when everything would fit)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(False)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+    def _fit(self) -> None:
+        w = self.widget()
+        if w is None:
+            return
+        need = w.minimumSizeHint()
+        vp = self.maximumViewportSize()
+        width, height = vp.width(), vp.height()
+        sb = self.style().pixelMetric(self.style().PixelMetric.PM_ScrollBarExtent)
+        if need.height() > height:
+            width -= sb
+        if need.width() > width:
+            height -= sb
+        w.resize(max(width, need.width()), max(height, need.height()))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._fit()
+
+
 class HotReloadWindow(QWidget):
     """Top-level mock window with LOADER and BRIDGE tabs."""
 
@@ -1130,15 +1335,17 @@ class HotReloadWindow(QWidget):
 
         self.setObjectName("HotReloadCanvas")
         self.setWindowTitle("Zero-G Admin Helper - ZeroGBridge")
-        self.setFixedSize(1280, 900)
+        self.resize(1280, 900)
+        self.setMinimumSize(900, 600)
         self.setStyleSheet(load_stylesheet())
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(14, 12, 14, 10)
-        root.setSpacing(8)
+        root.setContentsMargins(18, 16, 18, 14)
+        root.setSpacing(10)
 
         head = QHBoxLayout()
-        titles = QVBoxLayout()
+        titles = QHBoxLayout()
+        titles.setSpacing(16)
         title = QLabel("ZeroGBridge")
         title.setObjectName("PopupHeaderLabel")
         subtitle = QLabel(
@@ -1147,7 +1354,7 @@ class HotReloadWindow(QWidget):
         )
         subtitle.setObjectName("SubtitleLabel")
         titles.addWidget(title)
-        titles.addWidget(subtitle)
+        titles.addWidget(subtitle, stretch=1, alignment=Qt.AlignmentFlag.AlignBottom)
         head.addLayout(titles, stretch=1)
         root.addLayout(head)
 
@@ -1161,9 +1368,18 @@ class HotReloadWindow(QWidget):
 
         self.bridge = BridgePanel(parent=self, capture_mode=capture_mode, source=self.source)
 
-        self.tabs.addTab(self.loader, "  LOADER  ")
-        self.tabs.addTab(self.bridge, "  BRIDGE  ")
+        # Each tab scrolls if the window is smaller than the content.
+        self.tabs.addTab(self._scrollable(self.loader), "  LOADER  ")
+        self.tabs.addTab(self._scrollable(self.bridge), "  BRIDGE  ")
         root.addWidget(self.tabs, stretch=1)
+
+    @staticmethod
+    def _scrollable(panel: QWidget) -> QScrollArea:
+        area = _FitScrollArea()
+        area.setObjectName("PortalScroll")
+        area.setFrameShape(QFrame.Shape.NoFrame)
+        area.setWidget(panel)
+        return area
 
     def save_shot(self, path: Path) -> None:
         self.repaint()

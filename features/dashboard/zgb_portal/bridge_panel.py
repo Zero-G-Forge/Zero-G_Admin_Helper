@@ -50,7 +50,7 @@ COLOR_FAIL = "#ff3355"
 COLOR_WARN = "#ffaa33"
 COLOR_CYAN = "#00d4ff"
 COLOR_TEXT = "#e0e0e0"
-COLOR_DIM = "#7aa0b0"
+COLOR_DIM = "#a8c2cf"
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +670,7 @@ class BridgePanel(QWidget):
         self.badge = QLabel("ENGINE READY")
         self.badge.setObjectName("StatusBadge")
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.badge.setFixedHeight(28)
+        self.badge.setFixedHeight(34)
         header.addWidget(self.badge, alignment=Qt.AlignmentFlag.AlignTop)
         root.addLayout(header)
 
@@ -691,7 +691,7 @@ class BridgePanel(QWidget):
         frame = QFrame()
         frame.setObjectName("TelemetryPanel")
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setContentsMargins(14, 12, 14, 14)
         layout.setSpacing(10)
 
         left = QVBoxLayout()
@@ -870,7 +870,7 @@ class BridgePanel(QWidget):
         frame = QFrame()
         frame.setObjectName("ControlPanel")
         layout = QHBoxLayout(frame)
-        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setContentsMargins(14, 12, 14, 14)
         layout.setSpacing(10)
 
         left = QVBoxLayout()
@@ -881,7 +881,8 @@ class BridgePanel(QWidget):
         self.script_list.setObjectName("PlayerRegistryTable")
         self.script_list.setHorizontalHeaderLabels(["Script", "State", "Limit"])
         self.script_list.verticalHeader().setVisible(False)
-        self.script_list.verticalHeader().setDefaultSectionSize(24)
+        self.script_list.verticalHeader().setDefaultSectionSize(32)
+        self.script_list.setAlternatingRowColors(True)
         self.script_list.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.script_list.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.script_list.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
@@ -900,7 +901,7 @@ class BridgePanel(QWidget):
         left.addWidget(hint)
         left_w = QWidget()
         left_w.setLayout(left)
-        left_w.setFixedWidth(300)
+        left_w.setFixedWidth(340)
         layout.addWidget(left_w)
 
         right = QVBoxLayout()
@@ -913,7 +914,7 @@ class BridgePanel(QWidget):
         self.editor.setTabStopDistance(16 * 4)
         font = QFont("Courier Prime")
         font.setStyleHint(QFont.StyleHint.Monospace)
-        font.setPointSize(10)
+        font.setPointSize(12)
         self.editor.setFont(font)
         self.highlighter = PythonHighlighter(self.editor.document())
         right.addWidget(self.editor, stretch=3)
