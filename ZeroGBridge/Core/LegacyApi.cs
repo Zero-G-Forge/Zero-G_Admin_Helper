@@ -1,0 +1,281 @@
+// =====================================================================
+// MODULE: ZeroGBridge/Core/LegacyApi.cs
+// DESCRIPTION: Legacy ModInterface (Mif.dll) bridge used for in-game alerts
+// =====================================================================
+
+using System;
+using System.Collections.Concurrent;
+using System.Threading;
+using Eleon.Modding;
+
+namespace ZeroGBridge
+{
+    /// <summary>
+    /// Holds the legacy ModGameAPI handed to ModMain.Game_Start and runs Game_Request calls.
+    ///
+    /// Empyrion's mod loader instantiates ONE object for a class that implements both IMod and
+    /// ModInterface and assigns it to both slots, so Game_Start and Init arrive on the same instance.
+    /// The legacy API only exists in the DedicatedServer process (the one that owns port 30500).
+    ///
+    /// Threading: when Game_Update is ticking (game main thread), requests are queued and executed
+    /// from Game_Update. If Game_Update has not ticked in the last second, requests are executed
+    /// directly on the caller's thread (same as most legacy mods do).
+    /// </summary>
+    public static class LegacyApi
+    {
+        public enum RequestResult { Accepted, Rejected, NotAvailable, Timeout, Exception }
+
+        private sealed class Pending
+        {
+            public CmdId Cmd;
+            public ushort Seq;
+            public object Data;
+            public RequestResult Result = RequestResult.Timeout;
+            public string Error;
+            public readonly ManualResetEventSlim Done = new ManualResetEventSlim(false);
+            public int Claimed; // 0 = waiting, 1 = taken by executor or abandoned by caller
+        }
+
+        private static volatile ModGameAPI _api;
+        private static readonly ConcurrentQueue<Pending> Queue = new ConcurrentQueue<Pending>();
+        private static long _lastUpdateTicks; // DateTime.UtcNow.Ticks of the last Game_Update
+        private static int _seq = 40000;
+        private static int _unavailableWarned;
+        private static PlayerCache _playerCache;
+
+        // Faction list refresh: an immediate Id(1) request at start can return only a handful
+        // of factions before the world is loaded. Re-request once after 20 s, then every 5 min.
+        public const int DefaultInitialFactionRefreshDelayMs = 20000;
+        public const int DefaultFactionRefreshIntervalMs = 5 * 60 * 1000;
+        public static int InitialFactionRefreshDelayMs = DefaultInitialFactionRefreshDelayMs;
+        public static int FactionRefreshIntervalMs = DefaultFactionRefreshIntervalMs;
+
+        private static readonly object RefreshLock = new object();
+        private static Timer _refreshTimer;
+        private static int _loggedFactionCount = -1; // -1 = never logged
+        private static long _lastFactionRequestTicks;
+        private const int FactionChangedDebounceMs = 2000;
+
+        public static bool IsAvailable => _api != null;
+        public static int MainThreadId { get; private set; }
+        public static int LastExecThreadId { get; private set; }
+
+        public static bool UpdateIsTicking
+        {
+            get
+            {
+                long last = Interlocked.Read(ref _lastUpdateTicks);
+                return last != 0 && (DateTime.UtcNow.Ticks - last) < TimeSpan.TicksPerSecond;
+            }
+        }
+
+        public static void AttachPlayerCache(PlayerCache cache) { _playerCache = cache; }
+
+        public static void OnGameStart(ModGameAPI api)
+        {
+            _api = api;
+            Interlocked.Exchange(ref _unavailableWarned, 0);
+            ZgbLog.Write("[ZGB] -SUCCESS- Legacy ModInterface attached (Game_Start); in-game alerts available.");
+            RequestFactions();
+            StartFactionRefresh();
+        }
+
+        public static void OnGameExit()
+        {
+            StopFactionRefresh();
+            _api = null;
+            Interlocked.Exchange(ref _lastUpdateTicks, 0);
+            // Fail anything still queued
+            while (Queue.TryDequeue(out var p))
+            {
+                if (Interlocked.CompareExchange(ref p.Claimed, 1, 0) == 0)
+                {
+                    p.Result = RequestResult.NotAvailable;
+                    p.Done.Set();
+                }
+            }
+        }
+
+        /// <summary>Called from ModMain.Game_Update on the game main thread.</summary>
+        public static void OnGameUpdate()
+        {
+            MainThreadId = Thread.CurrentThread.ManagedThreadId;
+            Interlocked.Exchange(ref _lastUpdateTicks, DateTime.UtcNow.Ticks);
+            int budget = 20;
+            while (budget-- > 0 && Queue.TryDequeue(out var p))
+            {
+                if (Interlocked.CompareExchange(ref p.Claimed, 1, 0) != 0) continue; // caller timed out
+                Execute(p);
+                p.Done.Set();
+            }
+        }
+
+        public static void OnGameEvent(CmdId eventId, ushort seqNr, object data)
+        {
+            try
+            {
+                switch (eventId)
+                {
+                    case CmdId.Event_Get_Factions:
+                        var list = data as FactionInfoList;
+                        if (list?.factions != null && _playerCache != null)
+                        {
+                            foreach (var f in list.factions)
+                                _playerCache.UpsertFaction(f.factionId, f.abbrev, f.name);
+                            int total = _playerCache.FactionCount;
+                            int prev = Interlocked.Exchange(ref _loggedFactionCount, total);
+                            if (prev != total)
+                                ZgbLog.Write($"[ZGB] -INFO- Legacy Event_Get_Factions: {total} faction(s) cached for alert targeting.");
+                        }
+                        break;
+                    case CmdId.Event_Faction_Changed:
+                        RequestFactionsDebounced();
+                        break;
+                    case CmdId.Event_Error:
+                        var err = data as ErrorInfo;
+                        if (seqNr >= 40000)
+                        {
+                            ZgbLog.Write($"[ZGB] -WARN- Game reported Event_Error for bridge request seq {seqNr}: {(err != null ? err.errorType.ToString() : "unknown")}");
+                        }
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                ZgbLog.Write($"[ZGB] -WARN- Legacy Game_Event handler: {ex.Message}");
+            }
+        }
+
+        public static ushort NextSeq()
+        {
+            // 40000..65535 so bridge requests are recognizable in Event_Error
+            int v = Interlocked.Increment(ref _seq);
+            if (v > 65535)
+            {
+                Interlocked.CompareExchange(ref _seq, 40000, v);
+                v = Interlocked.Increment(ref _seq);
+            }
+            return (ushort)v;
+        }
+
+        public static void RequestFactions()
+        {
+            var api = _api;
+            if (api == null) return;
+            Interlocked.Exchange(ref _lastFactionRequestTicks, DateTime.UtcNow.Ticks);
+            try { api.Game_Request(CmdId.Request_Get_Factions, NextSeq(), new Id(1)); }
+            catch (Exception ex) { ZgbLog.Write($"[ZGB] -WARN- Request_Get_Factions failed: {ex.Message}"); }
+        }
+
+        /// <summary>
+        /// Starts (or restarts) the delayed faction refresh timer using the current
+        /// InitialFactionRefreshDelayMs / FactionRefreshIntervalMs values.
+        /// A delay of Timeout.Infinite or a negative value disables the timer.
+        /// </summary>
+        public static void StartFactionRefresh()
+        {
+            StopFactionRefresh();
+            if (_api == null) return;
+            int due = InitialFactionRefreshDelayMs;
+            int period = FactionRefreshIntervalMs;
+            if (due < 0 || due == Timeout.Infinite) return;
+            if (period <= 0 || period == Timeout.Infinite)
+                period = Timeout.Infinite;
+            lock (RefreshLock)
+            {
+                _refreshTimer = new Timer(OnFactionRefreshTick, null, due, period);
+            }
+        }
+
+        public static void StopFactionRefresh()
+        {
+            lock (RefreshLock)
+            {
+                var t = _refreshTimer;
+                _refreshTimer = null;
+                if (t != null)
+                {
+                    try { t.Dispose(); } catch { }
+                }
+            }
+        }
+
+        private static void OnFactionRefreshTick(object _)
+        {
+            try { RequestFactions(); }
+            catch { /* never throw from a timer */ }
+        }
+
+        private static void RequestFactionsDebounced()
+        {
+            long last = Interlocked.Read(ref _lastFactionRequestTicks);
+            if (last != 0 && (DateTime.UtcNow.Ticks - last) < TimeSpan.FromMilliseconds(FactionChangedDebounceMs).Ticks)
+                return;
+            RequestFactions();
+        }
+
+        /// <summary>
+        /// Runs one Game_Request and reports whether the game accepted it.
+        /// </summary>
+        public static RequestResult Request(CmdId cmd, object data, int timeoutMs, out string error)
+        {
+            error = null;
+            if (_api == null)
+            {
+                if (Interlocked.Exchange(ref _unavailableWarned, 1) == 0)
+                {
+                    ZgbLog.Write("[ZGB] -WARN- In-game alert requested but the legacy ModGameAPI is not attached (Game_Start not called in this process).");
+                }
+                error = "legacy API not attached";
+                return RequestResult.NotAvailable;
+            }
+
+            var p = new Pending { Cmd = cmd, Seq = NextSeq(), Data = data };
+
+            if (!UpdateIsTicking)
+            {
+                p.Claimed = 1;
+                Execute(p);
+                error = p.Error;
+                return p.Result;
+            }
+
+            Queue.Enqueue(p);
+            if (!p.Done.Wait(timeoutMs))
+            {
+                if (Interlocked.CompareExchange(ref p.Claimed, 1, 0) == 0)
+                {
+                    error = "main thread did not run the request in time";
+                    return RequestResult.Timeout;
+                }
+                // executor claimed it just now; wait for it to finish
+                p.Done.Wait(2000);
+            }
+            error = p.Error;
+            return p.Result;
+        }
+
+        private static void Execute(Pending p)
+        {
+            var api = _api;
+            LastExecThreadId = Thread.CurrentThread.ManagedThreadId;
+            if (api == null)
+            {
+                p.Result = RequestResult.NotAvailable;
+                p.Error = "legacy API not attached";
+                return;
+            }
+            try
+            {
+                bool ok = api.Game_Request(p.Cmd, p.Seq, p.Data);
+                p.Result = ok ? RequestResult.Accepted : RequestResult.Rejected;
+                if (!ok) p.Error = "Game_Request returned false";
+            }
+            catch (Exception ex)
+            {
+                p.Result = RequestResult.Exception;
+                p.Error = ex.GetType().Name + ": " + ex.Message;
+            }
+        }
+    }
+}

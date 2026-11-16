@@ -400,6 +400,92 @@ namespace ZeroGBridge
             }
         }
 
+        #region Alert target resolution (1.4)
+
+        /// <summary>
+        /// Adds or refreshes a faction from the legacy API (Event_Get_Factions).
+        /// Ids at or below the default human group (1) are ignored.
+        /// </summary>
+        public void UpsertFaction(int factionId, string abbrev, string name)
+        {
+            if (factionId <= DefaultHumanFactionId) return;
+            _factionLookup[factionId] = new FactionTag
+            {
+                FactionId = factionId,
+                Abbrev = string.IsNullOrWhiteSpace(abbrev) ? (name ?? "--") : abbrev.Trim(),
+                Name = string.IsNullOrWhiteSpace(name) ? (abbrev ?? "--") : name.Trim()
+            };
+        }
+
+        public int FactionCount => _factionLookup.Count;
+
+        /// <summary>
+        /// Resolves an alert faction target given as a numeric faction id or a tag
+        /// ("MEC", "[MEC]") or full name, case-insensitive, against the cached faction data.
+        /// </summary>
+        public bool TryResolveFaction(string idOrTag, out int factionId)
+        {
+            factionId = 0;
+            if (string.IsNullOrWhiteSpace(idOrTag)) return false;
+            string key = idOrTag.Trim();
+
+            if (int.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out int numeric))
+            {
+                if (numeric > DefaultHumanFactionId && _factionLookup.ContainsKey(numeric))
+                {
+                    factionId = numeric;
+                    return true;
+                }
+                // fall through: a tag can be numeric-looking (unlikely, but harmless)
+            }
+
+            string bare = key;
+            if (bare.Length >= 2 && bare.StartsWith("[") && bare.EndsWith("]"))
+                bare = bare.Substring(1, bare.Length - 2).Trim();
+            if (bare.Length == 0) return false;
+
+            foreach (var fac in _factionLookup.Values)
+            {
+                if (fac == null) continue;
+                if (string.Equals(fac.Abbrev, bare, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(fac.Name, bare, StringComparison.OrdinalIgnoreCase))
+                {
+                    factionId = fac.FactionId;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Resolves an alert player target given as an entity id or a Steam id against
+        /// the player cache. Returns the entity id the game API expects.
+        /// </summary>
+        public bool TryResolvePlayer(string entityOrSteamId, out int entityId, out PlayerRecord record)
+        {
+            entityId = 0;
+            record = null;
+            if (string.IsNullOrWhiteSpace(entityOrSteamId)) return false;
+            string key = entityOrSteamId.Trim();
+
+            foreach (var p in _allPlayers.Values)
+            {
+                if (p == null) continue;
+                bool match = string.Equals(p.entityId, key, StringComparison.Ordinal) ||
+                             string.Equals(p.steamId, key, StringComparison.Ordinal);
+                if (!match) continue;
+                if (int.TryParse(p.entityId, NumberStyles.Integer, CultureInfo.InvariantCulture, out int eid) && eid > 0)
+                {
+                    entityId = eid;
+                    record = p;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        #endregion
+
         public List<PlayerRecord> GetAllPlayers() => new List<PlayerRecord>(_allPlayers.Values);
         public List<PlayerRecord> GetOnlinePlayers() => _allPlayers.Values.Where(p => p.status == "Online").ToList();
 

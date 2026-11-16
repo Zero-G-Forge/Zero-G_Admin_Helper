@@ -2,14 +2,15 @@
 
 import os
 import sys
-import json
 from PyQt6.QtWidgets import QApplication, QDialog
 from PyQt6.QtCore import QEventLoop, QCoreApplication
 from PyQt6.QtGui import QIcon
 
 # Internal imports for registry modules
 from features.network.connection import is_network_ready
+from features.network.server_config import get_active_profile
 from features.dashboard.main_cockpit import MainCockpit
+from features.paths import asset_path
 
 import atexit
 from features.clear_pycache import clear_pycache
@@ -54,17 +55,16 @@ def main():
     # Initialize the core global window event loop using PyQt6
     app = QApplication(sys.argv)
 
-    # Dynamic Project Root Asset Traversal for the CSS Stylesheet
-    root_dir = os.path.dirname(os.path.abspath(__file__))
-
+    # Assets and data/ resolve from the app root (the folder that holds ZAH.py),
+    # never from the current working directory.
     # Application icon (used for every window and the taskbar)
-    icon_path = os.path.join(root_dir, "assets/branding/ZG_AdminHelper.png")
+    icon_path = asset_path("branding", "ZG_AdminHelper.png")
     if os.path.exists(icon_path):
         app.setWindowIcon(QIcon(icon_path))
         print("[SUCCESS] Application icon applied: ZG_AdminHelper.png")
     else:
         print(f"[WARNING] Application icon missing at: {icon_path}")
-    css_path = os.path.join(root_dir, "assets/ZAH.css")
+    css_path = asset_path("ZAH.css")
 
     # Ingest the centralized stylesheet via an immutable read stream
     if os.path.exists(css_path):
@@ -104,18 +104,17 @@ def main():
         print("[SUCCESS] Loading sequence complete. Launching Main Cockpit.")
         
         # --- LOAD CONFIGURATION ---
-        # Parse data/server_config.json to pass active credentials to the cockpit
-        config_path = os.path.join(root_dir, "data/server_config.json")
+        # Active server profile from data/server_config.json (app root, not cwd).
+        # A legacy single-server file is migrated before the cockpit sees it.
         app_config = {}
-        if os.path.exists(config_path):
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    app_config = json.load(f)
+        try:
+            app_config = get_active_profile()
+            if app_config.get("input_ip"):
                 print("[DEBUG] Configuration loaded successfully.")
-            except Exception as e:
-                print(f"[WARNING] Could not parse server_config.json: {e}")
-        else:
-            print("[WARNING] server_config.json not found on disk. Passing empty profile.")
+            else:
+                print("[WARNING] server_config.json not found on disk. Passing empty profile.")
+        except Exception as e:
+            print(f"[WARNING] Could not parse server_config.json: {e}")
         # -------------------------------
 
         # Pass the loaded config to MainCockpit

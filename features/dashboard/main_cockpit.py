@@ -13,16 +13,34 @@ from PyQt6 import QtCore
 from PyQt6.QtWidgets import (
     QMainWindow, QMenuBar, QMenu, QWidget, QGridLayout, QFrame, QLabel, QVBoxLayout, 
     QTextEdit, QHBoxLayout, QComboBox, QLineEdit, QPushButton, 
-    QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget
+    QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget, QDialog
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPainter, QPixmap, QAction, QKeySequence
 
 # Core background workers, database manager, and popup modal imports
+from features.auth.persistence import clear_login_session
 from features.dashboard.player_manager import PlayerManager
 from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.popups.active_entities_popup import ActiveEntitiesPopup
 from features.dashboard.popups.player_registry_popup import PlayerRegistryPopup
+from features.network.bridge_session import (
+    BRIDGE_LOGIN_TIMEOUT,
+    close_bridge_socket,
+    login_failure_message,
+    open_authenticated_socket,
+    switch_authenticated_socket,
+)
+from features.network.connection import NetworkWizardOverlay
+from features.network.server_config import (
+    add_server_profile,
+    get_active_profile,
+    list_server_profiles,
+    profile_label,
+    registry_cache_for,
+    set_active_server,
+)
+from features.network.server_switch import ServerLoginDialog, ServerSwitchDialog
 
 class TelemetryWidget(QFrame):
     """
@@ -140,9 +158,18 @@ class MainCockpit(QMainWindow):
         refresh_action.setStatusTip("Force a database sync refresh with the server mod bridge")
         refresh_action.triggered.connect(lambda: self.telemetry_worker.send_command("plys") if hasattr(self, 'telemetry_worker') and self.telemetry_worker else None)
 
+        login_server_action = QAction("&Log into another server", self)
+        login_server_action.setStatusTip("Authenticate to another ZeroGBridge server and save the profile")
+        login_server_action.triggered.connect(self._on_log_into_another_server)
+
+        switch_server_action = QAction("&Switch servers", self)
+        switch_server_action.setStatusTip("Close this session and reconnect to a saved server profile")
+        switch_server_action.triggered.connect(self._on_switch_servers)
+
         logout_action = QAction("&Log Out of ZAH", self)
         logout_action.setShortcut("Ctrl+Shift+L")
         logout_action.setStatusTip("Logs you out and back to main login screen")
+        logout_action.triggered.connect(self._on_log_out)
 
         exit_action = QAction("&Exit ZAH", self)
         exit_action.setShortcut("Ctrl+Q")
@@ -150,6 +177,9 @@ class MainCockpit(QMainWindow):
 
         # 4. Pack items cleanly into the layout
         file_menu.addAction(refresh_action)
+        file_menu.addSeparator()  # Native visual divider line
+        file_menu.addAction(login_server_action)
+        file_menu.addAction(switch_server_action)
         file_menu.addSeparator()  # Native visual divider line
         file_menu.addAction(logout_action)
         file_menu.addSeparator()  # Native visual divider line
@@ -398,58 +428,341 @@ class MainCockpit(QMainWindow):
     def _init_network_services(self):
         """
         Instantiates background telemetry streaming worker and wires UI control triggers.
-        Dynamically extracts host IP and Port from server_config.json.
+        Dynamically extracts host IP and Port from the active server profile.
         """
-        target_ip = None
-        target_port = 30500
+        self._wire_command_inputs()
 
-        # Step 1: Attempt lookup from passed configuration dictionary
-        if self.config and isinstance(self.config, dict):
-            target_ip = self.config.get("input_ip")
-            raw_port = self.config.get("input_port")
-            if raw_port:
-                target_port = int(raw_port)
+        target_ip, target_port, token = self._resolve_server_target()
 
-        # Step 2: Fallback direct read from data/server_config.json on disk
-        if not target_ip:
-            config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'server_config.json')
-            if os.path.exists(config_path):
-                try:
-                    with open(config_path, "r", encoding="utf-8") as f:
-                        cfg = json.load(f)
-                        target_ip = cfg.get("input_ip")
-                        raw_port = cfg.get("input_port")
-                        if raw_port:
-                            target_port = int(raw_port)
-                except Exception as e:
-                    print(f"[ERROR] MainCockpit: Failed to parse server_config.json: {e}")
-
-        # Step 3: Guard check to abort cleanly if no valid target IP was found
+        # Guard check to abort cleanly if no valid target IP was found
         if not target_ip:
             print("[ERROR] MainCockpit: No valid server IP found in config or on disk.")
+            self.setWindowTitle("Zero-G Admin Helper - Dashboard")
             self.telemetry_widget.lbl_target_ip.setText("Target IP: Not Configured")
             return
 
-        # Step 4: Update HUD Header Label dynamically with resolved IP and Port
-        self.telemetry_widget.lbl_target_ip.setText(f"Target IP: {target_ip}:{target_port}")
+        self._show_active_server({"input_ip": target_ip, "input_port": target_port, "input_pass": token})
+        self._load_registry_for_profile(self.config)
+        self._spawn_telemetry_worker(target_ip, target_port, token)
 
-        # Step 5: # Ingest background telemetry stream over Port 30500
-        print(f"[DEBUG] MainCockpit: Initializing TelemetryWorker target: {target_ip}:{target_port}")
-        self.telemetry_worker = TelemetryWorker(host=target_ip, port=target_port)
-        self.telemetry_worker.metrics_updated.connect(self._on_metrics_received)
-        self.telemetry_worker.players_updated.connect(self._on_live_stream_received)
-        self.telemetry_worker.player_cache_received.connect(self._on_full_cache_received)
-        self.telemetry_worker.command_response_received.connect(self._on_command_response_received)
-        self.telemetry_worker.connection_status.connect(self._on_connection_status)
-        self.telemetry_worker.start()
-
-        # Step 6: Render immediately from local database on startup
+        # Render immediately from the local database on startup
         self._refresh_dashboard_table()
 
-        # Step 7: Wire UI input triggers and feed selector stack
+    def _wire_command_inputs(self):
+        """Connects the console controls once. Later server switches must not stack handlers."""
+        if getattr(self, "_inputs_wired", False):
+            return
+        self._inputs_wired = True
         self.execute_btn.clicked.connect(self._handle_command_execution)
         self.cmd_input.returnPressed.connect(self._handle_command_execution)
         self.feed_selector.currentIndexChanged.connect(self.feed_stack.setCurrentIndex)
+
+    def _resolve_server_target(self):
+        """
+        Returns (ip, port, token) for the active profile.
+        The in-memory config wins. Otherwise the saved active profile is loaded.
+        """
+        source = {}
+        if self.config and isinstance(self.config, dict) and self.config.get("input_ip"):
+            source = self.config
+        else:
+            try:
+                source = get_active_profile()
+            except Exception as err:
+                print(f"[ERROR] MainCockpit: Failed to parse server_config.json: {err}")
+                source = {}
+            if source:
+                self.config = source
+
+        target_ip = source.get("input_ip") if isinstance(source, dict) else None
+        target_port = 30500
+        raw_port = source.get("input_port") if isinstance(source, dict) else None
+        if raw_port:
+            try:
+                target_port = int(raw_port)
+            except (TypeError, ValueError):
+                print(f"[ERROR] MainCockpit: Invalid port value in server profile: {raw_port}")
+                target_port = 30500
+        token = source.get("input_pass") if isinstance(source, dict) and source.get("input_pass") else ""
+        return target_ip, target_port, token
+
+    def _show_active_server(self, profile):
+        """Puts the active host:port in the window title and the telemetry target label."""
+        label = profile_label(profile)
+        self.setWindowTitle(f"Zero-G Admin Helper - Dashboard ({label})")
+        self.telemetry_widget.lbl_target_ip.setText(f"Target IP: {label}")
+        print(f"[STATUS] Active server: {label}")
+
+    def _reset_metric_readouts(self):
+        """Clears the last server's telemetry while a new session is opening."""
+        self.telemetry_widget.lbl_server_status.setText("Server Status: DETECTING....")
+        self.telemetry_widget.lbl_server_status.setStyleSheet("")
+        self.telemetry_widget.lbl_server_cpu.setText("CPU: --%")
+        self.telemetry_widget.lbl_server_ram.setText("RAM: --%")
+        self.telemetry_widget.lbl_fps.setText("FPS: --")
+        self.telemetry_widget.lbl_heap.setText("Heap: --")
+        self.telemetry_widget.lbl_players.setText("Players: --")
+        self.telemetry_widget.lbl_uptime.setText("Uptime: --")
+
+    def _load_registry_for_profile(self, profile):
+        """Reloads the player table cache that belongs to this server."""
+        if not profile or not profile.get("input_ip"):
+            return
+        cache_path = registry_cache_for(profile)
+        current = os.path.abspath(self.player_manager.storage_path)
+        if os.path.abspath(cache_path) == current:
+            return
+        self.player_manager.reload_storage(cache_path)
+
+    def _stop_telemetry_worker(self):
+        """Closes the current ZeroGBridge session and drops the worker."""
+        worker = getattr(self, "telemetry_worker", None)
+        if worker is not None:
+            worker.stop()
+            self.telemetry_worker = None
+
+    def _spawn_telemetry_worker(self, host, port, token, connected_socket=None):
+        """Starts a telemetry worker for host:port. An already-authenticated socket is reused."""
+        print(f"[DEBUG] MainCockpit: Initializing TelemetryWorker target: {host}:{port}")
+        worker = TelemetryWorker(
+            host=host,
+            port=port,
+            password=token,
+            connected_socket=connected_socket,
+        )
+        worker.metrics_updated.connect(self._on_metrics_received)
+        worker.players_updated.connect(self._on_live_stream_received)
+        worker.player_cache_received.connect(self._on_full_cache_received)
+        worker.command_response_received.connect(self._on_command_response_received)
+        worker.connection_status.connect(self._on_connection_status)
+        worker.start()
+        self.telemetry_worker = worker
+
+    def _refresh_after_server_switch(self, profile):
+        """Shows the new server and repaints the roster from that server's cache."""
+        self._show_active_server(profile)
+        self._load_registry_for_profile(profile)
+        self._refresh_dashboard_table()
+        label = profile_label(profile)
+        timestamp = datetime.now(timezone.utc).strftime("%H:%M")
+        self.console.append(f"[{timestamp}] [ADMIN >>] Switched server to {label}")
+        self.system_logs_box.append(f"[NETWORK] Active server: {label}")
+
+    def _switch_to_saved_profile(self, profile, allow_restore=True):
+        """
+        Closes the current ZeroGBridge session, authenticates to the chosen
+        profile, then refreshes the dashboard. A failed auth tries the previous
+        server once so the cockpit is not left with no session.
+        """
+        previous = dict(self.config) if isinstance(self.config, dict) else {}
+        ip = str(profile.get("input_ip", "")).strip()
+        port_text = str(profile.get("input_port", "")).strip()
+        token = str(profile.get("input_pass", "") or "")
+        if not ip or not port_text:
+            self.system_logs_box.append("[NETWORK WARNING] Cannot switch: server profile is missing a host or port.")
+            return False
+        try:
+            port = int(port_text)
+        except (TypeError, ValueError):
+            self.system_logs_box.append(f"[NETWORK WARNING] Cannot switch: invalid port for {ip}.")
+            return False
+
+        print(f"[STATUS] Closing current ZeroGBridge session before switching to {ip}:{port}")
+        self.system_logs_box.append(f"[NETWORK] Closing current session. Switching to {ip}:{port}...")
+        self._reset_metric_readouts()
+        self._stop_telemetry_worker()
+
+        try:
+            new_sock = switch_authenticated_socket(None, ip, port, token)
+        except Exception as err:
+            print(f"[WARNING] Server switch failed for {ip}:{port}: {err}")
+            self.system_logs_box.append(f"[NETWORK WARNING] Switch failed for {ip}:{port}: {err}")
+            self.telemetry_widget.lbl_server_status.setText("Server Status: OFFLINE")
+            self.telemetry_widget.lbl_server_status.setStyleSheet("color: #ff3355; font-weight: bold;")
+            if allow_restore and previous.get("input_ip") and profile_label(previous) != profile_label(profile):
+                print("[STATUS] Restoring the previous ZeroGBridge session.")
+                self.system_logs_box.append("[NETWORK] Restoring the previous server session.")
+                self._switch_to_saved_profile(previous, allow_restore=False)
+            return False
+
+        set_active_server(ip, port_text)
+        self.config = {
+            "input_ip": ip,
+            "input_port": port_text,
+            "input_pass": token,
+        }
+        self._spawn_telemetry_worker(ip, port, token, connected_socket=new_sock)
+        self._refresh_after_server_switch(self.config)
+        return True
+
+    def _show_server_login_dialog(self, message, ask_to_save=False):
+        """Modal result for File > Log into another server. Returns True when accepted."""
+        print(f"[STATUS] Server login dialog: {message}")
+        if ask_to_save:
+            print("[STATUS] Save this server anyway?")
+        dialog = ServerLoginDialog(message, ask_to_save=ask_to_save, parent=self)
+        accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        if ask_to_save:
+            print(f"[STATUS] Save this server anyway? {'yes' if accepted else 'no'}")
+        return accepted
+
+    def _save_entered_server(self, ip, port_text, token, make_active):
+        """Writes one profile. Logs [ERROR] and shows a dialog when the write fails."""
+        try:
+            add_server_profile(ip, port_text, token, make_active=make_active)
+        except Exception as err:
+            print(f"[ERROR] Could not write server profile {ip}:{port_text}: {err}")
+            self.system_logs_box.append(f"[ERROR] Could not write server profile {ip}:{port_text}: {err}")
+            self._show_server_login_dialog(f"Could not save {ip}:{port_text}: {err}")
+            return False
+        return True
+
+    def _on_log_into_another_server(self):
+        """
+        Opens the network wizard for another host, port, and auth token.
+        A failed handshake still offers to save the profile so Switch servers can list it.
+        The current session stays up when the new server is only saved.
+        """
+        print("[UI EVENT] Log into another server requested.")
+        wizard = NetworkWizardOverlay(self, persist_profile=False)
+        if wizard.exec() != QDialog.DialogCode.Accepted:
+            print("[STATUS] Additional server login canceled.")
+            return
+
+        profile = dict(getattr(wizard, "entered_profile", None) or {})
+        ip = str(profile.get("input_ip", "")).strip()
+        port_text = str(profile.get("input_port", "")).strip()
+        token = str(profile.get("input_pass", "") or "")
+        if not ip or not port_text:
+            print("[ERROR] Server host and port are required.")
+            self.system_logs_box.append("[ERROR] Server host and port are required.")
+            self._show_server_login_dialog("Server host and port are required.")
+            return
+        try:
+            port = int(port_text)
+        except (TypeError, ValueError):
+            print(f"[ERROR] Server port is not a number: {port_text}")
+            self.system_logs_box.append(f"[ERROR] Server port is not a number: {port_text}")
+            self._show_server_login_dialog(f"Server port is not a number: {port_text}")
+            return
+
+        print(
+            f"[STATUS] Checking auth for additional server {ip}:{port} "
+            f"(timeout {BRIDGE_LOGIN_TIMEOUT:.0f}s)..."
+        )
+        try:
+            probe = open_authenticated_socket(ip, port, token, timeout=BRIDGE_LOGIN_TIMEOUT)
+            close_bridge_socket(probe)
+        except Exception as err:
+            reason = login_failure_message(ip, port, err)
+            print(f"[STATUS] Handshake failed for {ip}:{port}. The current session was left open.")
+            self.system_logs_box.append(f"[ERROR] {reason}")
+            if not self._show_server_login_dialog(reason, ask_to_save=True):
+                print(f"[STATUS] Server profile {ip}:{port} was not saved.")
+                self.system_logs_box.append(f"[STATUS] Server profile {ip}:{port} was not saved.")
+                return
+            if self._save_entered_server(ip, port_text, token, make_active=False):
+                print(f"[STATUS] Saved server profile {ip}:{port} after a failed handshake.")
+                self.system_logs_box.append(
+                    f"[STATUS] Saved server profile {ip}:{port} after a failed handshake."
+                )
+            return
+
+        print(f"[STATUS] Additional server {ip}:{port} authenticated.")
+        if not self._save_entered_server(ip, port_text, token, make_active=False):
+            return
+        print(f"[STATUS] Saved server profile {ip}:{port}.")
+        switched = self._switch_to_saved_profile({
+            "input_ip": ip,
+            "input_port": port_text,
+            "input_pass": token,
+        })
+        if switched:
+            message = f"Connected to {ip}:{port}. The server profile was saved."
+        else:
+            message = f"Saved {ip}:{port}. The live session could not switch to that server."
+        print(f"[STATUS] {message}")
+        self.system_logs_box.append(f"[STATUS] {message}")
+        self._show_server_login_dialog(message)
+
+    def _on_switch_servers(self):
+        """Opens the saved-server list and reconnects to the operator's choice."""
+        print("[UI EVENT] Switch servers requested.")
+        print("[STATUS] Reloading saved servers from disk.")
+        servers, active_index = list_server_profiles()
+        print(f"[STATUS] Loaded {len(servers)} saved server profile(s) from disk.")
+        if not servers:
+            self.system_logs_box.append("[NETWORK WARNING] No saved servers yet. Use Log into another server first.")
+            print("[WARNING] Switch servers opened with an empty profile list.")
+            return
+
+        dialog = ServerSwitchDialog(servers, active_index=active_index, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.selected_profile:
+            print("[STATUS] Server switch canceled.")
+            return
+        self._switch_to_saved_profile(dialog.selected_profile)
+
+    def _on_log_out(self):
+        """
+        Closes the ZeroGBridge session and returns to the startup login flow.
+        Saved server profiles and auth tokens stay on disk.
+        """
+        print("[UI EVENT] Log Out of ZAH requested.")
+        self._stop_telemetry_worker()
+        self._clear_dashboard_session()
+        clear_login_session()
+        self._return_to_start_screen()
+
+    def _clear_dashboard_session(self):
+        """Clears the live dashboard. Saved server profiles are left on disk."""
+        self._reset_metric_readouts()
+        self.telemetry_widget.lbl_server_status.setText("Server Status: OFFLINE")
+        self.telemetry_widget.lbl_server_status.setStyleSheet("color: #ff3355; font-weight: bold;")
+        self.telemetry_widget.lbl_target_ip.setText("Target IP: Not Configured")
+        self.setWindowTitle("Zero-G Admin Helper - Dashboard")
+        self.console.clear()
+        self.global_chat_box.clear()
+        self.faction_chat_box.clear()
+        self.system_logs_box.clear()
+        self.cmd_input.clear()
+        self.player_table.setRowCount(0)
+        self.lbl_players_header.setText("Players on Server Within the Past 2 Weeks")
+        print("[STATUS] Dashboard session cleared.")
+
+    def _return_to_start_screen(self):
+        """
+        Hides the dashboard and runs the startup loader.
+        The loader opens the login window, then the network check.
+        """
+        print("[STATUS] Returning to the login screen.")
+        self.hide()
+        loader = None
+        result = QDialog.DialogCode.Rejected
+        try:
+            from features.loading.loading_screen import ApplicationLoader
+            loader = ApplicationLoader()
+            loader.start_boot_sequence()
+            result = loader.exec()
+        except Exception as err:
+            print(f"[ERROR] Login flow failed after logout: {err}")
+            self.close()
+            return
+        finally:
+            if loader is not None:
+                loader.deleteLater()
+
+        if result == QDialog.DialogCode.Accepted:
+            print("[SUCCESS] Login verified after logout. Restoring the dashboard.")
+            try:
+                self.config = get_active_profile()
+            except Exception as err:
+                print(f"[WARNING] Could not reload the active server profile: {err}")
+            self._init_network_services()
+            self.show()
+            return
+
+        print("[STATUS] Login canceled after logout. Shutting down.")
+        self.close()
 
     # -------------------------------------------------------------------------
     # Determines if Server is ONLINE/OFFLINE
@@ -714,9 +1027,7 @@ class MainCockpit(QMainWindow):
         before the window is destroyed.
         """
         print("[INFO] MainCockpit: Shutting down background network threads...")
-        if hasattr(self, 'telemetry_worker') and self.telemetry_worker:
-            self.telemetry_worker.stop()
-        
+        self._stop_telemetry_worker()
         event.accept()
 
     # -------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 // =====================================================================
 // MODULE: ZeroGBridge/ModMain.cs
-// DESCRIPTION: Master API v2 Lifecycle Controller (Pure IMod / IModApi)
+// DESCRIPTION: Master Lifecycle Controller (IMod API v2 + legacy ModInterface for alerts)
 // =====================================================================
 
 using System;
@@ -44,7 +44,13 @@ namespace ZeroGBridge
     /// Master lifecycle controller for ZeroGBridge implementing pure modern IMod.
     /// Hooks API v2 playfield delegates and manages Port 30500 telemetry broadcasts.
     /// </summary>
-    public class ModMain : IMod
+    /// <remarks>
+    /// 1.4: also implements the legacy ModInterface (Mif.dll) so in-game alerts can use
+    /// Request_InGameMessage_*. Empyrion's loader creates a single instance for a class that implements
+    /// both interfaces and assigns it to both slots, so Init (v2) and Game_Start (legacy) arrive on the
+    /// same object. Init does all the setup; the legacy callbacks only attach/detach the ModGameAPI.
+    /// </remarks>
+    public class ModMain : IMod, ModInterface
     {
         public static ModMain Instance { get; private set; }
         public static IModApi ModApiInstance { get; private set; }
@@ -62,6 +68,8 @@ namespace ZeroGBridge
         private PlayerCache _playerCache;
         private ServerView _serverView;
         private CommandDispatcher _commandDispatcher;
+        private AlertService _alertService;
+        private int _initDone;
         private TelemetryServer _telemetryServer;
         private TelemetryBroadcaster _telemetryBroadcaster;
         private string _logFilePath;
@@ -76,6 +84,11 @@ namespace ZeroGBridge
 
         public void Init(IModApi modApi)
         {
+            if (Interlocked.Exchange(ref _initDone, 1) == 1)
+            {
+                ZgbLog.Write("[ZGB] -WARN- Init called twice on the same ModMain instance; ignoring the second call.");
+                return;
+            }
             Instance = this;
             _modApi = modApi;
             ModApiInstance = modApi;
@@ -100,7 +113,11 @@ namespace ZeroGBridge
 
             // 3. Start Port 30500 Telemetry Server and Dispatcher
             _commandDispatcher = new CommandDispatcher(_playerCache);
-            _telemetryServer = new TelemetryServer(30500, _commandDispatcher);
+            LegacyApi.AttachPlayerCache(_playerCache);
+            if (LegacyApi.IsAvailable) LegacyApi.RequestFactions(); // Game_Start may have arrived first
+            _alertService = new AlertService(_playerCache);
+            AuthConfig.GetToken(); // logs the token source once (never the value)
+            _telemetryServer = new TelemetryServer(30500, _commandDispatcher, AuthConfig.GetToken, _alertService);
             _telemetryServer.Start();
 
             // 4. Launch TelemetryBroadcaster (CPU/RAM METRIC). LogDiscovery is left unwired on purpose.
@@ -134,6 +151,33 @@ namespace ZeroGBridge
             }
 
             ZgbLog.Write("[ZGB] -INFO- ZeroGBridge shut down cleanly.");
+        }
+
+        #endregion
+
+        #region Legacy ModInterface (alerts only)
+
+        public void Game_Start(ModGameAPI dediAPI)
+        {
+            try { LegacyApi.OnGameStart(dediAPI); }
+            catch (Exception ex) { ZgbLog.Write($"[ZGB] -WARN- Game_Start: {ex.Message}"); }
+        }
+
+        public void Game_Update()
+        {
+            try { LegacyApi.OnGameUpdate(); }
+            catch { /* never let the frame loop see an exception */ }
+        }
+
+        public void Game_Exit()
+        {
+            try { LegacyApi.OnGameExit(); }
+            catch { }
+        }
+
+        public void Game_Event(CmdId eventId, ushort seqNr, object data)
+        {
+            LegacyApi.OnGameEvent(eventId, seqNr, data);
         }
 
         #endregion
