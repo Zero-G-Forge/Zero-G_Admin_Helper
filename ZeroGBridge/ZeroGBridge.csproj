@@ -10,7 +10,7 @@
 
     <!-- Assembly Metadata Attributes -->
     <Title>ZeroGBridge</Title>
-    <Description>Dedicated Telemetry &amp; Administration Bridge for Empyrion</Description>
+    <Description>ZeroGBridge hot-reload loader (stable mod entry point; loads Core/ZeroGBridge.Core.dll)</Description>
     <Company>Zero-G Forge</Company>
     <Product>ZeroGBridge</Product>
     <Copyright>Copyright © 2026 Zero-G Forge</Copyright>
@@ -18,9 +18,9 @@
 
     <!-- Dynamic 16-bit Valid UTC-5 (CDT) Version Generation -->
     <MajorVersion>1</MajorVersion>
-    <MinorVersion>4</MinorVersion>
-    <!-- Human release name (1.4.2). The numeric version stays Major.Minor.MMDD.HHmm. -->
-    <ReleaseVersion>1.4.2</ReleaseVersion>
+    <MinorVersion>5</MinorVersion>
+    <!-- Human release name (1.5.0). The numeric version stays Major.Minor.MMDD.HHmm. -->
+    <ReleaseVersion>1.5.0</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
 
@@ -31,8 +31,16 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <DefaultItemExcludes>$(DefaultItemExcludes);lib/.EmpyrionAPITools-0-10.0/**;**/.EmpyrionAPITools-0-10.0/**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);lib/.EmpyrionAPITools-0-10.0/**;**/.EmpyrionAPITools-0-10.0/**;CoreProject/**</DefaultItemExcludes>
+    <!-- 1.5.0: this project is the LOADER only (the DLL Empyrion loads). Bridge logic (Core/, Network/,
+         Logging/) is built by CoreProject/ZeroGBridge.Core.csproj into the reloadable core DLL. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Loader/**/*.cs" />
+    <Compile Include="Properties/AssemblyInfo.cs" />
+  </ItemGroup>
 
   <ItemGroup>
     <Reference Include="ModApi">
@@ -78,7 +86,7 @@
   <!-- Auto-generate matching ModInfo.yaml on build -->
   <Target Name="GenerateModInfoYaml" AfterTargets="Build">
     <PropertyGroup>
-      <ModInfoContent>Name: ZeroGBridge%0ADisplayName: ZeroGBridge%0AVersion: $(Version)%0AAuthor: Zero-G Forge%0ADescription: Dedicated Telemetry &amp; Administration Bridge for Empyrion (release $(ReleaseVersion))</ModInfoContent>
+      <ModInfoContent>Name: ZeroGBridge%0ADisplayName: ZeroGBridge%0AVersion: $(Version)%0AAuthor: Zero-G Forge%0ADescription: Dedicated Telemetry &amp; Administration Bridge for Empyrion (hot-reload loader $(ReleaseVersion)%3B core in Core/ZeroGBridge.Core.dll)</ModInfoContent>
     </PropertyGroup>
     <WriteLinesToFile 
       File="$(TargetDir)ModInfo.yaml" 

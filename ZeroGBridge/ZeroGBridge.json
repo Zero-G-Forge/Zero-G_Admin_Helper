@@ -2,5 +2,7 @@
   "SaveGameName": "Zero-G Server - Season 4",
   "GlobalDbPath": "",
   "AuthToken": "",
-  "Port": 30500
+  "Port": 30500,
+  "HotReloadEnabled": true,
+  "AutoReloadOnDrop": false
 }

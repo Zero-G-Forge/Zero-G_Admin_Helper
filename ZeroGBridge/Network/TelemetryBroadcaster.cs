@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading;
 using Newtonsoft.Json;
 using Eleon.Modding;
+using ZeroGBridge.Hosting;
 
 namespace ZeroGBridge
 {
@@ -18,7 +19,7 @@ namespace ZeroGBridge
         private readonly IModApi _modApi;
         private readonly PlayerCache _playerCache;
         private readonly LogDiscovery _logDiscovery;
-        private readonly TelemetryServer _telemetryServer;
+        private readonly IClientHub _telemetryServer; // 1.5.0: the loader's listener (or the standalone one)
         private readonly string _logFilePath;
         private readonly Action _onTick;
 
@@ -43,7 +44,7 @@ namespace ZeroGBridge
             IModApi modApi,
             PlayerCache playerCache,
             LogDiscovery logDiscovery,
-            TelemetryServer telemetryServer,
+            IClientHub telemetryServer,
             string logFilePath,
             Action onTick = null)
         {
@@ -235,7 +236,7 @@ namespace ZeroGBridge
 
                     if (_telemetryServer != null && _telemetryServer.HasActiveConnections)
                     {
-                        _telemetryServer.BroadcastJson(jsonLine);
+                        _telemetryServer.BroadcastJson(jsonLine, null);
                     }
 
                     _logCounter++;

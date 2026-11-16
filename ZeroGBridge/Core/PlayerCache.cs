@@ -615,10 +615,12 @@ namespace ZeroGBridge
             string modDir = null;
             try
             {
-                string assemblyPath = Assembly.GetExecutingAssembly().Location;
-                if (!string.IsNullOrEmpty(assemblyPath))
+                // 1.5.0: the core DLL now lives in Core/versions/<id>/; ZeroGBridge.json stays next to
+                // the loader (ZeroGBridge.dll), which is where AuthConfig looks.
+                string cfgPath = AuthConfig.ConfigPath;
+                if (!string.IsNullOrEmpty(cfgPath))
                 {
-                    modDir = Path.GetDirectoryName(assemblyPath);
+                    modDir = Path.GetDirectoryName(cfgPath);
                 }
             }
             catch (Exception ex)

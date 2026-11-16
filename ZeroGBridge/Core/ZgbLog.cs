@@ -21,9 +21,17 @@ namespace ZeroGBridge
     /// </summary>
     public static class ZgbLog
     {
+        /// <summary>1.5.0: set by CoreEntry when the core runs under the hot-reload loader (lines go to the loader's log).</summary>
+        public static volatile Action<string> Sink;
+
         public static void Write(string message)
         {
             if (message == null) message = string.Empty;
+            var sink = Sink;
+            if (sink != null)
+            {
+                try { sink(message); return; } catch { /* loader gone: fall through */ }
+            }
             IModApi api = ModMain.ModApiInstance;
 
             if (api == null || IsConsoleOnly(message))

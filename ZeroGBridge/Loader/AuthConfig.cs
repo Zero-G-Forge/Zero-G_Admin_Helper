@@ -1,5 +1,5 @@
 // =====================================================================
-// MODULE: ZeroGBridge/Core/AuthConfig.cs
+// MODULE: ZeroGBridge/Loader/AuthConfig.cs (loader assembly; shared with the core)
 // DESCRIPTION: Bridge auth token ("AuthToken") and listen port ("Port", 1.4.2) from ZeroGBridge.json
 // =====================================================================
 
@@ -78,7 +78,7 @@ namespace ZeroGBridge
                 if (!_fallbackWarned)
                 {
                     _fallbackWarned = true;
-                    ZgbLog.Write($"[ZGB] -WARN- No AuthToken set in {ConfigPath}; using the built-in fallback password. Set \"AuthToken\" in ZeroGBridge.json to secure the bridge port.");
+                    HostLog.Write($"[ZGB] -WARN- No AuthToken set in {ConfigPath}; using the built-in fallback password. Set \"AuthToken\" in ZeroGBridge.json to secure the bridge port.");
                 }
                 return LegacyFallbackToken;
             }
@@ -116,15 +116,64 @@ namespace ZeroGBridge
                     return (int)v;
                 }
                 source = "invalid";
-                ZgbLog.Write($"[ZGB] -WARN- \"Port\" in {path} is not a valid TCP port (1-65535); using the default {DefaultPort}.");
+                HostLog.Write($"[ZGB] -WARN- \"Port\" in {path} is not a valid TCP port (1-65535); using the default {DefaultPort}.");
                 return DefaultPort;
             }
             catch (Exception ex)
             {
                 source = "invalid";
-                ZgbLog.Write($"[ZGB] -WARN- Could not read Port from {path}: {ex.GetType().Name}; using the default {DefaultPort}.");
+                HostLog.Write($"[ZGB] -WARN- Could not read Port from {path}: {ex.GetType().Name}; using the default {DefaultPort}.");
                 return DefaultPort;
             }
+        }
+
+        // ---------------- 1.5.0 hot-reload settings (read when used; no restart needed) ----------------
+
+        /// <summary>Raw value of a top-level key in ZeroGBridge.json, or null. Never use for AuthToken logging.</summary>
+        public static JToken ReadSetting(string key)
+        {
+            try
+            {
+                string path = ConfigPath;
+                if (!File.Exists(path)) return null;
+                var jo = JObject.Parse(File.ReadAllText(path));
+                var t = jo[key];
+                return t == null || t.Type == JTokenType.Null ? null : t;
+            }
+            catch { return null; }
+        }
+
+        public static bool GetBool(string key, bool fallback)
+        {
+            var t = ReadSetting(key);
+            if (t == null) return fallback;
+            if (t.Type == JTokenType.Boolean) return (bool)t;
+            if (t.Type == JTokenType.String)
+            {
+                string v = ((string)t).Trim();
+                if (v.Equals("true", StringComparison.OrdinalIgnoreCase) || v == "1") return true;
+                if (v.Equals("false", StringComparison.OrdinalIgnoreCase) || v == "0") return false;
+            }
+            if (t.Type == JTokenType.Integer) return (long)t != 0;
+            return fallback;
+        }
+
+        public static int GetInt(string key, int fallback, int min, int max)
+        {
+            var t = ReadSetting(key);
+            if (t == null) return fallback;
+            long v;
+            if (t.Type == JTokenType.Integer) v = (long)t;
+            else if (t.Type != JTokenType.String || !long.TryParse(((string)t).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out v)) return fallback;
+            return v < min || v > max ? fallback : (int)v;
+        }
+
+        public static string GetString(string key, string fallback)
+        {
+            var t = ReadSetting(key);
+            if (t == null || t.Type != JTokenType.String) return fallback;
+            string v = ((string)t).Trim();
+            return v.Length == 0 ? fallback : v;
         }
 
         private static void Refresh()
@@ -156,7 +205,7 @@ namespace ZeroGBridge
                 }
                 catch (Exception ex)
                 {
-                    ZgbLog.Write($"[ZGB] -WARN- Could not read AuthToken from {path}: {ex.GetType().Name}");
+                    HostLog.Write($"[ZGB] -WARN- Could not read AuthToken from {path}: {ex.GetType().Name}");
                 }
             }
 
@@ -166,7 +215,7 @@ namespace ZeroGBridge
             _cachedStamp = stamp;
             if (!_loadedOnce || hadToken != (token != null))
             {
-                ZgbLog.Write($"[ZGB] -INFO- Auth token source: {(token != null ? "ZeroGBridge.json AuthToken (set)" : "built-in fallback (AuthToken not set)")}");
+                HostLog.Write($"[ZGB] -INFO- Auth token source: {(token != null ? "ZeroGBridge.json AuthToken (set)" : "built-in fallback (AuthToken not set)")}");
             }
             _loadedOnce = true;
         }

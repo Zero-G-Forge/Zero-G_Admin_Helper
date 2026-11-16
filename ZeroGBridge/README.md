@@ -3,6 +3,14 @@
 Server-side Empyrion mod (net48, IMod API v2 + legacy ModInterface) that streams telemetry to
 Zero-G Admin Helper and accepts commands on a TCP port (default 30500, set with `Port`). Newline-delimited, UTF-8, one JSON reply per request.
 
+**1.5.0: hot reload.** The mod is now a small loader (`ZeroGBridge.dll`, owns the port and auth) plus a
+reloadable core (`Core/ZeroGBridge.Core.dll`, all bridge logic). Drop a new core into `Updates/` and send
+`hot:reload`, and it swaps in without a server restart or dropping ZAH connections. A broken core is rolled back
+automatically. See [HOTRELOAD.md](HOTRELOAD.md) for the layout, settings and the `hot:` command contract.
+
+Build: `ZeroGBridge.csproj` builds the loader. `CoreProject/ZeroGBridge.Core.csproj` builds the core.
+Deploy both the first time (one restart). After that, only the core changes for most patches.
+
 ## Configuration: `ZeroGBridge.json` (next to `ZeroGBridge.dll`)
 
 ```json
@@ -10,12 +18,16 @@ Zero-G Admin Helper and accepts commands on a TCP port (default 30500, set with 
   "SaveGameName": "Zero-G Server - Season 4",
   "GlobalDbPath": "",
   "AuthToken": "",
-  "Port": 30500
+  "Port": 30500,
+  "HotReloadEnabled": true,
+  "AutoReloadOnDrop": false
 }
 ```
 
+- `HotReloadEnabled`, `AutoReloadOnDrop`, `HotReloadPollMs`, `KeepCoreVersions` and `CoreIsolation` (1.5.0) are described in [HOTRELOAD.md](HOTRELOAD.md).
+
 - `Port` (1.4.2+) is the TCP port the bridge listens on. Missing, empty or invalid (not 1-65535) means 30500.
-  It is read once at startup, so restart the server after changing it. The log shows
+  It is read once at startup, so restart the server after changing it (a core hot reload does not re-read it). The log shows
   `Bridge port in use: <port> (...)` and `TelemetryServer listening on port <port>`.
   It must not be a port the game already uses (game, query, telnet/RCON).
 

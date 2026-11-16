@@ -11,6 +11,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using Eleon.Modding;
 using UnityEngine;
+using ZeroGBridge.Hosting;
 
 namespace ZeroGBridge
 {
@@ -55,8 +56,13 @@ namespace ZeroGBridge
     /// Request_InGameMessage_*. Empyrion's loader creates a single instance for a class that implements
     /// both interfaces and assigns it to both slots, so Init (v2) and Game_Start (legacy) arrive on the
     /// same object. Init does all the setup; the legacy callbacks only attach/detach the ModGameAPI.
+    ///
+    /// 1.5.0: this class lives in the reloadable core (Core/ZeroGBridge.Core.dll) and no longer
+    /// implements IMod / ModInterface; Empyrion loads ZeroGBridge.Loader.ZeroGBridgeLoader instead,
+    /// which owns the TCP port and drives this class through CoreEntry. Init(IModApi) still works
+    /// standalone (own listener) for the mock harness.
     /// </remarks>
-    public class ModMain : IMod, ModInterface
+    public class ModMain
     {
         public static ModMain Instance { get; private set; }
         public static IModApi ModApiInstance { get; private set; }
@@ -76,7 +82,8 @@ namespace ZeroGBridge
         private CommandDispatcher _commandDispatcher;
         private AlertService _alertService;
         private int _initDone;
-        private TelemetryServer _telemetryServer;
+        private IClientHub _telemetryServer;   // loader's listener (hosted) or _ownedListener (standalone)
+        private BridgeListener _ownedListener;
         private TelemetryBroadcaster _telemetryBroadcaster;
         private string _logFilePath;
 
@@ -88,7 +95,13 @@ namespace ZeroGBridge
 
         #region IMod Lifecycle Handlers
 
-        public void Init(IModApi modApi)
+        /// <summary>Standalone start (no loader): opens its own listener on the configured port.</summary>
+        public void Init(IModApi modApi) => InitCommon(modApi, null);
+
+        /// <summary>1.5.0: start under the hot-reload loader, which owns the TCP listener and auth.</summary>
+        public void StartHosted(IModApi modApi, IClientHub clients) => InitCommon(modApi, clients ?? throw new ArgumentNullException(nameof(clients)));
+
+        private void InitCommon(IModApi modApi, IClientHub hostedClients)
         {
             if (Interlocked.Exchange(ref _initDone, 1) == 1)
             {
@@ -117,16 +130,27 @@ namespace ZeroGBridge
             // 2. Wire into pure API v2 playfield lifecycle delegates
             HookApiV2Events();
 
-            // 3. Start Port 30500 Telemetry Server and Dispatcher
+            // 3. Dispatcher + alerts; the TCP listener is the loader's (hosted) or our own (standalone)
             _commandDispatcher = new CommandDispatcher(_playerCache);
             LegacyApi.AttachPlayerCache(_playerCache);
             if (LegacyApi.IsAvailable) LegacyApi.RequestFactions(); // Game_Start may have arrived first
             _alertService = new AlertService(_playerCache);
-            AuthConfig.GetToken(); // logs the token source once (never the value)
-            int port = AuthConfig.GetPort(out string portSource);
-            ZgbLog.Write($"[ZGB] -INFO- Bridge port in use: {port} ({(portSource == "json" ? "from ZeroGBridge.json Port" : portSource == "invalid" ? "default; ZeroGBridge.json Port is invalid" : "default; Port not set in ZeroGBridge.json")}).");
-            _telemetryServer = new TelemetryServer(port, _commandDispatcher, AuthConfig.GetToken, _alertService);
-            _telemetryServer.Start();
+            if (hostedClients != null)
+            {
+                _telemetryServer = hostedClients;
+                ZgbLog.Write("[ZGB] -INFO- Core started under the hot-reload loader (the loader owns the bridge port and auth).");
+            }
+            else
+            {
+                HostLog.Api = modApi; // loader-assembly classes (listener, AuthConfig) log like ZgbLog
+                BridgeListener.OwnerDescription = DescribeProcess;
+                AuthConfig.GetToken(); // logs the token source once (never the value)
+                int port = AuthConfig.GetPort(out string portSource);
+                ZgbLog.Write($"[ZGB] -INFO- Bridge port in use: {port} ({(portSource == "json" ? "from ZeroGBridge.json Port" : portSource == "invalid" ? "default; ZeroGBridge.json Port is invalid" : "default; Port not set in ZeroGBridge.json")}).");
+                _ownedListener = new BridgeListener(port, (clientId, line) => HandleLine(line), AuthConfig.GetToken);
+                _ownedListener.Start();
+                _telemetryServer = _ownedListener;
+            }
 
             // 4. Launch TelemetryBroadcaster (CPU/RAM METRIC). LogDiscovery is left unwired on purpose.
             _telemetryBroadcaster = new TelemetryBroadcaster(
@@ -151,7 +175,7 @@ namespace ZeroGBridge
             try
             {
                 _telemetryBroadcaster?.Stop();
-                _telemetryServer?.Stop();
+                _ownedListener?.Stop();
             }
             catch (Exception ex)
             {
@@ -160,6 +184,23 @@ namespace ZeroGBridge
 
             ZgbLog.Write("[ZGB] -INFO- ZeroGBridge shut down cleanly.");
         }
+
+        /// <summary>
+        /// One authenticated line (after the auth handshake): alert:{json} gets exactly one ALERT_ACK,
+        /// anything else goes to CommandDispatcher (exactly one reply).
+        /// </summary>
+        public string HandleLine(string line)
+        {
+            if (AlertService.IsAlertLine(line))
+            {
+                return _alertService != null
+                    ? _alertService.Handle(line)
+                    : AlertService.Ack(AlertService.TryGetReqId(line), "api_error");
+            }
+            return _commandDispatcher?.ProcessIncomingCommand(line);
+        }
+
+        public bool BroadcasterRunning => _telemetryBroadcaster?.IsThreadAlive ?? false;
 
         #endregion
 
@@ -195,7 +236,7 @@ namespace ZeroGBridge
         /// and in every playfield server process, so this tells which one owns port 30500.
         /// </summary>
         /// <summary>Human release name (the assembly version is Major.Minor.MMDD.HHmm).</summary>
-        public const string Release = "1.4.2";
+        public const string Release = BuildInfo.Release; // from ReleaseVersion in ZeroGBridge.Core.csproj
 
         public static string DescribeProcess()
         {

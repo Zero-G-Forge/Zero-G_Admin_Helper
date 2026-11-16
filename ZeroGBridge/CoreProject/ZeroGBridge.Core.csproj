@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 1.5.0: the reloadable bridge core. Deployed as Core/ZeroGBridge.Core.dll next to the loader
+       (ZeroGBridge.dll), or dropped into Updates/ for a hot reload. Empyrion never loads it directly. -->
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <AssemblyName>ZeroGBridge.Core</AssemblyName>
+    <RootNamespace>ZeroGBridge</RootNamespace>
+    <OutputType>Library</OutputType>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+
+    <Title>ZeroGBridge.Core</Title>
+    <Description>ZeroGBridge reloadable core (commands, factions, players, alerts, server view)</Description>
+    <Company>Zero-G Forge</Company>
+    <Product>ZeroGBridge</Product>
+    <Copyright>Copyright © 2026 Zero-G Forge</Copyright>
+
+    <MajorVersion>1</MajorVersion>
+    <MinorVersion>5</MinorVersion>
+    <!-- Core release name; can be overridden for test builds: -p:ReleaseVersion=1.5.0-test2 -->
+    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.5.0</ReleaseVersion>
+    <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
+    <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
+    <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>
+    <AssemblyVersion>$(Version)</AssemblyVersion>
+    <FileVersion>$(Version)</FileVersion>
+    <InformationalVersion>$(ReleaseVersion)+$(Version)</InformationalVersion>
+  </PropertyGroup>
+
+  <!-- Test-only broken builds for the mock harness: -p:ZgbTestBreak=init | selftest -->
+  <PropertyGroup Condition="'$(ZgbTestBreak)' == 'init'">
+    <DefineConstants>$(DefineConstants);ZGB_TEST_BREAK_INIT</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(ZgbTestBreak)' == 'selftest'">
+    <DefineConstants>$(DefineConstants);ZGB_TEST_BREAK_SELFTEST</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../Core/**/*.cs" />
+    <Compile Include="../Network/**/*.cs" />
+    <Compile Include="../Logging/**/*.cs" />
+    <Compile Include="$(IntermediateOutputPath)BuildInfo.g.cs" />
+  </ItemGroup>
+
+  <Target Name="GenerateBuildInfo" BeforeTargets="CoreCompile">
+    <WriteLinesToFile File="$(IntermediateOutputPath)BuildInfo.g.cs" Overwrite="true" WriteOnlyWhenDifferent="true"
+      Lines="namespace ZeroGBridge { internal static class BuildInfo { public const string Release = &quot;$(ReleaseVersion)&quot;%3B } }" />
+  </Target>
+
+  <ItemGroup>
+    <!-- Contracts (IBridgeCore, Wire, GatewayClient, AuthConfig, BridgeListener) live in the loader. -->
+    <ProjectReference Include="../ZeroGBridge.csproj">
+      <Private>False</Private>
+    </ProjectReference>
+
+    <Reference Include="ModApi"><HintPath>../lib/ModApi.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Mif"><HintPath>../lib/Mif.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Assembly-CSharp"><HintPath>../lib/Assembly-CSharp.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Newtonsoft.Json"><HintPath>../lib/Additional Libs/Newtonsoft.Json.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="Mono.Data.Sqlite"><HintPath>../lib/Additional Libs/Mono.Data.Sqlite.dll</HintPath><Private>False</Private></Reference>
+    <Reference Include="System.Data" />
+    <Reference Include="UnityEngine.CoreModule"><HintPath>../lib/Additional Libs/UnityEngine.CoreModule.dll</HintPath><Private>False</Private></Reference>
+  </ItemGroup>
+
+</Project>

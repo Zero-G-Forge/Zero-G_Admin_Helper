@@ -101,6 +101,20 @@ namespace ZeroGBridge
             StartFactionRefresh();
         }
 
+        /// <summary>
+        /// 1.5.0 hot reload: a freshly loaded core gets the ModGameAPI the game handed the loader at
+        /// Game_Start. This may run off the game thread, so the faction request is only marked
+        /// pending; the next Game_Update sends it.
+        /// </summary>
+        public static void AttachAfterReload(ModGameAPI api)
+        {
+            _api = api;
+            Interlocked.Exchange(ref _unavailableWarned, 0);
+            ZgbLog.Write("[ZGB] -SUCCESS- Legacy ModInterface re-attached after core load; faction refresh queued for the next Game_Update.");
+            RequestFactions();
+            StartFactionRefresh();
+        }
+
         public static void OnGameExit()
         {
             StopFactionRefresh();

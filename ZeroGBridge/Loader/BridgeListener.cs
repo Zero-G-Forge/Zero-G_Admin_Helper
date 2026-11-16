@@ -6,6 +6,15 @@ using System.Text;
 using System.Threading;
 using System.Collections.Concurrent;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
+using ZeroGBridge.Hosting;
+
+// =====================================================================
+// MODULE: ZeroGBridge/Loader/BridgeListener.cs (was Network/TelemetryServer.cs)
+// DESCRIPTION: Bridge TCP listener + auth. 1.5.0: lives in the stable loader so ZAH
+//              connections survive core hot reloads. Lines after auth go to a handler
+//              (the current core) or, for "hot:" lines, to the hot-reload controller.
+// =====================================================================
 
 namespace ZeroGBridge
 {
@@ -26,16 +35,20 @@ namespace ZeroGBridge
 
     /// <summary>
     /// Manages the bridge TCP socket server (ZeroGBridge.json "Port", default 30500) with password authentication gating
-    /// and protected JSON telemetry broadcasting.
+    /// and protected JSON telemetry broadcasting. MarshalByRefObject so a core in another AppDomain can broadcast.
     /// </summary>
-    public class TelemetryServer
+    public class BridgeListener : MarshalByRefObject, IClientHub
     {
+        /// <summary>Describes the owning process for the "listening" log line (set by the loader / standalone core).</summary>
+        public static Func<string> OwnerDescription = () => "ZeroGBridge";
+
+        public override object InitializeLifetimeService() => null; // live as long as the listener
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
 
         private readonly int _port;
-        private readonly CommandDispatcher _commandDispatcher;
+        private readonly Func<string, string, string> _lineHandler;   // (clientId, line) -> reply
+        private readonly Func<string, string, string> _hotHandler;    // (clientId, line) -> reply for "hot:" lines
         private readonly Func<string> _tokenProvider;
-        private readonly AlertService _alertService;
         private TcpListener _listener;
         private Thread _listenerThread;
         private volatile bool _isRunning;
@@ -59,12 +72,39 @@ namespace ZeroGBridge
 
         /// <param name="tokenProvider">Returns the current auth token (ZeroGBridge.json AuthToken or the fallback).
         /// Called on every auth attempt so a changed token applies without a restart. Never logged.</param>
-        public TelemetryServer(int port, CommandDispatcher commandDispatcher, Func<string> tokenProvider = null, AlertService alertService = null)
+        /// <param name="lineHandler">Authenticated non-hot lines (commands and alert:). Exactly one reply per line.</param>
+        /// <param name="hotHandler">Optional handler for "hot:" lines (loader only).</param>
+        public BridgeListener(int port, Func<string, string, string> lineHandler, Func<string> tokenProvider = null, Func<string, string, string> hotHandler = null)
         {
             _port = port;
-            _commandDispatcher = commandDispatcher;
+            _lineHandler = lineHandler;
             _tokenProvider = tokenProvider ?? AuthConfig.GetToken;
-            _alertService = alertService;
+            _hotHandler = hotHandler;
+        }
+
+        public const string HotPrefix = "hot:";
+
+        public static bool IsHotLine(string line) => line != null && line.StartsWith(HotPrefix, StringComparison.OrdinalIgnoreCase);
+
+        private static bool IsAlertLine(string line) => line != null && line.StartsWith("alert:", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Same JSON as AlertService.Ack(reqId, "auth") (the core's class is not visible here).</summary>
+        private static string AlertAuthAck(string line)
+        {
+            string reqId = null;
+            try
+            {
+                var t = JObject.Parse(line.Substring(6))["req_id"];
+                if (t != null && t.Type == JTokenType.String) reqId = (string)t;
+                else if (t != null && (t.Type == JTokenType.Integer || t.Type == JTokenType.Float)) reqId = Convert.ToString(((JValue)t).Value, System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch { }
+            return JsonConvert.SerializeObject(new { type = "ALERT_ACK", req_id = reqId, status = "failed", error = "auth" });
+        }
+
+        private static string SafeOwner()
+        {
+            try { return OwnerDescription?.Invoke() ?? "ZeroGBridge"; } catch { return "ZeroGBridge"; }
         }
 
         private static bool TokenEquals(string a, string b)
@@ -104,7 +144,7 @@ namespace ZeroGBridge
                 _listener = new TcpListener(IPAddress.Any, _port);
                 _listener.Start();
                 IsListening = true;
-                ZgbLog.Write($"[ZGB] -STATUS- TelemetryServer listening on port {_port} with password protection enabled. Owner: {ModMain.DescribeProcess()}");
+                HostLog.Write($"[ZGB] -STATUS- TelemetryServer listening on port {_port} with password protection enabled. Owner: {SafeOwner()}");
 
                 while (_isRunning)
                 {
@@ -137,7 +177,7 @@ namespace ZeroGBridge
             {
                 if (_isRunning)
                 {
-                    ZgbLog.Write($"[ZGB] -ERROR- TelemetryServer listener exception on port {_port}: {ex.Message} ({ModMain.DescribeProcess()}). If the port is in use, another ZeroGBridge process already owns it.");
+                    HostLog.Write($"[ZGB] -ERROR- TelemetryServer listener exception on port {_port}: {ex.Message} ({SafeOwner()}). If the port is in use, another ZeroGBridge process already owns it.");
                 }
             }
         }
@@ -174,25 +214,25 @@ namespace ZeroGBridge
                                 {
                                     session.IsAuthenticated = true;
                                     Interlocked.Increment(ref _authGeneration);
-                                    ZgbLog.Write($"[ZGB] -INFO- Client ZAH successfully authenticated on Port {_port}.");
+                                    HostLog.Write($"[ZGB] -INFO- Client ZAH successfully authenticated on Port {_port}.");
                                     var authSuccess = new { type = "AUTH", status = "Authenticated", message = "Access Granted" };
                                     SendToClient(session, JsonConvert.SerializeObject(authSuccess));
                                     continue;
                                 }
                                 else
                                 {
-                                    ZgbLog.Write($"[ZGB] -WARN- Client {session.RemoteEndpoint} provided an invalid auth token; closing.");
+                                    HostLog.Write($"[ZGB] -WARN- Client {session.RemoteEndpoint} provided an invalid auth token; closing.");
                                     var authDenied = new { type = "AUTH", status = "Denied", message = "Invalid Credentials" };
                                     SendToClient(session, JsonConvert.SerializeObject(authDenied));
                                     Thread.Sleep(1000);
                                     break;
                                 }
                             }
-                            else if (AlertService.IsAlertLine(trimmedLine))
+                            else if (IsAlertLine(trimmedLine))
                             {
                                 // alert before auth: one failed ack, one WARN, close
-                                ZgbLog.Write($"[ZGB] -WARN- Unauthenticated alert from {session.RemoteEndpoint}; closing connection.");
-                                SendToClient(session, AlertService.Ack(AlertService.TryGetReqId(trimmedLine), "auth"));
+                                HostLog.Write($"[ZGB] -WARN- Unauthenticated alert from {session.RemoteEndpoint}; closing connection.");
+                                SendToClient(session, AlertAuthAck(trimmedLine));
                                 break;
                             }
                             else
@@ -200,26 +240,39 @@ namespace ZeroGBridge
                                 // Not authenticated and not an auth line (e.g. port scanners sending HTTP):
                                 // reply once, log ONE warning with the remote address, close the connection.
                                 var authRequired = new { type = "AUTH", status = "Required", message = "Authentication Required. Submit auth:<password>" };
-                                ZgbLog.Write($"[ZGB] -WARN- Unauthenticated non-auth line from {session.RemoteEndpoint}; sent Auth Required and closed the connection.");
+                                HostLog.Write($"[ZGB] -WARN- Unauthenticated non-auth line from {session.RemoteEndpoint}; sent Auth Required and closed the connection.");
                                 SendToClient(session, JsonConvert.SerializeObject(authRequired));
                                 break;
                             }
                         }
 
-                        // 2. In-game alerts: exactly one ALERT_ACK per request.
-                        if (AlertService.IsAlertLine(trimmedLine))
+                        // 2. 1.5.0 hot-reload commands (loader). Exactly one HOT reply per line.
+                        string response;
+                        if (IsHotLine(trimmedLine))
                         {
-                            string ack = _alertService != null
-                                ? _alertService.Handle(trimmedLine)
-                                : AlertService.Ack(AlertService.TryGetReqId(trimmedLine), "api_error");
-                            SendToClient(session, ack);
+                            try
+                            {
+                                response = _hotHandler != null
+                                    ? _hotHandler(session.ClientId, trimmedLine)
+                                    : JsonConvert.SerializeObject(new { type = "HOT", ok = false, error = "not_supported", message = "This bridge build runs without the hot-reload loader." });
+                            }
+                            catch (Exception hex)
+                            {
+                                response = JsonConvert.SerializeObject(new { type = "HOT", ok = false, error = "exception", message = hex.GetType().Name + ": " + hex.Message });
+                            }
+                            SendToClient(session, response);
                             continue;
                         }
 
-                        // 3. Process authenticated commands via CommandDispatcher.
+                        // 3. Commands and alert: lines go to the core (CommandDispatcher / AlertService).
                         // Exactly one reply per request, written only to the requesting client.
                         // (CommandDispatcher logs the received command, so it is not logged twice here.)
-                        string response = _commandDispatcher?.ProcessIncomingCommand(trimmedLine);
+                        try { response = _lineHandler?.Invoke(session.ClientId, trimmedLine); }
+                        catch (Exception hex)
+                        {
+                            HostLog.Write($"[ZGB] -WARN- Line handler failed: {hex.GetType().Name}: {hex.Message}");
+                            response = JsonConvert.SerializeObject(new { type = "ERROR", message = "Bridge core error: " + hex.GetType().Name });
+                        }
                         if (!string.IsNullOrEmpty(response))
                         {
                             SendToClient(session, response);
@@ -229,7 +282,7 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                ZgbLog.Write($"[ZGB] -TRACE- Client session ZAH disconnected: {ex.Message}");
+                HostLog.Write($"[ZGB] -TRACE- Client session ZAH disconnected: {ex.Message}");
             }
             finally
             {
@@ -312,9 +365,9 @@ namespace ZeroGBridge
             }
             catch (Exception ex)
             {
-                ZgbLog.Write($"[ZGB] -ERROR- TelemetryServer shutdown exception: {ex.Message}");
+                HostLog.Write($"[ZGB] -ERROR- TelemetryServer shutdown exception: {ex.Message}");
             }
-            ZgbLog.Write("[ZGB] -INFO- TelemetryServer stopped cleanly.");
+            HostLog.Write("[ZGB] -INFO- TelemetryServer stopped cleanly.");
         }
 
         private void CloseClientConnection(TcpClient client)
