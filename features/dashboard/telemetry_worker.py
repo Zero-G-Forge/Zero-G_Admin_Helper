@@ -3,14 +3,14 @@ Telemetry Worker Thread for Zero-G Admin Helper.
 Handles asynchronous TCP streaming on Port 30500 and emits structured PyQt6 signals.
 """
 
-import json
-import os
 import socket
 import time
 from typing import Optional
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from features.dashboard.telemetry_parser import TelemetryParser
+from features.network.bridge_session import close_bridge_socket, open_authenticated_socket, send_bridge_command
+from features.network.server_config import get_active_profile
 
 
 class TelemetryWorker(QThread):
@@ -28,24 +28,20 @@ class TelemetryWorker(QThread):
     response_received = pyqtSignal(dict)
     connection_status = pyqtSignal(bool, str)
 
-    def __init__(self, host: str = "66.23.236.138", port: int = 30500, password: Optional[str] = None, parent=None):
+    def __init__(self, host: str = "66.23.236.138", port: int = 30500, password: Optional[str] = None, parent=None, connected_socket=None):
         super().__init__(parent)
         self.host = host
         self.port = port
         self.password = password
         self._is_running = True
-        self._socket: Optional[socket.socket] = None
+        self._socket: Optional[socket.socket] = connected_socket
 
-        # Fallback: Load input_pass from data/server_config.json if not explicitly provided
+        # Fallback: active profile input_pass when the cockpit did not pass one
         if not self.password:
-            config_path = os.path.join(os.path.dirname(__file__), "..", "..", "data", "server_config.json")
-            if os.path.exists(config_path):
-                try:
-                    with open(config_path, "r", encoding="utf-8") as f:
-                        cfg = json.load(f)
-                        self.password = cfg.get("input_pass", "")
-                except Exception as err:
-                    print(f"[TelemetryWorker] -WARN- Failed to load password from config: {err}")
+            try:
+                self.password = get_active_profile().get("input_pass", "")
+            except Exception as err:
+                print(f"[TelemetryWorker] -WARN- Failed to load password from config: {err}")
 
     def run(self):
         """
@@ -56,13 +52,16 @@ class TelemetryWorker(QThread):
             # session can't corrupt the first packet of the next one.
             buffer = b""
             try:
-                print(f"[TelemetryWorker] -INFO- Connecting to ZeroGBridge socket at {self.host}:{self.port}...")
-                self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self._socket.settimeout(5.0)
-                self._socket.connect((self.host, self.port))
-
-                # Step 1: Submit Authentication token to open the socket gate
-                self._send_auth_handshake()
+                # Step 1: Submit Authentication token to open the socket gate.
+                # A socket handed in by a server switch is already authenticated.
+                if self._socket is None:
+                    print(f"[TelemetryWorker] -INFO- Connecting to ZeroGBridge socket at {self.host}:{self.port}...")
+                    self._socket = open_authenticated_socket(
+                        self.host, int(self.port), self.password or "", timeout=5.0
+                    )
+                else:
+                    self._socket.settimeout(5.0)
+                    print(f"[TelemetryWorker] -STATUS- Adopted open ZeroGBridge session at {self.host}:{self.port}.")
 
                 self.connection_status.emit(True, "Connected")
                 print(f"[TelemetryWorker] -STATUS- Successfully connected and authenticated on Port {self.port}...")
@@ -102,17 +101,6 @@ class TelemetryWorker(QThread):
             # Backoff delay before attempting auto-reconnect
             if self._is_running:
                 time.sleep(3.0)
-
-    def _send_auth_handshake(self):
-        """
-        Transmits the authentication payload to unlock the ZeroGBridge telemetry stream.
-        """
-        auth_token = self.password if self.password else ""
-        formatted_auth = f"auth:{auth_token}\r\n"
-        if self._socket:
-            self._socket.sendall(formatted_auth.encode("utf-8"))
-            print("[TelemetryWorker] -STATUS- Transmitted socket auth handshake.")
-            time.sleep(0.3)
 
     def _process_line(self, line: str):
         """
@@ -179,8 +167,7 @@ class TelemetryWorker(QThread):
         if self._socket and self._is_running:
             try:
                 # Ensure \r\n line termination matching server-side StreamReader expectations
-                formatted_cmd = command_str.strip() + "\r\n"
-                self._socket.sendall(formatted_cmd.encode("utf-8"))
+                send_bridge_command(self._socket, command_str)
                 print(f"[TelemetryWorker] -INFO- Transmitted outbound command: {command_str.strip()}")
             except Exception as err:
                 print(f"[TelemetryWorker] -ERROR- Failed to transmit command: {err}")
@@ -197,13 +184,5 @@ class TelemetryWorker(QThread):
         """
         Closes socket handles safely.
         """
-        if self._socket:
-            try:
-                self._socket.shutdown(socket.SHUT_RDWR)
-            except Exception:
-                pass
-            try:
-                self._socket.close()
-            except Exception:
-                pass
-            self._socket = None
+        close_bridge_socket(self._socket)
+        self._socket = None

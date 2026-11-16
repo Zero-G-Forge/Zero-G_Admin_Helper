@@ -332,6 +332,17 @@ class PlayerManager:
         self._players[new_key] = new_record
         return new_record
 
+    def reload_storage(self, storage_path: str):
+        """
+        Points the registry at another cache file and reloads it from disk.
+        The cockpit calls this when the active ZeroGBridge server changes so
+        each server keeps its own roster.
+        """
+        self.storage_path = storage_path
+        self._players = {}
+        print(f"[PlayerManager] -INFO- Reloading player registry cache from: {self.storage_path}")
+        self.load_from_disk()
+
     def get_all_players(self) -> list:
         """
         Returns all registered player records with their full schema.

@@ -88,13 +88,45 @@ def check_for_persistent_user():
     if not os.path.exists(USERS_FILE):
         return False
     try:
-        users = load_secure_data(file_path)
+        users = load_secure_data(USERS_FILE)
         for user in users:
             if user.get("Keep me logged in status") is True:
                 return True
     except:
         return False
     return False
+
+def clear_login_session():
+    """
+    Drops the saved admin login so the startup screen asks for credentials again.
+    ZeroGBridge server profiles and their tokens are not removed.
+    """
+    if os.path.exists(SESSION_FILE):
+        try:
+            os.remove(SESSION_FILE)
+            print("[STATUS] Admin login session cleared.")
+        except Exception as e:
+            print(f"[ERROR] Failed to clear login session: {e}")
+
+    if not os.path.exists(USERS_FILE):
+        return
+
+    try:
+        users = load_secure_data(USERS_FILE)
+        changed = False
+        for user in users:
+            if user.get("Keep me logged in status") is True:
+                user["Keep me logged in status"] = False
+                changed = True
+        if not changed:
+            return
+
+        encrypted_blob = sec.encrypt_data(json.dumps(users, indent=4))
+        with open(USERS_FILE, 'w') as f:
+            f.write(encrypted_blob)
+        print("[SUCCESS] Cleared Keep me logged in for saved accounts.")
+    except Exception as e:
+        print(f"[ERROR] Failed to clear persistent login: {e}")
 
 def save_session(username):
     """Saves a new session token to disk."""
