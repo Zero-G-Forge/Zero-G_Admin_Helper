@@ -48,7 +48,19 @@ namespace ZeroGBridge
         public int FactionId { get; set; }
         public string Abbrev { get; set; } = "--";
         public string Name { get; set; } = "--";
+
+        /// <summary>
+        /// 1.4.2: FactionInfo.origin (Empyrion FactionGroup): 0 = player faction (club),
+        /// 1 = private / one-person player faction, 2+ = NPC groups, 255 = NoFaction.
+        /// Seeded and ECF entries use 0 / OriginUnknown until the game reports the real value.
+        /// </summary>
+        public byte Origin { get; set; } = 0;
+
+        /// <summary>Where the entry came from: Seed (built-in list), Ecf (config files) or Game (Event_Get_Factions).</summary>
+        public FactionSource Source { get; set; } = FactionSource.Game;
     }
+
+    public enum FactionSource { Seed, Ecf, Game }
 
     /// <summary>
     /// Thread-safe in-memory cache managing player records and resolving dynamic faction tags.
@@ -89,28 +101,28 @@ namespace ZeroGBridge
         {
             // Seed verified persistent server factions
             // Faction 1 ("Hum", the default human group) is not a real faction: shown as "--".
-            _factionLookup[100] = new FactionTag { FactionId = 100, Abbrev = "MEC", Name = "The Mechanics" };
-            _factionLookup[101] = new FactionTag { FactionId = 101, Abbrev = "TCS", Name = "Tin Can Sailors" };
-            _factionLookup[102] = new FactionTag { FactionId = 102, Abbrev = "=A=", Name = "Ascension Alliance" };
-            _factionLookup[103] = new FactionTag { FactionId = 103, Abbrev = "GoG", Name = "Grumpy Old Gits" };
-            _factionLookup[104] = new FactionTag { FactionId = 104, Abbrev = "VII", Name = "Legio VII" };
-            _factionLookup[105] = new FactionTag { FactionId = 105, Abbrev = "Gru", Name = "GrumpyOldMen" };
-            _factionLookup[106] = new FactionTag { FactionId = 106, Abbrev = "KTV", Name = "Knights Templar" };
-            _factionLookup[107] = new FactionTag { FactionId = 107, Abbrev = "Den", Name = "Dragon's Den" };
-            _factionLookup[108] = new FactionTag { FactionId = 108, Abbrev = "DIG", Name = "DIG DUG" };
-            _factionLookup[109] = new FactionTag { FactionId = 109, Abbrev = "GRE", Name = "Gambiarra" };
-            _factionLookup[110] = new FactionTag { FactionId = 110, Abbrev = "=$=", Name = "Ascended Adventures" };
-            _factionLookup[111] = new FactionTag { FactionId = 111, Abbrev = "DDF", Name = "Dragons Den OG" };
-            _factionLookup[112] = new FactionTag { FactionId = 112, Abbrev = "LSW", Name = "Lavro Ship Works" };
-            _factionLookup[113] = new FactionTag { FactionId = 113, Abbrev = "BOI", Name = "OS BOIS" };
-            _factionLookup[114] = new FactionTag { FactionId = 114, Abbrev = "ISA", Name = "ISA" };
-            _factionLookup[115] = new FactionTag { FactionId = 115, Abbrev = "ASS", Name = "Aussie Space Service" };
-            _factionLookup[116] = new FactionTag { FactionId = 116, Abbrev = "Clo", Name = "Clodos" };
-            _factionLookup[117] = new FactionTag { FactionId = 117, Abbrev = "WoF", Name = "Wings of Fire" };
-            _factionLookup[118] = new FactionTag { FactionId = 118, Abbrev = "B&B", Name = "B&B" };
-            _factionLookup[119] = new FactionTag { FactionId = 119, Abbrev = "Bad", Name = "Bad Lucky" };
-            _factionLookup[120] = new FactionTag { FactionId = 120, Abbrev = "iCF", Name = "iCore Federation" };
-            _factionLookup[121] = new FactionTag { FactionId = 121, Abbrev = "FBI", Name = "Fire Began Inside" };
+            _factionLookup[100] = new FactionTag { FactionId = 100, Abbrev = "MEC", Name = "The Mechanics", Source = FactionSource.Seed };
+            _factionLookup[101] = new FactionTag { FactionId = 101, Abbrev = "TCS", Name = "Tin Can Sailors", Source = FactionSource.Seed };
+            _factionLookup[102] = new FactionTag { FactionId = 102, Abbrev = "=A=", Name = "Ascension Alliance", Source = FactionSource.Seed };
+            _factionLookup[103] = new FactionTag { FactionId = 103, Abbrev = "GoG", Name = "Grumpy Old Gits", Source = FactionSource.Seed };
+            _factionLookup[104] = new FactionTag { FactionId = 104, Abbrev = "VII", Name = "Legio VII", Source = FactionSource.Seed };
+            _factionLookup[105] = new FactionTag { FactionId = 105, Abbrev = "Gru", Name = "GrumpyOldMen", Source = FactionSource.Seed };
+            _factionLookup[106] = new FactionTag { FactionId = 106, Abbrev = "KTV", Name = "Knights Templar", Source = FactionSource.Seed };
+            _factionLookup[107] = new FactionTag { FactionId = 107, Abbrev = "Den", Name = "Dragon's Den", Source = FactionSource.Seed };
+            _factionLookup[108] = new FactionTag { FactionId = 108, Abbrev = "DIG", Name = "DIG DUG", Source = FactionSource.Seed };
+            _factionLookup[109] = new FactionTag { FactionId = 109, Abbrev = "GRE", Name = "Gambiarra", Source = FactionSource.Seed };
+            _factionLookup[110] = new FactionTag { FactionId = 110, Abbrev = "=$=", Name = "Ascended Adventures", Source = FactionSource.Seed };
+            _factionLookup[111] = new FactionTag { FactionId = 111, Abbrev = "DDF", Name = "Dragons Den OG", Source = FactionSource.Seed };
+            _factionLookup[112] = new FactionTag { FactionId = 112, Abbrev = "LSW", Name = "Lavro Ship Works", Source = FactionSource.Seed };
+            _factionLookup[113] = new FactionTag { FactionId = 113, Abbrev = "BOI", Name = "OS BOIS", Source = FactionSource.Seed };
+            _factionLookup[114] = new FactionTag { FactionId = 114, Abbrev = "ISA", Name = "ISA", Source = FactionSource.Seed };
+            _factionLookup[115] = new FactionTag { FactionId = 115, Abbrev = "ASS", Name = "Aussie Space Service", Source = FactionSource.Seed };
+            _factionLookup[116] = new FactionTag { FactionId = 116, Abbrev = "Clo", Name = "Clodos", Source = FactionSource.Seed };
+            _factionLookup[117] = new FactionTag { FactionId = 117, Abbrev = "WoF", Name = "Wings of Fire", Source = FactionSource.Seed };
+            _factionLookup[118] = new FactionTag { FactionId = 118, Abbrev = "B&B", Name = "B&B", Source = FactionSource.Seed };
+            _factionLookup[119] = new FactionTag { FactionId = 119, Abbrev = "Bad", Name = "Bad Lucky", Source = FactionSource.Seed };
+            _factionLookup[120] = new FactionTag { FactionId = 120, Abbrev = "iCF", Name = "iCore Federation", Source = FactionSource.Seed };
+            _factionLookup[121] = new FactionTag { FactionId = 121, Abbrev = "FBI", Name = "Fire Began Inside", Source = FactionSource.Seed };
 
             DiscoverEcfFactions();
         }
@@ -183,7 +195,9 @@ namespace ZeroGBridge
                             {
                                 FactionId = currentId,
                                 Abbrev = currentAbbrev.Trim('[', ']'),
-                                Name = !string.IsNullOrEmpty(currentName) ? currentName : currentAbbrev
+                                Name = !string.IsNullOrEmpty(currentName) ? currentName : currentAbbrev,
+                                Origin = OriginUnknown,
+                                Source = FactionSource.Ecf
                             };
                             if (_factionLookup.TryAdd(currentId, tag)) added++;
                         }
@@ -402,36 +416,124 @@ namespace ZeroGBridge
 
         #region Alert target resolution (1.4)
 
+        /// <summary>FactionInfo.origin 0: a player faction (club).</summary>
+        public const byte OriginPlayerFaction = 0;
+        /// <summary>FactionInfo.origin 1: a private / one-person player faction.</summary>
+        public const byte OriginPrivateFaction = 1;
+        /// <summary>Marker for ECF entries whose real origin is not known (never treated as a player faction).</summary>
+        public const byte OriginUnknown = 254;
+
+        /// <summary>True for origin 0 (player club) and 1 (private faction). NPC groups (2+) and 255 are not player factions.</summary>
+        public static bool IsPlayerOrigin(byte origin)
+        {
+            return origin == OriginPlayerFaction || origin == OriginPrivateFaction;
+        }
+
         /// <summary>
-        /// Adds or refreshes a faction from the legacy API (Event_Get_Factions).
-        /// Ids at or below the default human group (1) are ignored.
+        /// 1.3/1.4 signature, kept for callers that have no origin: treated as a player faction (origin 0).
         /// </summary>
         public void UpsertFaction(int factionId, string abbrev, string name)
         {
-            if (factionId <= DefaultHumanFactionId) return;
+            UpsertFaction(factionId, abbrev, name, OriginPlayerFaction);
+        }
+
+        /// <summary>
+        /// Adds or refreshes a faction from the legacy API (Event_Get_Factions).
+        /// Only origin 0 (player club) and origin 1 (private faction) are stored. NPC origins
+        /// (2+, 255) are dropped, and a seeded/game entry with the same id is removed so an NPC
+        /// faction can never be an alert target. Ids at or below the default human group (1) are ignored.
+        /// Returns true when the faction was stored.
+        /// </summary>
+        public bool UpsertFaction(int factionId, string abbrev, string name, byte origin)
+        {
+            if (factionId <= DefaultHumanFactionId) return false;
+            if (!IsPlayerOrigin(origin))
+            {
+                if (_factionLookup.TryGetValue(factionId, out var existing) && existing != null && existing.Source != FactionSource.Ecf)
+                    _factionLookup.TryRemove(factionId, out _);
+                return false;
+            }
             _factionLookup[factionId] = new FactionTag
             {
                 FactionId = factionId,
                 Abbrev = string.IsNullOrWhiteSpace(abbrev) ? (name ?? "--") : abbrev.Trim(),
-                Name = string.IsNullOrWhiteSpace(name) ? (abbrev ?? "--") : name.Trim()
+                Name = string.IsNullOrWhiteSpace(name) ? (abbrev ?? "--") : name.Trim(),
+                Origin = origin,
+                Source = FactionSource.Game
             };
+            return true;
         }
 
+        /// <summary>All cached faction entries (player, seeded and ECF). Used for display tags only.</summary>
         public int FactionCount => _factionLookup.Count;
+
+        /// <summary>Player factions (origin 0/1, not ECF) that have at least one real player as a member.</summary>
+        public int PlayerFactionCount => PlayerFactions().Count;
+
+        public bool TryGetFaction(int factionId, out FactionTag tag)
+        {
+            return _factionLookup.TryGetValue(factionId, out tag) && tag != null;
+        }
+
+        /// <summary>
+        /// A real player: a cached player record with a Steam id or a positive entity id.
+        /// Member of a faction when its factionId matches, or (private factions) when the
+        /// faction id is the player's own entity id.
+        /// </summary>
+        public bool HasRealPlayer(FactionTag fac)
+        {
+            if (fac == null) return false;
+            string idStr = fac.FactionId.ToString(CultureInfo.InvariantCulture);
+            foreach (var p in _allPlayers.Values)
+            {
+                if (p == null || !IsRealPlayer(p)) continue;
+                if (p.factionId == fac.FactionId) return true;
+                if (fac.Origin == OriginPrivateFaction && p.entityId == idStr) return true;
+            }
+            return false;
+        }
+
+        private static bool IsRealPlayer(PlayerRecord p)
+        {
+            bool hasSteam = !string.IsNullOrWhiteSpace(p.steamId) && p.steamId != "--";
+            bool hasEntity = int.TryParse(p.entityId, NumberStyles.Integer, CultureInfo.InvariantCulture, out int eid) && eid > 0;
+            return hasSteam || hasEntity;
+        }
+
+        /// <summary>
+        /// Factions that alerts may target: origin 0 or 1, from the game or the seed list
+        /// (never ECF/NPC), with at least one real player member. Evaluated on each call,
+        /// so a faction becomes targetable as soon as its players are known.
+        /// </summary>
+        public List<FactionTag> PlayerFactions()
+        {
+            var result = new List<FactionTag>();
+            foreach (var fac in _factionLookup.Values)
+            {
+                if (fac == null) continue;
+                if (fac.Source == FactionSource.Ecf) continue;
+                if (!IsPlayerOrigin(fac.Origin)) continue;
+                if (!HasRealPlayer(fac)) continue;
+                result.Add(fac);
+            }
+            return result;
+        }
 
         /// <summary>
         /// Resolves an alert faction target given as a numeric faction id or a tag
-        /// ("MEC", "[MEC]") or full name, case-insensitive, against the cached faction data.
+        /// ("MEC", "[MEC]") or full name, case-insensitive. 1.4.2: only player factions
+        /// (origin 0/1) with a real player resolve; NPC factions such as Zirax never do.
         /// </summary>
         public bool TryResolveFaction(string idOrTag, out int factionId)
         {
             factionId = 0;
             if (string.IsNullOrWhiteSpace(idOrTag)) return false;
             string key = idOrTag.Trim();
+            var candidates = PlayerFactions();
 
             if (int.TryParse(key, NumberStyles.Integer, CultureInfo.InvariantCulture, out int numeric))
             {
-                if (numeric > DefaultHumanFactionId && _factionLookup.ContainsKey(numeric))
+                if (numeric > DefaultHumanFactionId && candidates.Any(f => f.FactionId == numeric))
                 {
                     factionId = numeric;
                     return true;
@@ -444,9 +546,8 @@ namespace ZeroGBridge
                 bare = bare.Substring(1, bare.Length - 2).Trim();
             if (bare.Length == 0) return false;
 
-            foreach (var fac in _factionLookup.Values)
+            foreach (var fac in candidates)
             {
-                if (fac == null) continue;
                 if (string.Equals(fac.Abbrev, bare, StringComparison.OrdinalIgnoreCase) ||
                     string.Equals(fac.Name, bare, StringComparison.OrdinalIgnoreCase))
                 {

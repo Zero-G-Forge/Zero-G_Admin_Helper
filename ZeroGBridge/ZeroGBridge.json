@@ -1,5 +1,6 @@
 {
   "SaveGameName": "Zero-G Server - Season 4",
   "GlobalDbPath": "",
-  "AuthToken": ""
+  "AuthToken": "",
+  "Port": 30500
 }

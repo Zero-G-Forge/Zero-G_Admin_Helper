@@ -22,6 +22,23 @@ namespace ZeroGBridge
         }
 
         /// <summary>
+        /// 1.4.2 gents filter (replaces the old faction-name blacklist):
+        /// keep structures owned by FactionGroup 0 (player faction), 1 (private) or 5 (admin);
+        /// drop NPC groups (2-4, 6+) and 255 (NoFaction / POIs). When the group is unknown,
+        /// drop only factions known from the config ECF files (NPC definitions).
+        /// </summary>
+        public bool IsPlayerSideRecord(EntityRecord rec)
+        {
+            if (rec == null) return false;
+            if (rec.factionGroup >= 0 && rec.factionGroup <= 255)
+                return ServerView.IsPlayerSideGroup((byte)rec.factionGroup);
+            if (rec.factionId > PlayerCache.DefaultHumanFactionId && _playerCache != null
+                && _playerCache.TryGetFaction(rec.factionId, out var tag) && tag.Source == FactionSource.Ecf)
+                return false;
+            return true;
+        }
+
+        /// <summary>
         /// Ingests and routes a command string to its appropriate handler.
         /// </summary>
         public string ProcessIncomingCommand(string command)
@@ -116,7 +133,7 @@ namespace ZeroGBridge
                     });
                 }
 
-                // 5. Global Structure / Entity Query with NPC Blacklist Filter
+                // 5. Global Structure / Entity Query (1.4.2: NPC filter by faction origin/group, not by name)
                 if (lowerCmd == "gents" || lowerCmd == "structures" || lowerCmd == "getentities"
                     || lowerCmd.StartsWith("gents:") || lowerCmd.StartsWith("structures:"))
                 {
@@ -136,12 +153,6 @@ namespace ZeroGBridge
 
                     ZgbLog.Write("[ZGB] -ACTION- Processing 'gents' entity query directive from ZAH.");
 
-                    // NPC blacklist for filtering out non-player entities
-                    var npcBlacklist = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        "NoFaction", "Talon", "Zirax", "Zrx", "Polaris", "Pol", 
-                        "Kriel", "Trader", "Traders", "Uch", "UCH", "Warlord", "Alien"
-                    };
 
                     // Real live entities from loaded playfields only. Empty list when none are loaded
                     // (never return the old hardcoded mock structures).
@@ -160,7 +171,7 @@ namespace ZeroGBridge
                     List<object> structureSnapshot = new List<object>();
                     foreach (var rec in merged.Values.OrderBy(r => r.playfield).ThenBy(r => r.name))
                     {
-                        if (!string.IsNullOrEmpty(rec.faction) && npcBlacklist.Contains(rec.faction.Trim('[', ']')))
+                        if (!IsPlayerSideRecord(rec))
                             continue;
                         if (!string.IsNullOrEmpty(pfFilter) && !string.Equals(rec.playfield, pfFilter, StringComparison.OrdinalIgnoreCase))
                             continue;

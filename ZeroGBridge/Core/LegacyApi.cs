@@ -20,6 +20,12 @@ namespace ZeroGBridge
     /// Threading: when Game_Update is ticking (game main thread), requests are queued and executed
     /// from Game_Update. If Game_Update has not ticked in the last second, requests are executed
     /// directly on the caller's thread (same as most legacy mods do).
+    ///
+    /// 1.4.2: Request_Get_Factions is only ever issued on the game thread: from Game_Start
+    /// (the game calls it on its main thread) or from Game_Update. The refresh timer, Init and
+    /// Event_Faction_Changed only mark a refresh as pending; the next Game_Update sends it.
+    /// (1.4.1 called Game_Request from the System.Threading.Timer worker, which the game
+    /// appears to ignore, so the cache never grew past the seeded clubs.)
     /// </summary>
     public static class LegacyApi
     {
@@ -56,6 +62,19 @@ namespace ZeroGBridge
         private static long _lastFactionRequestTicks;
         private const int FactionChangedDebounceMs = 2000;
 
+        // 1.4.2: game-thread faction requests
+        private static int _factionRequestPending;      // 1 = send Request_Get_Factions on the next Game_Update
+        private static long _factionPendingSinceTicks;
+        private static int _pendingWaitWarned;
+        private static int _lastFactionSeq = -1;         // seq of the last Request_Get_Factions we sent
+        private static int _factionRequestsSent;
+        private static string _lastFactionLogKey;
+        public static int LastFactionRequestThreadId { get; private set; }
+        public static int GameStartThreadId { get; private set; }
+        public static int FactionRequestsSent => Volatile.Read(ref _factionRequestsSent);
+        public static bool FactionRequestPending => Volatile.Read(ref _factionRequestPending) == 1;
+        public static int LastFactionSeq => Volatile.Read(ref _lastFactionSeq);
+
         public static bool IsAvailable => _api != null;
         public static int MainThreadId { get; private set; }
         public static int LastExecThreadId { get; private set; }
@@ -74,9 +93,11 @@ namespace ZeroGBridge
         public static void OnGameStart(ModGameAPI api)
         {
             _api = api;
+            GameStartThreadId = Thread.CurrentThread.ManagedThreadId;
             Interlocked.Exchange(ref _unavailableWarned, 0);
             ZgbLog.Write("[ZGB] -SUCCESS- Legacy ModInterface attached (Game_Start); in-game alerts available.");
-            RequestFactions();
+            // Game_Start runs on the game's main thread, so the first request can go out right here.
+            SendFactionRequestNow("Game_Start");
             StartFactionRefresh();
         }
 
@@ -85,6 +106,7 @@ namespace ZeroGBridge
             StopFactionRefresh();
             _api = null;
             Interlocked.Exchange(ref _lastUpdateTicks, 0);
+            Interlocked.Exchange(ref _factionRequestPending, 0);
             // Fail anything still queued
             while (Queue.TryDequeue(out var p))
             {
@@ -101,6 +123,11 @@ namespace ZeroGBridge
         {
             MainThreadId = Thread.CurrentThread.ManagedThreadId;
             Interlocked.Exchange(ref _lastUpdateTicks, DateTime.UtcNow.Ticks);
+            if (Interlocked.Exchange(ref _factionRequestPending, 0) == 1)
+            {
+                Interlocked.Exchange(ref _pendingWaitWarned, 0);
+                SendFactionRequestNow("Game_Update");
+            }
             int budget = 20;
             while (budget-- > 0 && Queue.TryDequeue(out var p))
             {
@@ -117,16 +144,7 @@ namespace ZeroGBridge
                 switch (eventId)
                 {
                     case CmdId.Event_Get_Factions:
-                        var list = data as FactionInfoList;
-                        if (list?.factions != null && _playerCache != null)
-                        {
-                            foreach (var f in list.factions)
-                                _playerCache.UpsertFaction(f.factionId, f.abbrev, f.name);
-                            int total = _playerCache.FactionCount;
-                            int prev = Interlocked.Exchange(ref _loggedFactionCount, total);
-                            if (prev != total)
-                                ZgbLog.Write($"[ZGB] -INFO- Legacy Event_Get_Factions: {total} faction(s) cached for alert targeting.");
-                        }
+                        HandleFactionList(seqNr, data as FactionInfoList);
                         break;
                     case CmdId.Event_Faction_Changed:
                         RequestFactionsDebounced();
@@ -146,6 +164,38 @@ namespace ZeroGBridge
             }
         }
 
+        /// <summary>
+        /// Merges one Event_Get_Factions reply (ours or another mod's). Stores origin 0/1 only;
+        /// NPC origins are dropped. Logs the incoming count and seqNr (DEBUG every time,
+        /// INFO when the numbers change).
+        /// </summary>
+        internal static void HandleFactionList(ushort seqNr, FactionInfoList list)
+        {
+            int received = list?.factions?.Count ?? 0;
+            string whose = seqNr == Volatile.Read(ref _lastFactionSeq) ? "ours" : "other";
+            if (list?.factions == null || _playerCache == null)
+            {
+                ZgbLog.Write($"[ZGB] -DEBUG- Event_Get_Factions seqNr={seqNr} ({whose}): received={received}, nothing cached (list or cache missing).");
+                return;
+            }
+
+            int stored = 0, npc = 0, skipped = 0;
+            foreach (var f in list.factions)
+            {
+                if (f.factionId <= PlayerCache.DefaultHumanFactionId) { skipped++; continue; }
+                if (_playerCache.UpsertFaction(f.factionId, f.abbrev, f.name, f.origin)) stored++;
+                else npc++;
+            }
+            int playerFactions = _playerCache.PlayerFactionCount;
+            ZgbLog.Write($"[ZGB] -DEBUG- Event_Get_Factions seqNr={seqNr} ({whose}): received={received} stored(origin 0/1)={stored} dropped(NPC)={npc} skipped(id<=1)={skipped} player factions with a real player={playerFactions}");
+
+            string key = received + "/" + stored + "/" + npc + "/" + playerFactions;
+            string prevKey = Interlocked.Exchange(ref _lastFactionLogKey, key);
+            Interlocked.Exchange(ref _loggedFactionCount, playerFactions);
+            if (prevKey != key)
+                ZgbLog.Write($"[ZGB] -INFO- Legacy Event_Get_Factions (seqNr {seqNr}, {whose}): {received} received, {stored} player faction(s) stored, {npc} NPC dropped; {playerFactions} with a real player available for alert targeting.");
+        }
+
         public static ushort NextSeq()
         {
             // 40000..65535 so bridge requests are recognizable in Event_Error
@@ -158,12 +208,33 @@ namespace ZeroGBridge
             return (ushort)v;
         }
 
+        /// <summary>
+        /// Asks for a faction list refresh. Safe from any thread: it only marks the request as
+        /// pending; the next Game_Update (game main thread) sends Request_Get_Factions.
+        /// </summary>
         public static void RequestFactions()
+        {
+            if (_api == null) return;
+            Interlocked.Exchange(ref _lastFactionRequestTicks, DateTime.UtcNow.Ticks);
+            if (Interlocked.Exchange(ref _factionRequestPending, 1) == 0)
+                Interlocked.Exchange(ref _factionPendingSinceTicks, DateTime.UtcNow.Ticks);
+        }
+
+        /// <summary>Sends Request_Get_Factions on the current thread. Only call from Game_Start or Game_Update.</summary>
+        private static void SendFactionRequestNow(string from)
         {
             var api = _api;
             if (api == null) return;
             Interlocked.Exchange(ref _lastFactionRequestTicks, DateTime.UtcNow.Ticks);
-            try { api.Game_Request(CmdId.Request_Get_Factions, NextSeq(), new Id(1)); }
+            ushort seq = NextSeq();
+            Interlocked.Exchange(ref _lastFactionSeq, seq);
+            LastFactionRequestThreadId = Thread.CurrentThread.ManagedThreadId;
+            try
+            {
+                bool ok = api.Game_Request(CmdId.Request_Get_Factions, seq, new Id(1));
+                Interlocked.Increment(ref _factionRequestsSent);
+                ZgbLog.Write($"[ZGB] -DEBUG- Request_Get_Factions sent from {from} (thread {LastFactionRequestThreadId}) seqNr={seq} accepted={ok}");
+            }
             catch (Exception ex) { ZgbLog.Write($"[ZGB] -WARN- Request_Get_Factions failed: {ex.Message}"); }
         }
 
@@ -200,9 +271,20 @@ namespace ZeroGBridge
             }
         }
 
+        // Timer worker thread: never call the game from here, just mark the refresh pending.
         private static void OnFactionRefreshTick(object _)
         {
-            try { RequestFactions(); }
+            try
+            {
+                RequestFactions();
+                long since = Interlocked.Read(ref _factionPendingSinceTicks);
+                if (FactionRequestPending && since != 0 && !UpdateIsTicking
+                    && DateTime.UtcNow.Ticks - since > TimeSpan.TicksPerMinute
+                    && Interlocked.Exchange(ref _pendingWaitWarned, 1) == 0)
+                {
+                    ZgbLog.Write("[ZGB] -WARN- Faction refresh is waiting for Game_Update (game thread), which has not ticked for over a minute.");
+                }
+            }
             catch { /* never throw from a timer */ }
         }
 

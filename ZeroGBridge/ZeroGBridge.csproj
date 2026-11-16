@@ -19,13 +19,15 @@
     <!-- Dynamic 16-bit Valid UTC-5 (CDT) Version Generation -->
     <MajorVersion>1</MajorVersion>
     <MinorVersion>4</MinorVersion>
+    <!-- Human release name (1.4.2). The numeric version stays Major.Minor.MMDD.HHmm. -->
+    <ReleaseVersion>1.4.2</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
 
     <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>
     <AssemblyVersion>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</AssemblyVersion>
     <FileVersion>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</FileVersion>
-    <InformationalVersion>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</InformationalVersion>
+    <InformationalVersion>$(ReleaseVersion)+$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</InformationalVersion>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -76,7 +78,7 @@
   <!-- Auto-generate matching ModInfo.yaml on build -->
   <Target Name="GenerateModInfoYaml" AfterTargets="Build">
     <PropertyGroup>
-      <ModInfoContent>Name: ZeroGBridge%0ADisplayName: ZeroGBridge%0AVersion: $(Version)%0AAuthor: Zero-G Forge%0ADescription: Dedicated Telemetry &amp; Administration Bridge for Empyrion</ModInfoContent>
+      <ModInfoContent>Name: ZeroGBridge%0ADisplayName: ZeroGBridge%0AVersion: $(Version)%0AAuthor: Zero-G Forge%0ADescription: Dedicated Telemetry &amp; Administration Bridge for Empyrion (release $(ReleaseVersion))</ModInfoContent>
     </PropertyGroup>
     <WriteLinesToFile 
       File="$(TargetDir)ModInfo.yaml" 

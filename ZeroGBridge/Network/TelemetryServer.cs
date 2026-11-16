@@ -25,7 +25,7 @@ namespace ZeroGBridge
     }
 
     /// <summary>
-    /// Manages the TCP socket server on Port 30500 with password authentication gating
+    /// Manages the bridge TCP socket server (ZeroGBridge.json "Port", default 30500) with password authentication gating
     /// and protected JSON telemetry broadcasting.
     /// </summary>
     public class TelemetryServer
@@ -45,6 +45,12 @@ namespace ZeroGBridge
         private readonly ConcurrentDictionary<string, ClientSession> _connectedSessions = new ConcurrentDictionary<string, ClientSession>();
 
         public bool HasActiveConnections => !_connectedSessions.IsEmpty;
+
+        /// <summary>The TCP port this server listens on (ZeroGBridge.json "Port", default 30500).</summary>
+        public int Port => _port;
+
+        /// <summary>True once the listener socket is bound (for tests and status).</summary>
+        public bool IsListening { get; private set; }
 
         // Incremented on every successful auth. TelemetryBroadcaster watches it so a newly
         // connected client receives the online roster on the next METRIC tick.
@@ -97,6 +103,7 @@ namespace ZeroGBridge
             {
                 _listener = new TcpListener(IPAddress.Any, _port);
                 _listener.Start();
+                IsListening = true;
                 ZgbLog.Write($"[ZGB] -STATUS- TelemetryServer listening on port {_port} with password protection enabled. Owner: {ModMain.DescribeProcess()}");
 
                 while (_isRunning)

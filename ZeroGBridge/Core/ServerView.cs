@@ -242,6 +242,7 @@ namespace ZeroGBridge
                             type = ((EntityType)gsi.type).ToString(),
                             faction = faction,
                             factionId = factionId,
+                            factionGroup = gsi.factionGroup,
                             playfield = playfield,
                             position = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0:F1}, {1:F1}, {2:F1}", gsi.pos.x, gsi.pos.y, gsi.pos.z),
                             source = "server",
@@ -300,7 +301,7 @@ namespace ZeroGBridge
         }
 
         // FactionGroup: 0 = player faction, 1 = private (player), 5 = admin. NPC groups / NoFaction (POIs) are skipped.
-        private static bool IsPlayerSideGroup(byte group)
+        public static bool IsPlayerSideGroup(byte group)
         {
             return group == 0 || group == 1 || group == 5;
         }

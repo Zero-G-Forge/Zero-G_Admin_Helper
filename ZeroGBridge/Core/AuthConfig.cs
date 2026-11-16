@@ -1,9 +1,10 @@
 // =====================================================================
 // MODULE: ZeroGBridge/Core/AuthConfig.cs
-// DESCRIPTION: Port 30500 auth token from ZeroGBridge.json ("AuthToken")
+// DESCRIPTION: Bridge auth token ("AuthToken") and listen port ("Port", 1.4.2) from ZeroGBridge.json
 // =====================================================================
 
 using System;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using Newtonsoft.Json.Linq;
@@ -30,6 +31,9 @@ namespace ZeroGBridge
         private static bool _cachedExists;
         private static bool _loadedOnce;
         private static bool _fallbackWarned;
+
+        /// <summary>Listen port used when ZeroGBridge.json has no valid "Port".</summary>
+        public const int DefaultPort = 30500;
 
         /// <summary>For tests: point at a specific ZeroGBridge.json.</summary>
         public static string ConfigPathOverride
@@ -74,9 +78,52 @@ namespace ZeroGBridge
                 if (!_fallbackWarned)
                 {
                     _fallbackWarned = true;
-                    ZgbLog.Write($"[ZGB] -WARN- No AuthToken set in {ConfigPath}; using the built-in fallback password. Set \"AuthToken\" in ZeroGBridge.json to secure port 30500.");
+                    ZgbLog.Write($"[ZGB] -WARN- No AuthToken set in {ConfigPath}; using the built-in fallback password. Set \"AuthToken\" in ZeroGBridge.json to secure the bridge port.");
                 }
                 return LegacyFallbackToken;
+            }
+        }
+
+        /// <summary>
+        /// 1.4.2: the TCP port the bridge listens on. Reads "Port" from ZeroGBridge.json
+        /// (a number or numeric string, 1-65535). Missing, empty or invalid means 30500.
+        /// Read once at startup; changing it needs a server restart.
+        /// </summary>
+        public static int GetPort() => GetPort(out _);
+
+        /// <param name="source">"json", "default" (not set) or "invalid" (set but unusable; default used).</param>
+        public static int GetPort(out string source)
+        {
+            source = "default";
+            string path = ConfigPath;
+            try
+            {
+                if (!File.Exists(path)) return DefaultPort;
+                var jo = JObject.Parse(File.ReadAllText(path));
+                var t = jo["Port"];
+                if (t == null || t.Type == JTokenType.Null) return DefaultPort;
+                if (t.Type == JTokenType.String && string.IsNullOrWhiteSpace((string)t)) return DefaultPort;
+
+                long v;
+                bool ok = false;
+                if (t.Type == JTokenType.Integer) { v = (long)t; ok = true; }
+                else if (t.Type == JTokenType.String) ok = long.TryParse(((string)t).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out v);
+                else v = 0;
+
+                if (ok && v >= 1 && v <= 65535)
+                {
+                    source = "json";
+                    return (int)v;
+                }
+                source = "invalid";
+                ZgbLog.Write($"[ZGB] -WARN- \"Port\" in {path} is not a valid TCP port (1-65535); using the default {DefaultPort}.");
+                return DefaultPort;
+            }
+            catch (Exception ex)
+            {
+                source = "invalid";
+                ZgbLog.Write($"[ZGB] -WARN- Could not read Port from {path}: {ex.GetType().Name}; using the default {DefaultPort}.");
+                return DefaultPort;
             }
         }
 

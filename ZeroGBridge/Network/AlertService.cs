@@ -126,7 +126,7 @@ namespace ZeroGBridge
                 if (string.IsNullOrWhiteSpace(idRaw))
                     return Fail(reqId, "bad_request", "faction target needs an id");
                 if (_playerCache == null || !_playerCache.TryResolveFaction(idRaw, out targetId))
-                    return Fail(reqId, "unknown_target", "faction not found: " + Short(idRaw));
+                    return Fail(reqId, "unknown_target", "player faction not found (NPC factions and factions without a real player are not targetable): " + Short(idRaw));
                 cmd = CmdId.Request_InGameMessage_Faction;
             }
             else

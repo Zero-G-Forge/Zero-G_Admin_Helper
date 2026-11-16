@@ -25,6 +25,12 @@ namespace ZeroGBridge
         public string type { get; set; }
         public string faction { get; set; }
         public int factionId { get; set; }
+
+        // 1.4.2: FactionGroup / origin of the owning faction (0 player, 1 private, 5 admin, 2+ NPC, 255 none).
+        // -1 = unknown. Used by gents to drop NPC structures (replaces the old name blacklist).
+        [Newtonsoft.Json.JsonIgnore]
+        public int factionGroup { get; set; } = -1;
+
         public string playfield { get; set; }
         public string position { get; set; }
         public string pos { get { return position; } }
@@ -117,7 +123,9 @@ namespace ZeroGBridge
             if (LegacyApi.IsAvailable) LegacyApi.RequestFactions(); // Game_Start may have arrived first
             _alertService = new AlertService(_playerCache);
             AuthConfig.GetToken(); // logs the token source once (never the value)
-            _telemetryServer = new TelemetryServer(30500, _commandDispatcher, AuthConfig.GetToken, _alertService);
+            int port = AuthConfig.GetPort(out string portSource);
+            ZgbLog.Write($"[ZGB] -INFO- Bridge port in use: {port} ({(portSource == "json" ? "from ZeroGBridge.json Port" : portSource == "invalid" ? "default; ZeroGBridge.json Port is invalid" : "default; Port not set in ZeroGBridge.json")}).");
+            _telemetryServer = new TelemetryServer(port, _commandDispatcher, AuthConfig.GetToken, _alertService);
             _telemetryServer.Start();
 
             // 4. Launch TelemetryBroadcaster (CPU/RAM METRIC). LogDiscovery is left unwired on purpose.
@@ -186,6 +194,9 @@ namespace ZeroGBridge
         /// Version, process mode and pid. Empyrion loads the mod in the dedicated server
         /// and in every playfield server process, so this tells which one owns port 30500.
         /// </summary>
+        /// <summary>Human release name (the assembly version is Major.Minor.MMDD.HHmm).</summary>
+        public const string Release = "1.4.2";
+
         public static string DescribeProcess()
         {
             string version = "?";
@@ -214,7 +225,7 @@ namespace ZeroGBridge
             }
             catch { }
 
-            return $"ZeroGBridge v{version} process: mode={mode} name={proc} pid={pid}";
+            return $"ZeroGBridge {Release} (v{version}) process: mode={mode} name={proc} pid={pid}";
         }
 
         #region Pure API v2 Event Wiring
@@ -412,7 +423,8 @@ namespace ZeroGBridge
                 }
 
                 int factionId = 0;
-                try { factionId = entity.Faction.Id; } catch { }
+                int factionGroup = -1;
+                try { factionId = entity.Faction.Id; factionGroup = (byte)entity.Faction.Group; } catch { }
 
                 string faction = _playerCache != null
                     ? _playerCache.ResolveFactionAbbrev(factionId)
@@ -431,6 +443,7 @@ namespace ZeroGBridge
                     type = entity.Type.ToString(),
                     faction = faction,
                     factionId = factionId,
+                    factionGroup = factionGroup,
                     playfield = playfield.Name ?? "--",
                     position = FormatPosition(entity.Position)
                 };
