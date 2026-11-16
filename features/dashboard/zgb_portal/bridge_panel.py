@@ -10,7 +10,23 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .data_source import Script
+from PyQt6 import sip
+
+from .data_source import Script, format_players, format_status
+
+# Catalog entries that have a real, read-only bridge call on live data.
+LIVE_COMMANDS = {
+    ("Server", "Get status"): "status",
+    ("Players", "List players"): "plys",
+}
+LIVE_ONLY_READS_TIP = (
+    "Not available on live data yet. Only Server › Get status and Players › List players "
+    "are wired to the bridge (read-only). Switch Data source to Examples to try the rest."
+)
+LIVE_PUSH_TIP = (
+    "Not available on live data: the bridge has no script upload command. Put the script in the "
+    "server's ZeroGBridge folder with the host panel. Run / Test still works locally."
+)
 
 from PyQt6.QtCore import Qt, QRegularExpression
 from PyQt6.QtGui import (
@@ -593,7 +609,7 @@ def build_catalog() -> list[ApiCommand]:
                     Param("message", "Message", "text", "Anyone at the station?")],
                    None, simulates="player_chat"),
         ApiCommand("Server", "Get status", "bridge.server.status",
-                   "Snapshot of the mock server.",
+                   "Snapshot of the server: loader, core, players online, last reload.",
                    [], lambda v: _ok(
                        "bridge.server.status()",
                        "Server:     Zero-G Reborn (GTX)\n"
@@ -644,6 +660,7 @@ class BridgePanel(QWidget):
         self._suppress_script_change = False
 
         self._init_ui()
+        self._apply_mode()
         self._select_command("Players", "List players")
         self._select_script("greet_on_join.py")
         self._script_log("IronPython 3.4 engine ready (mock). Two scripts are live, one is disabled.", "dim")
@@ -658,7 +675,7 @@ class BridgePanel(QWidget):
         titles = QVBoxLayout()
         title = QLabel("ZeroGBridge  —  Game & Server API")
         title.setObjectName("PopupHeaderLabel")
-        subtitle = QLabel(
+        self.subtitle = subtitle = QLabel(
             "Browse what the Empyrion ModAPI and the server expose, run a command with fake "
             "results, or write an IronPython (.py) script and push it live with no restart."
         )
@@ -809,6 +826,7 @@ class BridgePanel(QWidget):
         self.cmd_call.setText(cmd.call)
         self.cmd_summary.setText(cmd.summary)
         self._rebuild_form(cmd)
+        self._update_run_button()
 
     def _rebuild_form(self, cmd: ApiCommand) -> None:
         while self.form.rowCount():
@@ -849,11 +867,92 @@ class BridgePanel(QWidget):
                 values[key] = w.text()
         return values
 
+    # ----- data source -----------------------------------------------------
+
+    def set_source(self, source) -> None:
+        self.source = source
+        self.scripts = source.scripts()
+        self.current_script = None
+        self._refresh_script_list()
+        if self.scripts:
+            self._select_script(self.scripts[0].name)
+        self._apply_mode()
+        self.result.clear()
+
+    def _apply_mode(self) -> None:
+        live = getattr(self.source, "is_live", False)
+        if live:
+            self.subtitle.setText(
+                "Live: Get status and List players read the connected server (read-only). "
+                "Other commands and Push live are off on live data. Scripts below are local examples."
+            )
+            self.footer.setText("Live data. Only read-only bridge calls are enabled.")
+            self.result.setPlaceholderText("Run Get status or List players to read the live server…")
+            self.badge.setText("LIVE · READ-ONLY")
+        else:
+            self.subtitle.setText(
+                "Examples: browse the Empyrion ModAPI and server commands with fake results, "
+                "or edit an IronPython (.py) script. Nothing is sent to a server."
+            )
+            self.footer.setText("Examples. Commands and scripts do not touch a live server.")
+            self.result.setPlaceholderText("Run a command to see a simulated result…")
+            self.badge.setText("ENGINE READY")
+        self.btn_push.setEnabled(not live)
+        self.btn_push.setToolTip(LIVE_PUSH_TIP if live else "")
+        self._update_run_button()
+
+    def _update_run_button(self) -> None:
+        cmd = self.current_cmd
+        live = getattr(self.source, "is_live", False)
+        if live and cmd and (cmd.category, cmd.name) not in LIVE_COMMANDS:
+            self.btn_run.setEnabled(False)
+            self.btn_run.setToolTip(LIVE_ONLY_READS_TIP)
+        else:
+            self.btn_run.setEnabled(True)
+            self.btn_run.setToolTip("Read-only bridge call." if live else "")
+
+    def _run_live(self, cmd, values: dict) -> None:
+        what = LIVE_COMMANDS.get((cmd.category, cmd.name))
+        if not what:
+            return
+        from .live_client import run_async
+
+        src = self.source
+        self.btn_run.setEnabled(False)
+        self.result.setPlainText("Reading the live server…")
+        online_only = bool(values.get("online_only"))
+        if what == "status":
+            fn = lambda: format_status(src.fetch_state())
+            call = "hot:status"
+        else:
+            fn = lambda: format_players(src.fetch_players(), online_only=online_only)
+            call = "plys"
+
+        def done(text, src=src, call=call):
+            if sip.isdeleted(self) or src is not self.source:
+                return
+            self.result.setPlainText("OK  {0}  (live: {1})\n\n{2}".format(call, src.server_label(), text))
+            self.footer.setText("Ran {0} on {1} — OK.".format(call, src.server_label()))
+            self._update_run_button()
+
+        def failed(kind, message, src=src, call=call):
+            if sip.isdeleted(self) or src is not self.source:
+                return
+            self.result.setPlainText("FAILED  {0}\n\n{1}".format(call, message))
+            self.footer.setText("{0} failed: {1}".format(call, message))
+            self._update_run_button()
+
+        run_async(fn, done, failed)
+
     def _on_run_command(self) -> None:
         cmd = self.current_cmd
         if not cmd:
             return
         values = self._param_values()
+        if getattr(self.source, "is_live", False):
+            if (cmd.category, cmd.name) in LIVE_COMMANDS:
+                self._run_live(cmd, values)
+            return
         if cmd.simulates:
             text = self._simulate_event(cmd.simulates, values)
         elif cmd.runner:
@@ -1065,6 +1164,8 @@ class BridgePanel(QWidget):
         self._run_script_test(script, hook, values, prefix="TEST")
 
     def _on_push_live(self) -> None:
+        if getattr(self.source, "is_live", False):
+            return
         self._store_editor()
         script = self.current_script
         if not script:

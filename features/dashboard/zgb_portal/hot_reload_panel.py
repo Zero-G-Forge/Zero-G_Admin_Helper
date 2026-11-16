@@ -25,11 +25,13 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from PyQt6 import sip
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -52,7 +54,22 @@ from PyQt6.QtWidgets import (
 from features.paths import asset_path
 
 from .bridge_panel import BridgePanel
-from .data_source import HistoryEntry, LoaderState, PortalDataSource, SampleDataSource
+from .data_source import (
+    HistoryEntry,
+    LiveDataSource,
+    LoaderState,
+    PortalDataSource,
+    SampleDataSource,
+    offline_state,
+)
+from .live_client import run_async
+
+LIVE_UPLOAD_TIP = (
+    "Not available on live data: the bridge has no upload command. "
+    "Drop the new ZeroGBridge.Core.dll into the server's Mods/ZeroGBridge/Updates/ "
+    "folder with the host panel, then use Reload now."
+)
+LIVE_REFRESH_MS = 30_000
 
 # ---------------------------------------------------------------------------
 # Paths & theme
@@ -661,6 +678,11 @@ class HotReloadPanel(QWidget):
         self._capture_dir = HERE
         self._pending_finish = None
         self._shot_target = None  # set by the parent window so tab chrome is included
+        self._live_inflight = False   # a status read is running
+        self._live_action = False     # a confirmed reload/rollback is running
+        self._last_conn = None        # last live connection state written to the log
+        self._last_core_id = None
+        self._last_refresh = None
 
 
         self.setObjectName("HotReloadCanvas")
@@ -670,15 +692,232 @@ class HotReloadPanel(QWidget):
             self.setStyleSheet(load_stylesheet())
 
         self._init_ui()
+        self._apply_mode()
         self._refresh_status()
         self._refresh_history()
         self._set_busy(False)
+        self._log_source_intro()
+        if self.source.is_live:
+            self.refresh_live()
 
+    # ----- data source -----------------------------------------------------
+
+    def _alive(self) -> bool:
+        return not sip.isdeleted(self)
+
+    def set_source(self, source: PortalDataSource) -> None:
+        """Switch between Live and Examples. Pending simulated steps are dropped."""
+        self._clear_timers()
+        self.source = source
+        self.state = source.loader_state()
+        self._last_conn = None
+        self._last_core_id = None
+        self._live_action = False
+        self._live_inflight = False
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setFormat("Idle")
+        self._apply_mode()
+        self._refresh_history()
+        self._set_busy(False)
+        self._log_source_intro()
+        if source.is_live:
+            self.refresh_live()
+
+    def _log_source_intro(self) -> None:
         st = self.state
-        self._log(f"Loader {st.loader_version} holding port {st.port}. ZAH session attached.", "info")
-        self._log(f"Core {st.core_version} loaded since {fmt_time(st.loaded_since)} — {st.last_result}.",
-                  "ok" if st.last_ok else "warn")
-        self._log(f"Data source: {self.source.label}. No live server. Reloads and rollbacks are simulated.", "dim")
+        if self.source.is_live:
+            self._log(
+                f"Data source: Live — {st.server_name} (bridge {st.port}). Reading hot:status… "
+                "Reload and rollback always ask before anything is sent.",
+                "cyan",
+            )
+            self.footer.setText(f"Live: {st.server_name}, bridge {st.port}.")
+        else:
+            self._log(f"Data source: Examples (Examples/ZGB_Portal). Loader {st.loader_version}, "
+                      f"core {st.core_version}.", "info")
+            self._log("Examples only: reloads and rollbacks are simulated, nothing is sent to a server.", "dim")
+            self.footer.setText(f"Examples. Port {st.port} is held by the loader (simulated).")
+
+    def _apply_mode(self) -> None:
+        live = self.source.is_live
+        self.file_lbl.setText("Pending drop" if live else "New core DLL")
+        self.dll_path.setReadOnly(live)
+        if live:
+            self.dll_path.setPlaceholderText("No new core is waiting in Updates/")
+            self.dll_path.setText(self.state.pending_drop)
+        else:
+            self.dll_path.setPlaceholderText("Pick a ZeroGBridge.Core.*.dll to upload…")
+            self.dll_path.setText(self.state.pending_dll)
+        self.btn_browse.setToolTip(LIVE_UPLOAD_TIP if live else "Pick an example core DLL.")
+        self.btn_sim_drop.setToolTip(
+            LIVE_UPLOAD_TIP if live else "Examples only: pretend a new core DLL was copied into the incoming folder."
+        )
+        self.chk_auto.setToolTip(
+            "Shows the server's AutoReloadOnDrop setting (read-only on live data)." if live else ""
+        )
+        self.chk_auto.blockSignals(True)
+        self.chk_auto.setChecked(bool(self.state.server_auto_reload) if live else False)
+        self.chk_auto.blockSignals(False)
+        self.chk_force.setVisible(live)
+        self.btn_rollback_sel.setToolTip(
+            "Live data: use Roll back to previous (the bridge restores its last good core)." if live else ""
+        )
+        self.btn_reload.setText("Reload now")
+        self.lbl_hold_k.setText("Core domain" if live else "Session")
+
+    # ----- live reads ------------------------------------------------------
+
+    def refresh_live(self) -> None:
+        """Reads hot:status in a worker thread. Read-only; safe to call any time."""
+        if not self.source.is_live or self._live_inflight or self._live_action:
+            return
+        self._live_inflight = True
+        src = self.source
+        if self.state.connection != "Online":
+            self.state.connection = "Connecting"
+            self._refresh_status()
+        run_async(
+            src.fetch_state,
+            lambda st, src=src: self._on_live_state(src, st),
+            lambda kind, msg, src=src: self._on_live_error(src, kind, msg),
+        )
+
+    def _on_live_state(self, src, state: LoaderState) -> None:
+        if not self._alive() or src is not self.source:
+            return
+        self._live_inflight = False
+        self._last_refresh = now_cst()
+        self.state = state
+        if self._last_conn != "Online" or self._last_core_id != state.core_id:
+            self._log(
+                f"Live: {state.server_name} — loader {state.loader_version}, core "
+                f"{state.core_release or '?'} ({state.core_version}) in {state.core_domain or '—'}, "
+                f"{state.players_online} online.",
+                "ok",
+            )
+        self._last_conn = "Online"
+        self._last_core_id = state.core_id
+        self._apply_mode()
+        self._refresh_history()
+        self._set_busy(False)
+        self.footer.setText(
+            f"Live: {state.server_name}, bridge {state.port}. Updated {self._last_refresh.strftime('%I:%M:%S %p CST').lstrip('0')}."
+        )
+
+    def _on_live_error(self, src, kind: str, message: str) -> None:
+        if not self._alive() or src is not self.source:
+            return
+        self._live_inflight = False
+        conn = "Auth failed" if kind == "auth" else "Offline"
+        self.state = offline_state(src.profile(), conn, message)
+        if self._last_conn != conn:
+            self._log(f"Live: {message}", "fail")
+        self._last_conn = conn
+        self._last_core_id = None
+        self._apply_mode()
+        self._refresh_history()
+        self._set_busy(False)
+        self.footer.setText(f"Live: {conn.lower()} — {message}")
+
+    # ----- live reload / rollback (always confirmed) -----------------------
+
+    def _refresh_age(self) -> str:
+        if not self._last_refresh:
+            return ""
+        return f" (as of {self._last_refresh.strftime('%I:%M %p CST').lstrip('0')})"
+
+    def _live_reload(self) -> None:
+        if self._live_action or self.state.connection != "Online":
+            return
+        s = self.state
+        force = self.chk_force.isChecked()
+        if force:
+            what = (f"Force reload: the running core {s.core_release or ''} ({s.core_version}) is "
+                    "unloaded and loaded again, even if nothing new is in Updates/.")
+        elif s.pending_drop:
+            what = f"Load the core waiting in Updates/: {s.pending_drop}."
+        else:
+            what = ("No new core is waiting in Updates/. The bridge will answer 'unchanged' "
+                    "unless you tick Force reload same core.")
+        body = (
+            f"{self._player_warning()}{self._refresh_age()}\n\n"
+            f"Send a hot reload to {s.server_name} (bridge port {s.port})?\n\n{what}\n\n"
+            "The loader keeps the bridge port open and the server does not restart. "
+            "If the new core fails, the loader rolls back on its own."
+        )
+        if not self._confirm(f"Confirm live reload on {s.server_name}", body, "Reload on server"):
+            self._log("Live reload cancelled. Nothing was sent.", "dim")
+            return
+        self._start_live_action("reload", lambda src=self.source: src.reload(force=force),
+                                f"hot reload{' (force)' if force else ''}")
+
+    def _live_rollback(self) -> None:
+        if self._live_action or self.state.connection != "Online":
+            return
+        s = self.state
+        body = (
+            f"{self._player_warning()}{self._refresh_age()}\n\n"
+            f"Roll back the bridge core on {s.server_name} (bridge port {s.port})?\n\n"
+            f"Running now: {s.core_release or ''} ({s.core_version}). The loader restores its "
+            "previous good core. The server does not restart."
+        )
+        if not self._confirm(f"Confirm live rollback on {s.server_name}", body, "Roll back on server"):
+            self._log("Live rollback cancelled. Nothing was sent.", "dim")
+            return
+        self._start_live_action("rollback", lambda src=self.source: src.rollback(), "hot rollback")
+
+    def _start_live_action(self, kind: str, fn, label: str) -> None:
+        src = self.source
+        self._live_action = True
+        self._set_busy(True)
+        self.progress.setRange(0, 0)
+        self.progress.setFormat(f"{kind.title()} running on server…")
+        self._log(f"Sent {label} to {self.state.server_name}.", "cyan")
+        run_async(
+            fn,
+            lambda res, src=src: self._on_live_action_done(src, kind, res),
+            lambda k, msg, src=src: self._on_live_action_failed(src, kind, msg),
+        )
+
+    def _end_live_action(self) -> None:
+        self._live_action = False
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.setFormat("Idle")
+        self._set_busy(False)
+
+    def _on_live_action_done(self, src, kind: str, res: dict) -> None:
+        if not self._alive() or src is not self.source:
+            return
+        self._end_live_action()
+        res = res if isinstance(res, dict) else {}
+        ok = bool(res.get("ok"))
+        result = str(res.get("result") or ("ok" if ok else "failed"))
+        parts = [f"{kind.title()} result: {result}"]
+        if res.get("from") or res.get("to"):
+            parts.append(f"{res.get('from') or '—'} → {res.get('to') or res.get('current') or '—'}")
+        if res.get("durationMs") is not None:
+            parts.append(f"{res.get('durationMs')} ms")
+        if res.get("rolledBackTo"):
+            parts.append(f"rolled back to {res.get('rolledBackTo')}")
+        detail = res.get("error") or res.get("message")
+        if detail:
+            parts.append(str(detail))
+        text = " — ".join(parts)
+        level = "ok" if ok and result.lower() not in ("unchanged", "failed", "error") else ("warn" if ok else "fail")
+        self._log(text, level)
+        self.footer.setText(text)
+        self._last_core_id = None  # log the fresh state after the action
+        self.refresh_live()
+
+    def _on_live_action_failed(self, src, kind: str, message: str) -> None:
+        if not self._alive() or src is not self.source:
+            return
+        self._end_live_action()
+        self._log(f"{kind.title()} request failed: {message}", "fail")
+        self.footer.setText(f"{kind.title()} request failed: {message}")
+        self.refresh_live()
 
     # ----- layout ----------------------------------------------------------
 
@@ -719,8 +958,7 @@ class HotReloadPanel(QWidget):
         title = QLabel("ZeroGBridge Hot Reload")
         title.setObjectName("PopupHeaderLabel")
         subtitle = QLabel(
-            "Loader stays loaded and keeps the bridge port open. "
-            "The core DLL (commands, factions, alerts) can be swapped while the server runs."
+            "The loader keeps the bridge port open while the core DLL is swapped. No restart."
         )
         subtitle.setObjectName("SubtitleLabel")
         subtitle.setWordWrap(True)
@@ -798,9 +1036,9 @@ class HotReloadPanel(QWidget):
         layout.addWidget(hdr)
 
         file_row = QHBoxLayout()
-        file_lbl = QLabel("New core DLL")
+        self.file_lbl = file_lbl = QLabel("New core DLL")
         file_lbl.setObjectName("FieldLabel")
-        file_lbl.setFixedWidth(100)
+        file_lbl.setFixedWidth(110)
         self.dll_path = QLineEdit()
         self.dll_path.setObjectName("CommandInput")
         self.dll_path.setPlaceholderText("Pick a ZeroGBridge.Core.*.dll to upload…")
@@ -838,7 +1076,13 @@ class HotReloadPanel(QWidget):
         self.btn_sim_drop.setToolTip("Mock only: pretend a new core DLL was copied into the incoming folder.")
         self.btn_sim_drop.clicked.connect(self._on_simulate_drop)
 
+        self.chk_force = QCheckBox("Force reload same core")
+        self.chk_force.setToolTip("Live only: send reload with force, so the running core is reloaded "
+                                  "even when nothing new is waiting in Updates/.")
+        self.chk_force.setVisible(False)
+
         btn_row.addWidget(self.btn_reload)
+        btn_row.addWidget(self.chk_force)
         btn_row.addWidget(self.btn_rollback_prev)
         btn_row.addSpacing(12)
         btn_row.addWidget(self.chk_auto)
@@ -922,15 +1166,38 @@ class HotReloadPanel(QWidget):
 
     def _refresh_status(self) -> None:
         s = self.state
+        live = self.source.is_live
+        online = s.connection == "Online"
         self.lbl_server.setText(s.server_name)
         self.lbl_loader.setText(s.loader_version)
-        self.lbl_core.setText(s.core_version)
-        self.lbl_since.setText(fmt_time(s.loaded_since))
+        if live and s.core_release:
+            self.lbl_core.setText(f"{s.core_release}  ({s.core_version})")
+        else:
+            self.lbl_core.setText(s.core_version)
+        self.lbl_since.setText(fmt_time(s.loaded_since) if (online or not live) else "—")
         self.lbl_result.setText(s.last_result)
-        self.lbl_result.setStyleSheet(
-            f"color: {COLOR_OK if s.last_ok else COLOR_FAIL}; font-size: 15px; font-weight: bold;"
-        )
-        self.lbl_players.setText(str(s.players_online))
+        if live and s.connection == "Connecting":
+            color = COLOR_WARN
+        else:
+            color = COLOR_OK if s.last_ok else COLOR_FAIL
+        self.lbl_result.setStyleSheet(f"color: {color}; font-size: 15px; font-weight: bold;")
+        self.lbl_players.setText(str(s.players_online) if (online or not live) else "—")
+        if live:
+            self.lbl_port.setText(str(s.port))
+            self.lbl_hold.setText(s.core_domain or "—")
+            if s.busy or s.reload_in_progress:
+                self._set_badge("RELOADING", COLOR_WARN)
+            elif s.connection == "Connecting":
+                self._set_badge("CONNECTING…", COLOR_WARN)
+            elif s.connection == "Auth failed":
+                self._set_badge("AUTH FAILED", COLOR_FAIL)
+            elif s.connection == "Offline":
+                self._set_badge("OFFLINE", COLOR_FAIL)
+            elif s.last_ok:
+                self._set_badge("LIVE · LOADER ACTIVE", COLOR_OK)
+            else:
+                self._set_badge("LIVE · LAST RELOAD FAILED", COLOR_WARN)
+            return
         self.lbl_port.setText(f"{s.port}  (held by loader)")
         self.lbl_hold.setText("ZAH connection retained")
         if s.busy:
@@ -942,10 +1209,12 @@ class HotReloadPanel(QWidget):
 
     def _refresh_history(self) -> None:
         self.history.setRowCount(0)
+        marked = False
         for entry in self.state.history:
             row = self.history.rowCount()
             self.history.insertRow(row)
-            current = entry.version == self.state.core_version and entry.result == "OK"
+            current = (not marked) and entry.version == self.state.core_version and entry.result == "OK"
+            marked = marked or current
             note = entry.note
             if current and "Current" not in note:
                 note = (note + "  " if note else "") + "Current core"
@@ -997,11 +1266,14 @@ class HotReloadPanel(QWidget):
     def _set_busy(self, busy: bool) -> None:
         self.state.busy = busy
         enabled = not busy
-        self.btn_browse.setEnabled(enabled)
-        self.btn_reload.setEnabled(enabled)
-        self.btn_rollback_prev.setEnabled(enabled)
-        self.chk_auto.setEnabled(enabled)
-        self.btn_sim_drop.setEnabled(enabled and self.chk_auto.isChecked())
+        live = self.source.is_live
+        can_send = enabled and (not live or self.state.connection == "Online")
+        self.btn_browse.setEnabled(enabled and not live)
+        self.btn_reload.setEnabled(can_send)
+        self.btn_rollback_prev.setEnabled(can_send)
+        self.chk_force.setEnabled(can_send and live)
+        self.chk_auto.setEnabled(enabled and not live)
+        self.btn_sim_drop.setEnabled(enabled and not live and self.chk_auto.isChecked())
         self.dll_path.setEnabled(enabled)
         if not busy:
             self._on_history_selection()
@@ -1010,7 +1282,7 @@ class HotReloadPanel(QWidget):
         self._refresh_status()
 
     def _on_history_selection(self) -> None:
-        if self.state.busy:
+        if self.state.busy or self.source.is_live:
             self.btn_rollback_sel.setEnabled(False)
             return
         row = self.history.currentRow()
@@ -1022,6 +1294,8 @@ class HotReloadPanel(QWidget):
         self.btn_rollback_sel.setEnabled(can)
 
     def _on_browse(self) -> None:
+        if self.source.is_live:
+            return
         cores = self.source.cores_dir()
         start = str(cores if cores.exists() else HERE)
         path, _ = QFileDialog.getOpenFileName(
@@ -1043,6 +1317,8 @@ class HotReloadPanel(QWidget):
             self._log("Auto-reload off. New cores will wait for Reload now.", "dim")
 
     def _on_simulate_drop(self) -> None:
+        if self.source.is_live:
+            return
         # Prefer a successful sample if present, otherwise the selected path.
         candidate = self.source.drop_core()
         path = str(candidate) if candidate else (self.dll_path.text().strip() or self.state.pending_dll)
@@ -1054,6 +1330,9 @@ class HotReloadPanel(QWidget):
         self._start_reload(path, confirm=True, source="auto-drop")
 
     def _on_reload_clicked(self) -> None:
+        if self.source.is_live:
+            self._live_reload()
+            return
         path = self.dll_path.text().strip()
         if not path:
             self._log("Choose a core DLL before reloading.", "warn")
@@ -1068,6 +1347,9 @@ class HotReloadPanel(QWidget):
         return None
 
     def _on_rollback_previous(self) -> None:
+        if self.source.is_live:
+            self._live_rollback()
+            return
         entry = self._previous_ok_version()
         if not entry:
             self._log("No previous OK core is stashed in the loader.", "warn")
@@ -1075,6 +1357,8 @@ class HotReloadPanel(QWidget):
         self._start_rollback(entry.version, confirm=True)
 
     def _on_rollback_selected(self) -> None:
+        if self.source.is_live:
+            return
         row = self.history.currentRow()
         if row < 0 or row >= len(self.state.history):
             return
@@ -1092,8 +1376,9 @@ class HotReloadPanel(QWidget):
         server = self.state.server_name
         if n == 0:
             return f"No players are currently online on {server}."
-        noun = "player" if n == 1 else "players"
-        return f"{n} {noun} are currently online on {server}."
+        if n == 1:
+            return f"1 player is currently online on {server}."
+        return f"{n} players are currently online on {server}."
 
     # ----- simulated reload / rollback ------------------------------------
 
@@ -1323,15 +1608,24 @@ class _FitScrollArea(QScrollArea):
 
 
 class HotReloadWindow(QWidget):
-    """Top-level mock window with LOADER and BRIDGE tabs."""
+    """Top-level window with LOADER and BRIDGE tabs and a Live | Examples data source switch."""
 
     capture_finished = pyqtSignal()
 
-    def __init__(self, capture_mode: bool = False, parent=None, source: PortalDataSource | None = None):
+    def __init__(self, capture_mode: bool = False, parent=None, source: PortalDataSource | None = None,
+                 profile_provider=None):
         super().__init__(parent)
         self.capture_mode = capture_mode
         self.source = source or SampleDataSource()
+        if self.source.is_live:
+            self._live_source = self.source
+        else:
+            self._live_source = LiveDataSource(profile_provider)
+        self._sample_source = self.source if not self.source.is_live else SampleDataSource()
         self._capture_dir = HERE
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(LIVE_REFRESH_MS)
+        self._refresh_timer.timeout.connect(self.refresh)
 
         self.setObjectName("HotReloadCanvas")
         self.setWindowTitle("Zero-G Admin Helper - ZeroGBridge")
@@ -1340,22 +1634,39 @@ class HotReloadWindow(QWidget):
         self.setStyleSheet(load_stylesheet())
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 16, 18, 14)
-        root.setSpacing(10)
+        root.setContentsMargins(18, 12, 18, 12)
+        root.setSpacing(8)
 
         head = QHBoxLayout()
         titles = QHBoxLayout()
         titles.setSpacing(16)
         title = QLabel("ZeroGBridge")
         title.setObjectName("PopupHeaderLabel")
-        subtitle = QLabel(
-            "Loader and Bridge tools for Zero-G Admin Helper. "
-            "Viewer only — simulated data, no live server connection."
-        )
+        self.subtitle = subtitle = QLabel("")
         subtitle.setObjectName("SubtitleLabel")
         titles.addWidget(title)
         titles.addWidget(subtitle, stretch=1, alignment=Qt.AlignmentFlag.AlignBottom)
         head.addLayout(titles, stretch=1)
+
+        src_lbl = QLabel("Data source")
+        src_lbl.setObjectName("FieldLabel")
+        self.source_picker = QComboBox()
+        self.source_picker.setObjectName("SourcePicker")
+        self.source_picker.addItems(["Live", "Examples"])
+        self.source_picker.setToolTip("Live: the server ZAH is connected to. Examples: sample files in Examples/ZGB_Portal.")
+        self.source_picker.setCurrentIndex(0 if self.source.is_live else 1)
+        self.source_picker.currentIndexChanged.connect(self._on_source_picked)
+        self.btn_refresh = QPushButton("Refresh")
+        self.btn_refresh.setObjectName("ExecuteButton")
+        self.btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_refresh.setToolTip("Read hot:status again now (read-only). Live data also refreshes every 30 s.")
+        self.btn_refresh.clicked.connect(self.refresh)
+        # Compact so the header stays one short row.
+        self.btn_refresh.setStyleSheet("QPushButton#ExecuteButton { min-height: 22px; padding: 3px 14px; }")
+        self.source_picker.setStyleSheet("QComboBox#SourcePicker { min-height: 22px; padding: 2px 8px; }")
+        head.addWidget(src_lbl)
+        head.addWidget(self.source_picker)
+        head.addWidget(self.btn_refresh)
         root.addLayout(head)
 
         self.tabs = QTabWidget()
@@ -1372,6 +1683,50 @@ class HotReloadWindow(QWidget):
         self.tabs.addTab(self._scrollable(self.loader), "  LOADER  ")
         self.tabs.addTab(self._scrollable(self.bridge), "  BRIDGE  ")
         root.addWidget(self.tabs, stretch=1)
+        self._update_source_chrome()
+
+    # ----- data source / refresh ------------------------------------------
+
+    def _on_source_picked(self, index: int) -> None:
+        src = self._live_source if index == 0 else self._sample_source
+        if src is self.source:
+            return
+        self.source = src
+        self.loader.set_source(src)
+        self.bridge.set_source(src)
+        self._update_source_chrome()
+
+    def _update_source_chrome(self) -> None:
+        live = self.source.is_live
+        self.btn_refresh.setEnabled(live)
+        if live:
+            st = self.loader.state
+            self.subtitle.setText(
+                f"LIVE — {self._live_source.server_label()} · bridge {st.port} · auto refresh 30 s"
+            )
+            if self.isVisible():
+                self._refresh_timer.start()
+        else:
+            self.subtitle.setText("EXAMPLES — sample data from Examples/ZGB_Portal, nothing is sent")
+            self._refresh_timer.stop()
+
+    def refresh(self) -> None:
+        """Live: re-read hot:status (read-only). Examples: nothing to do."""
+        if self.source.is_live:
+            self.loader.refresh_live()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self.source.is_live:
+            self._refresh_timer.start()
+
+    def hideEvent(self, event) -> None:
+        self._refresh_timer.stop()
+        super().hideEvent(event)
+
+    def closeEvent(self, event) -> None:
+        self._refresh_timer.stop()
+        super().closeEvent(event)
 
     @staticmethod
     def _scrollable(panel: QWidget) -> QScrollArea:

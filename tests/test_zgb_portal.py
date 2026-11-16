@@ -9,7 +9,8 @@ from features.dashboard.main_cockpit import MainCockpit
 from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.zgb_portal import ZeroGBridgePortal
 from features.dashboard.zgb_portal import hot_reload_panel
-from features.dashboard.zgb_portal.data_source import EXAMPLES_DIR, SampleDataSource
+from features.dashboard.zgb_portal.data_source import EXAMPLES_DIR, LiveDataSource, SampleDataSource
+from features.dashboard.zgb_portal.live_client import wait_for_tasks
 from features.paths import APP_ROOT, DATA_DIR
 
 
@@ -71,7 +72,8 @@ def test_view_menu_opens_zgb_portal(qapp, monkeypatch):
         assert portal.isWindow()
         assert portal.windowTitle() == "Zero-G Admin Helper - ZeroGBridge Portal"
         assert portal.tabs.count() == 2
-        assert isinstance(portal.source, SampleDataSource)
+        # Default is Live (here: 127.0.0.1:30500 -> offline). Scripts are the local examples.
+        assert isinstance(portal.source, LiveDataSource)
         assert len(portal.bridge.scripts) == 3
 
         # Single instance: triggering again raises the same window.
@@ -94,6 +96,7 @@ def test_view_menu_opens_zgb_portal(qapp, monkeypatch):
         assert window.zgb_portal is None
     finally:
         window.close()
+        wait_for_tasks()
 
 
 def test_portal_borders_are_muted():
@@ -108,7 +111,7 @@ def test_portal_borders_are_muted():
 
 def test_portal_tabs_scroll_when_window_is_small(qapp):
     del qapp
-    portal = ZeroGBridgePortal()
+    portal = ZeroGBridgePortal(source=SampleDataSource())
     try:
         portal.resize(900, 600)
         portal.show()
