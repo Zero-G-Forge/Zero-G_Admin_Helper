@@ -437,6 +437,17 @@ namespace ZeroGBridge
             UpsertFaction(factionId, abbrev, name, OriginPlayerFaction);
         }
 
+        /// <summary>How one Event_Get_Factions row was classified (1.5.1).</summary>
+        public enum FactionUpsertResult
+        {
+            /// <summary>Origin 0/1 with an id above the default human group: stored.</summary>
+            Stored = 0,
+            /// <summary>NPC origin (2+, 255), whatever its id (including the id-0 rows the game sends for NPC groups).</summary>
+            DroppedNpc = 1,
+            /// <summary>Origin 0/1 with id &lt;= 1 (the default human group): not a faction.</summary>
+            SkippedDefaultGroup = 2
+        }
+
         /// <summary>
         /// Adds or refreshes a faction from the legacy API (Event_Get_Factions).
         /// Only origin 0 (player club) and origin 1 (private faction) are stored. NPC origins
@@ -446,13 +457,25 @@ namespace ZeroGBridge
         /// </summary>
         public bool UpsertFaction(int factionId, string abbrev, string name, byte origin)
         {
-            if (factionId <= DefaultHumanFactionId) return false;
+            return ClassifyAndUpsertFaction(factionId, abbrev, name, origin) == FactionUpsertResult.Stored;
+        }
+
+        /// <summary>
+        /// 1.5.1: classifies by origin first. A non-player origin is always DroppedNpc, even when
+        /// factionId &lt;= 1 (live servers send most NPC groups such as Zirax/Talon with id 0).
+        /// Only origin 0/1 rows with id &lt;= 1 count as SkippedDefaultGroup. Rows with id &lt;= 1 are
+        /// never stored or used as a lookup key (an id-0 NPC row never removes or overwrites anything).
+        /// </summary>
+        public FactionUpsertResult ClassifyAndUpsertFaction(int factionId, string abbrev, string name, byte origin)
+        {
             if (!IsPlayerOrigin(origin))
             {
-                if (_factionLookup.TryGetValue(factionId, out var existing) && existing != null && existing.Source != FactionSource.Ecf)
+                if (factionId > DefaultHumanFactionId
+                    && _factionLookup.TryGetValue(factionId, out var existing) && existing != null && existing.Source != FactionSource.Ecf)
                     _factionLookup.TryRemove(factionId, out _);
-                return false;
+                return FactionUpsertResult.DroppedNpc;
             }
+            if (factionId <= DefaultHumanFactionId) return FactionUpsertResult.SkippedDefaultGroup;
             _factionLookup[factionId] = new FactionTag
             {
                 FactionId = factionId,
@@ -461,7 +484,7 @@ namespace ZeroGBridge
                 Origin = origin,
                 Source = FactionSource.Game
             };
-            return true;
+            return FactionUpsertResult.Stored;
         }
 
         /// <summary>All cached faction entries (player, seeded and ECF). Used for display tags only.</summary>

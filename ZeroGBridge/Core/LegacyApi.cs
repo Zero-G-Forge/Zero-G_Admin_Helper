@@ -5,6 +5,8 @@
 
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using Eleon.Modding;
 
@@ -180,8 +182,9 @@ namespace ZeroGBridge
 
         /// <summary>
         /// Merges one Event_Get_Factions reply (ours or another mod's). Stores origin 0/1 only;
-        /// NPC origins are dropped. Logs the incoming count and seqNr (DEBUG every time,
-        /// INFO when the numbers change).
+        /// NPC origins are dropped (1.5.1: classified by origin first, so id-0 NPC rows count as
+        /// dropped, not skipped). Logs the incoming count and seqNr (DEBUG every time, plus counts
+        /// by origin and a sample of dropped/skipped rows; INFO when the numbers change).
         /// </summary>
         internal static void HandleFactionList(ushort seqNr, FactionInfoList list)
         {
@@ -193,21 +196,53 @@ namespace ZeroGBridge
                 return;
             }
 
+            // 1.5.1: classify by origin first. NPC origins count as dropped(NPC) even with id 0/1
+            // (live servers report most NPC groups with factionId 0); only origin 0/1 rows with
+            // id <= 1 (the default human group) count as skipped(id<=1).
             int stored = 0, npc = 0, skipped = 0;
+            var byOrigin = new SortedDictionary<int, int>();
+            var skippedSample = new List<string>();
+            var droppedSample = new List<string>();
             foreach (var f in list.factions)
             {
-                if (f.factionId <= PlayerCache.DefaultHumanFactionId) { skipped++; continue; }
-                if (_playerCache.UpsertFaction(f.factionId, f.abbrev, f.name, f.origin)) stored++;
-                else npc++;
+                byOrigin.TryGetValue(f.origin, out int oc);
+                byOrigin[f.origin] = oc + 1;
+                switch (_playerCache.ClassifyAndUpsertFaction(f.factionId, f.abbrev, f.name, f.origin))
+                {
+                    case PlayerCache.FactionUpsertResult.Stored:
+                        stored++;
+                        break;
+                    case PlayerCache.FactionUpsertResult.DroppedNpc:
+                        npc++;
+                        if (droppedSample.Count < FactionLogSampleSize) droppedSample.Add(DescribeFactionRow(f));
+                        break;
+                    default:
+                        skipped++;
+                        if (skippedSample.Count < FactionLogSampleSize) skippedSample.Add(DescribeFactionRow(f));
+                        break;
+                }
             }
             int playerFactions = _playerCache.PlayerFactionCount;
             ZgbLog.Write($"[ZGB] -DEBUG- Event_Get_Factions seqNr={seqNr} ({whose}): received={received} stored(origin 0/1)={stored} dropped(NPC)={npc} skipped(id<=1)={skipped} player factions with a real player={playerFactions}");
+            ZgbLog.Write($"[ZGB] -DEBUG- Event_Get_Factions detail seqNr={seqNr} by origin: {string.Join(", ", byOrigin.Select(kv => kv.Key + "=" + kv.Value))}");
+            if (droppedSample.Count > 0)
+                ZgbLog.Write($"[ZGB] -DEBUG- Event_Get_Factions detail seqNr={seqNr} dropped(NPC) sample ({droppedSample.Count} of {npc}): {string.Join("; ", droppedSample)}");
+            if (skippedSample.Count > 0)
+                ZgbLog.Write($"[ZGB] -DEBUG- Event_Get_Factions detail seqNr={seqNr} skipped(id<=1) sample ({skippedSample.Count} of {skipped}): {string.Join("; ", skippedSample)}");
 
             string key = received + "/" + stored + "/" + npc + "/" + playerFactions;
             string prevKey = Interlocked.Exchange(ref _lastFactionLogKey, key);
             Interlocked.Exchange(ref _loggedFactionCount, playerFactions);
             if (prevKey != key)
                 ZgbLog.Write($"[ZGB] -INFO- Legacy Event_Get_Factions (seqNr {seqNr}, {whose}): {received} received, {stored} player faction(s) stored, {npc} NPC dropped; {playerFactions} with a real player available for alert targeting.");
+        }
+
+        /// <summary>Max rows per DEBUG sample line for dropped/skipped faction rows.</summary>
+        internal const int FactionLogSampleSize = 8;
+
+        private static string DescribeFactionRow(FactionInfo f)
+        {
+            return $"id={f.factionId} origin={f.origin} abbrev={f.abbrev ?? "-"} name={f.name ?? "-"}";
         }
 
         public static ushort NextSeq()

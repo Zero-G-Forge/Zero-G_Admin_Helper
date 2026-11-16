@@ -8,6 +8,11 @@ reloadable core (`Core/ZeroGBridge.Core.dll`, all bridge logic). Drop a new core
 `hot:reload`, and it swaps in without a server restart or dropping ZAH connections. A broken core is rolled back
 automatically. See [HOTRELOAD.md](HOTRELOAD.md) for the layout, settings and the `hot:` command contract.
 
+**Core 1.5.1 (core-only, hot-swappable on the 1.5.0 loader).** Event_Get_Factions rows are classified by origin
+first: NPC groups that the game reports with faction id 0 (Zirax, Talon, ...) now count as `dropped(NPC)` instead of
+`skipped(id<=1)`. Only origin 0/1 rows with id <= 1 (the default human group) count as skipped. DEBUG also logs counts
+by origin and a sample of dropped/skipped rows. The loader and the `hot:` contract are unchanged.
+
 Build: `ZeroGBridge.csproj` builds the loader. `CoreProject/ZeroGBridge.Core.csproj` builds the core.
 Deploy both the first time (one restart). After that, only the core changes for most patches.
 

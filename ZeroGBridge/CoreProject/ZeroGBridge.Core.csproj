@@ -22,7 +22,7 @@
     <MajorVersion>1</MajorVersion>
     <MinorVersion>5</MinorVersion>
     <!-- Core release name; can be overridden for test builds: -p:ReleaseVersion=1.5.0-test2 -->
-    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.5.0</ReleaseVersion>
+    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.5.1</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
     <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>
