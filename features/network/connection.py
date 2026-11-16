@@ -1,6 +1,5 @@
 # connection.py
 
-import json
 import os
 import socket
 
@@ -8,18 +7,48 @@ from PyQt6.QtWidgets import QDialog, QLabel, QLineEdit, QPushButton
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt
 
+from features.network.bridge_session import login_failure_message
 from features.network.server_config import add_server_profile, get_active_profile
+
+# Live check on the game port. Not the ZeroGBridge port.
+GAME_CHECK_TIMEOUT = 5.0
 
 # ---------------------------------------------------
 # Network Configuration Validation Function (Ping Check + Config File Integrity)
 # ---------------------------------------------------
 
-def is_network_ready(config_path=None, timeout=5.0):
+def describe_game_check_failure(ip, port, err):
+    """Dialog and [ERROR] text for a failed game-port live check."""
+    detail = login_failure_message(ip, port, err)
+    prefix = "Could not reach "
+    if detail.startswith(prefix):
+        return "Could not reach game server " + detail[len(prefix):]
+    return f"Could not reach game server {ip}:{port}: {err}"
+
+
+def check_game_server(ip, port, timeout=GAME_CHECK_TIMEOUT):
     """
-    Performs a diagnostic ping to verify connectivity.
-    Returns True if the server responds, False otherwise.
+    Live check that the game port accepts TCP. This does not speak to ZeroGBridge
+    and does not send auth:<token>. Returns (True, None) or (False, error).
+    """
+    label = f"{ip}:{port}"
+    print(f"[STATUS] Checking game server {label} is up (timeout {timeout:.0f}s)...")
+    try:
+        with socket.create_connection((str(ip), int(port)), timeout=timeout):
+            print(f"[SUCCESS] Game server {label} is up.")
+            return True, None
+    except Exception as err:
+        reason = describe_game_check_failure(ip, port, err)
+        print(f"[ERROR] {reason}")
+        return False, err
+
+
+def is_network_ready(config_path=None, timeout=GAME_CHECK_TIMEOUT):
+    """
+    Performs a diagnostic ping of the game port to verify the server is up.
+    Returns True if that port accepts TCP, False otherwise.
     Reads the active profile, including a server_config.json that was just
-    migrated from the single-server format.
+    migrated from the single-server format. This does not open ZeroGBridge.
     """
     try:
         config = get_active_profile(config_path)
@@ -30,7 +59,7 @@ def is_network_ready(config_path=None, timeout=5.0):
     if not config:
         return False
 
-    # Ensure keys match the ones written in accept_action_callback
+    # input_port is the game port typed in the wizard, not bridge_port.
     raw_ip = config.get("input_ip")
     raw_port = config.get("input_port") or 30500
 
@@ -41,17 +70,13 @@ def is_network_ready(config_path=None, timeout=5.0):
     try:
         ip = str(raw_ip)
         port = int(raw_port)
-        
-        print(f"[DEBUG] Initiating network diagnostic: Pinging {ip}:{port} with a {timeout}s timeout...")
-        
-        # Diagnostic Ping Hook
-        with socket.create_connection((ip, port), timeout=timeout) as s:
-            print(f"[SUCCESS] Ping diagnostic passed for {ip}:{port}. Connection established.")
-            return True
-            
-    except (json.JSONDecodeError, ValueError, socket.timeout, ConnectionRefusedError, OSError) as e:
-        print(f"[WARNING] Ping diagnostic failed: {e}")
+    except (TypeError, ValueError) as err:
+        print(f"[WARNING] Ping diagnostic failed: {err}")
         return False
+
+    print(f"[DEBUG] Initiating network diagnostic: Pinging game server {ip}:{port} with a {timeout}s timeout...")
+    ready, _err = check_game_server(ip, port, timeout=timeout)
+    return ready
     
 # ---------------------------------------------------
 # Network Configuration Existence Check (Post-Ping)
@@ -117,7 +142,7 @@ class NetworkWizardOverlay(QDialog):
         self.input_port = QLineEdit(self)
         self.input_port.setGeometry(120, 247, 320, 30)
         self.input_port.setStyleSheet(field_qss)
-        self.input_port.setPlaceholderText("TelNET Port")
+        self.input_port.setPlaceholderText("Game Port")
         
         self.input_pass = QLineEdit(self)
         self.input_pass.setGeometry(120, 325, 320, 30)
@@ -183,9 +208,10 @@ class NetworkWizardOverlay(QDialog):
         print("\n==========================================")
         print("PRODUCTION WIZARD DATA INGESTION SUMMARY:")
         print("==========================================")
-        print(f"IP Target     : {self.input_ip.text() if self.input_ip.text() else 'BLANK'}")
-        print(f"Port Target   : {self.input_port.text() if self.input_port.text() else 'BLANK'}")
+        print(f"Game IP       : {self.input_ip.text() if self.input_ip.text() else 'BLANK'}")
+        print(f"Game Port     : {self.input_port.text() if self.input_port.text() else 'BLANK'}")
         print(f"Auth Token    : {'SET' if self.input_pass.text() else 'BLANK'}")
+        print("Bridge Port   : 30500 (not typed; ZeroGBridge connects in the background)")
         print("==================================================")
 
         # 1. Capture Data - Keys MUST match is_network_ready() dictionary lookup
@@ -196,8 +222,9 @@ class NetworkWizardOverlay(QDialog):
         }
         self.entered_profile = config_data
         print(
-            f"[STATUS] Network wizard accepted for "
-            f"{config_data['input_ip'] or 'BLANK'}:{config_data['input_port'] or 'BLANK'}."
+            f"[STATUS] Network wizard accepted for game server "
+            f"{config_data['input_ip'] or 'BLANK'}:{config_data['input_port'] or 'BLANK'}. "
+            f"ZeroGBridge port is not entered here."
         )
 
         # 2. Persistence - add or update this server and keep every other profile.

@@ -106,8 +106,9 @@ def test_logout_closes_session_and_returns_to_login(qapp, tmp_path, monkeypatch)
 
         window = MainCockpit({
             "input_ip": "127.0.0.1",
-            "input_port": str(bridge.port),
+            "input_port": "30004",
             "input_pass": "logout-token",
+            "bridge_port": str(bridge.port),
         })
         assert bridge.wait_until_authenticated()
         assert bridge.wait_for_command("plys")

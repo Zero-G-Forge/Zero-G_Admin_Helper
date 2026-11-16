@@ -3,16 +3,21 @@
 Saved ZeroGBridge server profiles in data/server_config.json.
 
 Older builds stored one server at the top level (input_ip, input_port,
-input_pass). The file now keeps every server under "servers" and records the
-selected one in "active_index". A file still in the old shape is rewritten
-the first time it is loaded. The auth token stays in input_pass and is never
-printed.
+input_pass). input_port is the game server port (for example 30004).
+input_pass is the auth token the bridge handshake already uses.
+The file now keeps every server under "servers" and records the selected one
+in "active_index". bridge_port is the ZeroGBridge port and defaults to 30500.
+A file still in the old shape, or missing bridge_port, is rewritten the first
+time it is loaded. The auth token stays in input_pass and is never printed.
 """
 
 import json
 import os
 
 from features.paths import DATA_DIR
+
+# ZeroGBridge listens here unless a profile stores another bridge_port.
+DEFAULT_BRIDGE_PORT = "30500"
 
 
 def _resolve_config_path(config_path=None):
@@ -26,14 +31,23 @@ def _empty_store():
     return {"active_index": 0, "servers": []}
 
 
+def bridge_port_of(profile):
+    """ZeroGBridge port for this profile. Missing or blank becomes 30500."""
+    if not isinstance(profile, dict):
+        return DEFAULT_BRIDGE_PORT
+    text = str(profile.get("bridge_port", "")).strip()
+    return text or DEFAULT_BRIDGE_PORT
+
+
 def _profile_from_mapping(raw):
-    """Copies the three wizard fields. Missing fields become empty strings."""
+    """Copies the wizard fields and fills bridge_port when it was not stored."""
     if not isinstance(raw, dict):
-        return {"input_ip": "", "input_port": "", "input_pass": ""}
+        raw = {}
     return {
         "input_ip": str(raw.get("input_ip", "")).strip(),
         "input_port": str(raw.get("input_port", "")).strip(),
         "input_pass": str(raw.get("input_pass", "")).strip(),
+        "bridge_port": bridge_port_of(raw),
     }
 
 
@@ -57,13 +71,18 @@ def _filename_piece(value):
     return "".join(cleaned) or "x"
 
 
-def profile_label(profile):
-    """Host:port text used in the window title and the switch list."""
+def game_endpoint(profile):
+    """Game server ip:port. This is the port the operator typed, not bridge_port."""
     if not isinstance(profile, dict):
         return "unknown"
     ip = str(profile.get("input_ip", "")).strip() or "unknown"
-    port = str(profile.get("input_port", "")).strip() or "30500"
+    port = str(profile.get("input_port", "")).strip() or "unknown"
     return f"{ip}:{port}"
+
+
+def profile_label(profile):
+    """Switch-list text: game endpoint, then the ZeroGBridge port."""
+    return f"{game_endpoint(profile)} (bridge {bridge_port_of(profile)})"
 
 
 def same_server_endpoint(left, right):
@@ -104,15 +123,22 @@ def load_server_store(config_path=None):
         return _empty_store()
 
     servers = []
+    needs_bridge_port = False
     for entry in data.get("servers") or []:
         if isinstance(entry, dict):
+            if not str(entry.get("bridge_port", "")).strip():
+                needs_bridge_port = True
             servers.append(_profile_from_mapping(entry))
 
     active_index = data.get("active_index", 0)
     if not isinstance(active_index, int) or active_index < 0 or (servers and active_index >= len(servers)):
         active_index = 0
 
-    return {"active_index": active_index, "servers": servers}
+    store = {"active_index": active_index, "servers": servers}
+    if needs_bridge_port:
+        save_server_store(store, path)
+        print("[SUCCESS] Saved bridge_port 30500 on server profiles that did not have one.")
+    return store
 
 
 def save_server_store(store, config_path=None):
@@ -133,7 +159,7 @@ def save_server_store(store, config_path=None):
 
 def get_active_profile(config_path=None):
     """
-    Returns the selected server as input_ip / input_port / input_pass.
+    Returns the selected server as input_ip / input_port / input_pass / bridge_port.
     An empty dict means there is nothing to connect to.
     """
     store = load_server_store(config_path)
@@ -159,8 +185,9 @@ def list_server_profiles(config_path=None):
 
 def add_server_profile(ip, port, token, make_active=True, config_path=None):
     """
-    Inserts a server profile. The same host and port updates input_pass in
-    place so the other saved servers stay on disk. make_active selects it.
+    Inserts a server profile. port is the game port. The same host and game
+    port updates input_pass in place and leaves bridge_port alone. A new
+    profile gets bridge_port 30500. make_active selects it.
     """
     store = load_server_store(config_path)
     servers = list(store.get("servers") or [])

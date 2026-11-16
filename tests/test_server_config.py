@@ -24,21 +24,42 @@ def test_legacy_single_server_migrates_and_keeps_token(tmp_path):
     path = tmp_path / "server_config.json"
     _write(path, {
         "input_ip": "10.1.1.1",
-        "input_port": 30500,
+        "input_port": 30004,
         "input_pass": "legacy-token-value",
     })
 
     active = get_active_profile(str(path))
     assert active["input_ip"] == "10.1.1.1"
-    assert active["input_port"] == "30500"
+    assert active["input_port"] == "30004"
     assert active["input_pass"] == "legacy-token-value"
+    assert active["bridge_port"] == "30500"
 
     stored = json.loads(path.read_text(encoding="utf-8"))
     assert stored["active_index"] == 0
     assert len(stored["servers"]) == 1
     assert stored["servers"][0]["input_pass"] == "legacy-token-value"
+    assert stored["servers"][0]["input_port"] == "30004"
+    assert stored["servers"][0]["bridge_port"] == "30500"
     assert "input_ip" not in stored
     print("[SUCCESS] Legacy server_config.json migrated without dropping input_pass.")
+
+
+def test_missing_bridge_port_is_filled_and_game_port_stays(tmp_path):
+    path = tmp_path / "server_config.json"
+    _write(path, {
+        "active_index": 0,
+        "servers": [
+            {"input_ip": "10.0.0.5", "input_port": "30004", "input_pass": "kept"},
+        ],
+    })
+    active = get_active_profile(str(path))
+    assert active["input_port"] == "30004"
+    assert active["input_pass"] == "kept"
+    assert active["bridge_port"] == "30500"
+    stable = path.read_text(encoding="utf-8")
+    assert get_active_profile(str(path))["bridge_port"] == "30500"
+    assert path.read_text(encoding="utf-8") == stable
+    print("[SUCCESS] Profiles without bridge_port gained 30500 and kept the game port.")
 
 
 def test_new_format_is_not_rewritten_on_load(tmp_path):
@@ -46,8 +67,8 @@ def test_new_format_is_not_rewritten_on_load(tmp_path):
     _write(path, {
         "active_index": 1,
         "servers": [
-            {"input_ip": "10.0.0.1", "input_port": "30500", "input_pass": "alpha"},
-            {"input_ip": "10.0.0.2", "input_port": "30501", "input_pass": "beta"},
+            {"input_ip": "10.0.0.1", "input_port": "30004", "input_pass": "alpha", "bridge_port": "30500"},
+            {"input_ip": "10.0.0.2", "input_port": "30005", "input_pass": "beta", "bridge_port": "30501"},
         ],
     })
     before = path.read_text(encoding="utf-8")
@@ -71,8 +92,10 @@ def test_add_server_profile_keeps_existing_profiles(tmp_path):
     assert len(servers) == 2
     assert servers[0]["input_ip"] == "10.0.0.1"
     assert servers[0]["input_pass"] == "keep-me"
+    assert servers[0]["bridge_port"] == "30500"
     assert servers[1]["input_ip"] == "10.0.0.2"
     assert servers[1]["input_pass"] == "second-token"
+    assert servers[1]["bridge_port"] == "30500"
     assert active_index == 1
     print("[SUCCESS] Additional server profile saved without overwriting the first.")
 

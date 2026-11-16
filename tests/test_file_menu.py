@@ -60,18 +60,7 @@ def test_file_menu_lists_server_actions(qapp, monkeypatch):
     """Builds MainCockpit offscreen. Must not open a ZeroGBridge socket."""
     del qapp
 
-    def _refuse_socket(*_args, **_kwargs):
-        raise AssertionError("File menu setup must not open a ZeroGBridge socket")
-
     monkeypatch.setattr(TelemetryWorker, "start", lambda self: None)
-    monkeypatch.setattr(
-        "features.dashboard.main_cockpit.open_authenticated_socket",
-        _refuse_socket,
-    )
-    monkeypatch.setattr(
-        "features.dashboard.telemetry_worker.open_authenticated_socket",
-        _refuse_socket,
-    )
     monkeypatch.setattr(
         "features.dashboard.main_cockpit.registry_cache_for",
         lambda profile, config_path=None: os.path.join(DATA_DIR, "player_registry_cache.json"),

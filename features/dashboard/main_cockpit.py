@@ -24,16 +24,16 @@ from features.dashboard.player_manager import PlayerManager
 from features.dashboard.telemetry_worker import TelemetryWorker
 from features.dashboard.popups.active_entities_popup import ActiveEntitiesPopup
 from features.dashboard.popups.player_registry_popup import PlayerRegistryPopup
-from features.network.bridge_session import (
-    BRIDGE_LOGIN_TIMEOUT,
-    close_bridge_socket,
-    login_failure_message,
-    open_authenticated_socket,
-    switch_authenticated_socket,
+from features.network.connection import (
+    GAME_CHECK_TIMEOUT,
+    NetworkWizardOverlay,
+    check_game_server,
+    describe_game_check_failure,
 )
-from features.network.connection import NetworkWizardOverlay
 from features.network.server_config import (
     add_server_profile,
+    bridge_port_of,
+    game_endpoint,
     get_active_profile,
     list_server_profiles,
     profile_label,
@@ -432,7 +432,7 @@ class MainCockpit(QMainWindow):
         """
         self._wire_command_inputs()
 
-        target_ip, target_port, token = self._resolve_server_target()
+        target_ip, bridge_port, token = self._resolve_server_target()
 
         # Guard check to abort cleanly if no valid target IP was found
         if not target_ip:
@@ -441,9 +441,9 @@ class MainCockpit(QMainWindow):
             self.telemetry_widget.lbl_target_ip.setText("Target IP: Not Configured")
             return
 
-        self._show_active_server({"input_ip": target_ip, "input_port": target_port, "input_pass": token})
+        self._show_active_server(self.config if isinstance(self.config, dict) else {})
         self._load_registry_for_profile(self.config)
-        self._spawn_telemetry_worker(target_ip, target_port, token)
+        self._spawn_telemetry_worker(target_ip, bridge_port, token)
 
         # Render immediately from the local database on startup
         self._refresh_dashboard_table()
@@ -459,7 +459,9 @@ class MainCockpit(QMainWindow):
 
     def _resolve_server_target(self):
         """
-        Returns (ip, port, token) for the active profile.
+        Returns (ip, bridge_port, token) for the active profile.
+        input_port is the game port and is not used here.
+        The bridge auth token is input_pass, which is where ZAH already stores it.
         The in-memory config wins. Otherwise the saved active profile is loaded.
         """
         source = {}
@@ -474,24 +476,28 @@ class MainCockpit(QMainWindow):
             if source:
                 self.config = source
 
+        if isinstance(self.config, dict) and not str(self.config.get("bridge_port", "")).strip():
+            self.config = dict(self.config)
+            self.config["bridge_port"] = "30500"
+
         target_ip = source.get("input_ip") if isinstance(source, dict) else None
-        target_port = 30500
-        raw_port = source.get("input_port") if isinstance(source, dict) else None
-        if raw_port:
-            try:
-                target_port = int(raw_port)
-            except (TypeError, ValueError):
-                print(f"[ERROR] MainCockpit: Invalid port value in server profile: {raw_port}")
-                target_port = 30500
+        bridge_text = bridge_port_of(source if isinstance(source, dict) else {})
+        try:
+            bridge_port = int(bridge_text)
+        except (TypeError, ValueError):
+            print(f"[ERROR] Invalid bridge_port '{bridge_text}'. Using 30500.")
+            bridge_port = 30500
         token = source.get("input_pass") if isinstance(source, dict) and source.get("input_pass") else ""
-        return target_ip, target_port, token
+        return target_ip, bridge_port, token
 
     def _show_active_server(self, profile):
-        """Puts the active host:port in the window title and the telemetry target label."""
-        label = profile_label(profile)
-        self.setWindowTitle(f"Zero-G Admin Helper - Dashboard ({label})")
-        self.telemetry_widget.lbl_target_ip.setText(f"Target IP: {label}")
-        print(f"[STATUS] Active server: {label}")
+        """Shows the game endpoint in the title and both ports on the target label."""
+        game = game_endpoint(profile)
+        bridge = bridge_port_of(profile)
+        ip = str(profile.get("input_ip", "")).strip() if isinstance(profile, dict) else ""
+        self.setWindowTitle(f"Zero-G Admin Helper - Dashboard ({game})")
+        self.telemetry_widget.lbl_target_ip.setText(f"Game: {game} | Bridge: {ip}:{bridge}")
+        print(f"[STATUS] Active game server: {game}. ZeroGBridge target: {ip}:{bridge}.")
 
     def _reset_metric_readouts(self):
         """Clears the last server's telemetry while a new session is opening."""
@@ -522,8 +528,9 @@ class MainCockpit(QMainWindow):
             self.telemetry_worker = None
 
     def _spawn_telemetry_worker(self, host, port, token, connected_socket=None):
-        """Starts a telemetry worker for host:port. An already-authenticated socket is reused."""
+        """Starts a telemetry worker for the ZeroGBridge host:port. The thread connects and retries."""
         print(f"[DEBUG] MainCockpit: Initializing TelemetryWorker target: {host}:{port}")
+        print(f"[STATUS] ZeroGBridge connecting to {host}:{port} in the background.")
         worker = TelemetryWorker(
             host=host,
             port=port,
@@ -548,50 +555,43 @@ class MainCockpit(QMainWindow):
         self.console.append(f"[{timestamp}] [ADMIN >>] Switched server to {label}")
         self.system_logs_box.append(f"[NETWORK] Active server: {label}")
 
-    def _switch_to_saved_profile(self, profile, allow_restore=True):
+    def _switch_to_saved_profile(self, profile):
         """
-        Closes the current ZeroGBridge session, authenticates to the chosen
-        profile, then refreshes the dashboard. A failed auth tries the previous
-        server once so the cockpit is not left with no session.
+        Points the dashboard at a saved game server and starts the ZeroGBridge
+        worker in the background. The bridge handshake does not block this call.
+        If the mod is not listening, the worker keeps retrying and the status
+        label shows OFFLINE the same way the original server does.
         """
-        previous = dict(self.config) if isinstance(self.config, dict) else {}
         ip = str(profile.get("input_ip", "")).strip()
-        port_text = str(profile.get("input_port", "")).strip()
+        game_port = str(profile.get("input_port", "")).strip()
         token = str(profile.get("input_pass", "") or "")
-        if not ip or not port_text:
-            self.system_logs_box.append("[NETWORK WARNING] Cannot switch: server profile is missing a host or port.")
+        bridge_text = bridge_port_of(profile)
+        if not ip or not game_port:
+            print("[ERROR] Cannot switch: server profile is missing a game host or port.")
+            self.system_logs_box.append("[ERROR] Cannot switch: server profile is missing a game host or port.")
             return False
         try:
-            port = int(port_text)
+            bridge_port = int(bridge_text)
         except (TypeError, ValueError):
-            self.system_logs_box.append(f"[NETWORK WARNING] Cannot switch: invalid port for {ip}.")
-            return False
+            print(f"[ERROR] Invalid bridge_port '{bridge_text}'. Using 30500.")
+            bridge_port = 30500
+            bridge_text = "30500"
 
-        print(f"[STATUS] Closing current ZeroGBridge session before switching to {ip}:{port}")
-        self.system_logs_box.append(f"[NETWORK] Closing current session. Switching to {ip}:{port}...")
+        print(f"[STATUS] Switching dashboard to game server {ip}:{game_port}.")
+        print(f"[STATUS] Closing the current ZeroGBridge session. {ip}:{bridge_port} will connect in the background.")
+        self.system_logs_box.append(
+            f"[NETWORK] Switching to game server {ip}:{game_port}. ZeroGBridge {ip}:{bridge_port} connects in the background."
+        )
         self._reset_metric_readouts()
         self._stop_telemetry_worker()
-
-        try:
-            new_sock = switch_authenticated_socket(None, ip, port, token)
-        except Exception as err:
-            print(f"[WARNING] Server switch failed for {ip}:{port}: {err}")
-            self.system_logs_box.append(f"[NETWORK WARNING] Switch failed for {ip}:{port}: {err}")
-            self.telemetry_widget.lbl_server_status.setText("Server Status: OFFLINE")
-            self.telemetry_widget.lbl_server_status.setStyleSheet("color: #ff3355; font-weight: bold;")
-            if allow_restore and previous.get("input_ip") and profile_label(previous) != profile_label(profile):
-                print("[STATUS] Restoring the previous ZeroGBridge session.")
-                self.system_logs_box.append("[NETWORK] Restoring the previous server session.")
-                self._switch_to_saved_profile(previous, allow_restore=False)
-            return False
-
-        set_active_server(ip, port_text)
+        set_active_server(ip, game_port)
         self.config = {
             "input_ip": ip,
-            "input_port": port_text,
+            "input_port": game_port,
             "input_pass": token,
+            "bridge_port": bridge_text,
         }
-        self._spawn_telemetry_worker(ip, port, token, connected_socket=new_sock)
+        self._spawn_telemetry_worker(ip, bridge_port, token)
         self._refresh_after_server_switch(self.config)
         return True
 
@@ -607,21 +607,22 @@ class MainCockpit(QMainWindow):
         return accepted
 
     def _save_entered_server(self, ip, port_text, token, make_active):
-        """Writes one profile. Logs [ERROR] and shows a dialog when the write fails."""
+        """Writes one game-server profile. bridge_port defaults to 30500 inside the store."""
         try:
-            add_server_profile(ip, port_text, token, make_active=make_active)
+            return add_server_profile(ip, port_text, token, make_active=make_active)
         except Exception as err:
             print(f"[ERROR] Could not write server profile {ip}:{port_text}: {err}")
             self.system_logs_box.append(f"[ERROR] Could not write server profile {ip}:{port_text}: {err}")
-            self._show_server_login_dialog(f"Could not save {ip}:{port_text}: {err}")
-            return False
-        return True
+            self._show_server_login_dialog(f"Could not save game server {ip}:{port_text}: {err}")
+            return None
 
     def _on_log_into_another_server(self):
         """
-        Opens the network wizard for another host, port, and auth token.
-        A failed handshake still offers to save the profile so Switch servers can list it.
-        The current session stays up when the new server is only saved.
+        Opens the network wizard for another game server.
+        The wizard port is only a live TCP check. The profile is saved when that
+        check passes, or when the operator chooses Save this server anyway.
+        ZeroGBridge then connects to bridge_port in the background and does not
+        block the save or the dashboard.
         """
         print("[UI EVENT] Log into another server requested.")
         wizard = NetworkWizardOverlay(self, persist_profile=False)
@@ -634,53 +635,50 @@ class MainCockpit(QMainWindow):
         port_text = str(profile.get("input_port", "")).strip()
         token = str(profile.get("input_pass", "") or "")
         if not ip or not port_text:
-            print("[ERROR] Server host and port are required.")
-            self.system_logs_box.append("[ERROR] Server host and port are required.")
-            self._show_server_login_dialog("Server host and port are required.")
+            print("[ERROR] Game server host and port are required.")
+            self.system_logs_box.append("[ERROR] Game server host and port are required.")
+            self._show_server_login_dialog("Game server host and port are required.")
             return
         try:
             port = int(port_text)
         except (TypeError, ValueError):
-            print(f"[ERROR] Server port is not a number: {port_text}")
-            self.system_logs_box.append(f"[ERROR] Server port is not a number: {port_text}")
-            self._show_server_login_dialog(f"Server port is not a number: {port_text}")
+            print(f"[ERROR] Game port is not a number: {port_text}")
+            self.system_logs_box.append(f"[ERROR] Game port is not a number: {port_text}")
+            self._show_server_login_dialog(f"Game port is not a number: {port_text}")
             return
 
-        print(
-            f"[STATUS] Checking auth for additional server {ip}:{port} "
-            f"(timeout {BRIDGE_LOGIN_TIMEOUT:.0f}s)..."
-        )
-        try:
-            probe = open_authenticated_socket(ip, port, token, timeout=BRIDGE_LOGIN_TIMEOUT)
-            close_bridge_socket(probe)
-        except Exception as err:
-            reason = login_failure_message(ip, port, err)
-            print(f"[STATUS] Handshake failed for {ip}:{port}. The current session was left open.")
+        ok, err = check_game_server(ip, port, timeout=GAME_CHECK_TIMEOUT)
+        if not ok:
+            reason = describe_game_check_failure(ip, port, err)
+            print(f"[STATUS] Game server {ip}:{port} is not up. The current session was left open.")
             self.system_logs_box.append(f"[ERROR] {reason}")
             if not self._show_server_login_dialog(reason, ask_to_save=True):
-                print(f"[STATUS] Server profile {ip}:{port} was not saved.")
-                self.system_logs_box.append(f"[STATUS] Server profile {ip}:{port} was not saved.")
+                print(f"[STATUS] Game server {ip}:{port} was not saved.")
+                self.system_logs_box.append(f"[STATUS] Game server {ip}:{port} was not saved.")
                 return
-            if self._save_entered_server(ip, port_text, token, make_active=False):
-                print(f"[STATUS] Saved server profile {ip}:{port} after a failed handshake.")
-                self.system_logs_box.append(
-                    f"[STATUS] Saved server profile {ip}:{port} after a failed handshake."
-                )
+            saved = self._save_entered_server(ip, port_text, token, make_active=True)
+            if not saved:
+                return
+            print(
+                f"[STATUS] Saved game server {ip}:{port} after a failed live check. "
+                f"ZeroGBridge {ip}:{bridge_port_of(saved)} will keep trying in the background."
+            )
+            self.system_logs_box.append(
+                f"[STATUS] Saved game server {ip}:{port}. ZeroGBridge {ip}:{bridge_port_of(saved)} will keep trying."
+            )
+            self._switch_to_saved_profile(saved)
             return
 
-        print(f"[STATUS] Additional server {ip}:{port} authenticated.")
-        if not self._save_entered_server(ip, port_text, token, make_active=False):
+        saved = self._save_entered_server(ip, port_text, token, make_active=True)
+        if not saved:
             return
-        print(f"[STATUS] Saved server profile {ip}:{port}.")
-        switched = self._switch_to_saved_profile({
-            "input_ip": ip,
-            "input_port": port_text,
-            "input_pass": token,
-        })
-        if switched:
-            message = f"Connected to {ip}:{port}. The server profile was saved."
-        else:
-            message = f"Saved {ip}:{port}. The live session could not switch to that server."
+        bridge = bridge_port_of(saved)
+        print(f"[STATUS] Saved game server {ip}:{port}. ZeroGBridge {ip}:{bridge} connects in the background.")
+        self._switch_to_saved_profile(saved)
+        message = (
+            f"Game server {ip}:{port} is up. The profile was saved. "
+            f"ZeroGBridge will connect to {ip}:{bridge} in the background."
+        )
         print(f"[STATUS] {message}")
         self.system_logs_box.append(f"[STATUS] {message}")
         self._show_server_login_dialog(message)

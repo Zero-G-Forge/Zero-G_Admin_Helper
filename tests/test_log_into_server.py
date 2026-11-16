@@ -1,7 +1,9 @@
 # test_log_into_server.py
-"""File > Log into another server, then File > Switch servers, against the mock bridge."""
+"""File > Log into another server checks the game port, then lists the profile."""
 
 import os
+import socket
+import threading
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
@@ -12,6 +14,42 @@ from features.network.server_config import list_server_profiles
 from features.network.server_switch import ServerLoginDialog, ServerSwitchDialog
 from features.paths import DATA_DIR
 from tests.mock_bridge import MockBridge
+
+
+class GamePort:
+    """Accepts TCP and closes it. This is the game-port live check, not ZeroGBridge."""
+
+    def __init__(self):
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._sock.bind(("127.0.0.1", 0))
+        self._sock.listen(8)
+        self._sock.settimeout(0.2)
+        self.port = self._sock.getsockname()[1]
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name="game-port", daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        while not self._stop.is_set():
+            try:
+                conn, _addr = self._sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            try:
+                conn.close()
+            except OSError:
+                pass
+
+    def stop(self):
+        self._stop.set()
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+        self._thread.join(timeout=1.0)
 
 
 def _visible(text):
@@ -79,10 +117,10 @@ def _start_driver(state):
     return timer
 
 
-def _login_then_list_switch(qapp, tmp_path, monkeypatch, target, token, save_anyway):
+def _login_then_list_switch(qapp, tmp_path, monkeypatch, ip, port, token, save_anyway):
     """
-    Opens the real File actions.
-    Returns the dialog messages and the Switch servers labels.
+    Opens the real File actions against a home bridge on bridge_port.
+    The wizard port is the game port and is not used for the bridge handshake.
     """
     del qapp
     home = MockBridge("home-token").start()
@@ -99,18 +137,19 @@ def _login_then_list_switch(qapp, tmp_path, monkeypatch, target, token, save_any
             lambda profile, config_path=None: os.path.join(DATA_DIR, "player_registry_cache.json"),
         )
         from features.network.server_config import add_server_profile
-        add_server_profile("127.0.0.1", str(home.port), "home-token")
+        add_server_profile("127.0.0.1", "30004", "home-token")
 
         window = MainCockpit({
             "input_ip": "127.0.0.1",
-            "input_port": str(home.port),
+            "input_port": "30004",
             "input_pass": "home-token",
+            "bridge_port": str(home.port),
         })
         assert home.wait_until_authenticated()
 
         state = {
-            "ip": "127.0.0.1",
-            "port": str(target.port),
+            "ip": ip,
+            "port": str(port),
             "token": token,
             "save_anyway": save_anyway,
             "messages": [],
@@ -136,46 +175,61 @@ def _login_then_list_switch(qapp, tmp_path, monkeypatch, target, token, save_any
         home.stop()
 
 
-def test_login_success_shows_the_server_in_switch_list(qapp, tmp_path, monkeypatch):
-    target = MockBridge("beta-token").start()
+def test_login_success_saves_game_port_and_lists_it(qapp, tmp_path, monkeypatch):
+    game = GamePort()
     try:
-        state = _login_then_list_switch(qapp, tmp_path, monkeypatch, target, "beta-token", True)
-        assert any(message.startswith(f"Connected to 127.0.0.1:{target.port}.") for message in state["messages"])
-        assert any(f"127.0.0.1:{target.port}" in label for label in state["labels"])
-        saved, _active = list_server_profiles()
-        assert any(entry.get("input_pass") == "beta-token" for entry in saved)
-        print("[SUCCESS] Auth success saved the server and Switch servers listed it.")
-    finally:
-        target.stop()
-
-
-def test_login_auth_failure_save_anyway_lists_the_server(qapp, tmp_path, monkeypatch):
-    target = MockBridge("good-token").start()
-    try:
-        state = _login_then_list_switch(qapp, tmp_path, monkeypatch, target, "wrong-token", True)
-        assert f"Authentication was rejected for 127.0.0.1:{target.port}." in state["messages"]
-        assert "Save this server anyway?" in state["questions"]
-        assert any(f"127.0.0.1:{target.port}" in label for label in state["labels"])
-        saved, _active = list_server_profiles()
-        assert any(
-            entry.get("input_ip") == "127.0.0.1" and entry.get("input_port") == str(target.port)
-            for entry in saved
+        state = _login_then_list_switch(
+            qapp, tmp_path, monkeypatch, "127.0.0.1", game.port, "beta-token", True
         )
-        print("[SUCCESS] Auth failure offered Save this server anyway? and the profile was listed.")
-    finally:
-        target.stop()
-
-
-def test_login_timeout_save_anyway_lists_the_server(qapp, tmp_path, monkeypatch):
-    target = MockBridge("unused-token", silent=True).start()
-    try:
-        state = _login_then_list_switch(qapp, tmp_path, monkeypatch, target, "timeout-token", True)
-        expected = f"Could not reach 127.0.0.1:{target.port}: connection timed out"
+        expected = (
+            f"Game server 127.0.0.1:{game.port} is up. The profile was saved. "
+            f"ZeroGBridge will connect to 127.0.0.1:30500 in the background."
+        )
         assert expected in state["messages"]
-        assert "Save this server anyway?" in state["questions"]
-        assert any(f"127.0.0.1:{target.port}" in label for label in state["labels"])
+        assert any(f"127.0.0.1:{game.port}" in label for label in state["labels"])
+        assert any("bridge 30500" in label for label in state["labels"])
         saved, _active = list_server_profiles()
-        assert any(entry.get("input_pass") == "timeout-token" for entry in saved)
-        print("[SUCCESS] Timeout showed the reachability error and saved the server anyway.")
+        match = [
+            entry for entry in saved
+            if entry.get("input_port") == str(game.port)
+        ]
+        assert match
+        assert match[0]["bridge_port"] == "30500"
+        assert match[0]["input_pass"] == "beta-token"
+        print("[SUCCESS] Game port check saved the profile and Switch servers listed it.")
     finally:
-        target.stop()
+        game.stop()
+
+
+def test_login_game_port_refused_save_anyway_lists_the_server(qapp, tmp_path, monkeypatch):
+    closed = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    closed.bind(("127.0.0.1", 0))
+    refused_port = closed.getsockname()[1]
+    closed.close()
+    state = _login_then_list_switch(
+        qapp, tmp_path, monkeypatch, "127.0.0.1", refused_port, "refused-token", True
+    )
+    assert f"Could not reach game server 127.0.0.1:{refused_port}: host unreachable" in state["messages"]
+    assert "Save this server anyway?" in state["questions"]
+    assert any(f"127.0.0.1:{refused_port}" in label for label in state["labels"])
+    saved, _active = list_server_profiles()
+    match = [entry for entry in saved if entry.get("input_port") == str(refused_port)]
+    assert match
+    assert match[0]["bridge_port"] == "30500"
+    assert match[0]["input_pass"] == "refused-token"
+    print("[SUCCESS] A down game port offered Save this server anyway? and the profile was listed.")
+
+
+def test_login_game_port_timeout_save_anyway_lists_the_server(qapp, tmp_path, monkeypatch):
+    state = _login_then_list_switch(
+        qapp, tmp_path, monkeypatch, "192.0.2.1", 9, "timeout-token", True
+    )
+    assert "Could not reach game server 192.0.2.1:9: connection timed out" in state["messages"]
+    assert "Save this server anyway?" in state["questions"]
+    assert any("192.0.2.1:9" in label for label in state["labels"])
+    saved, _active = list_server_profiles()
+    match = [entry for entry in saved if entry.get("input_ip") == "192.0.2.1"]
+    assert match
+    assert match[0]["input_port"] == "9"
+    assert match[0]["bridge_port"] == "30500"
+    print("[SUCCESS] Game-port timeout showed the error and saved the server anyway.")
