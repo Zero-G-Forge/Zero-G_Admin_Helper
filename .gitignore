@@ -40,4 +40,4 @@ ZeroGBridge/obj/
 EOF
 
 # ZGB Portal example data (tracked)
-!Examples/**/*.json
+!.instructions/Examples/**/*.json
