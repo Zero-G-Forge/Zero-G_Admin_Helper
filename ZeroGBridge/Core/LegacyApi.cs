@@ -1,6 +1,7 @@
 // =====================================================================
 // MODULE: ZeroGBridge/Core/LegacyApi.cs
 // DESCRIPTION: Legacy ModInterface (Mif.dll) bridge used for in-game alerts
+//              (1.6.0: also every Eleon request sent by api:/con:, see EleonReplies.cs)
 // =====================================================================
 
 using System;
@@ -123,6 +124,7 @@ namespace ZeroGBridge
             _api = null;
             Interlocked.Exchange(ref _lastUpdateTicks, 0);
             Interlocked.Exchange(ref _factionRequestPending, 0);
+            try { EleonReplies.CancelAll(); } catch { } // 1.6.0: wake api:/con: commands still waiting
             // Fail anything still queued
             while (Queue.TryDequeue(out var p))
             {
@@ -155,6 +157,8 @@ namespace ZeroGBridge
 
         public static void OnGameEvent(CmdId eventId, ushort seqNr, object data)
         {
+            // 1.6.0: answers to api:/con: requests (matched by seq); own try/catch inside
+            EleonReplies.Deliver(eventId, seqNr, data);
             try
             {
                 switch (eventId)
@@ -350,6 +354,15 @@ namespace ZeroGBridge
         /// </summary>
         public static RequestResult Request(CmdId cmd, object data, int timeoutMs, out string error)
         {
+            return Request(cmd, data, timeoutMs, NextSeq(), out error);
+        }
+
+        /// <summary>
+        /// 1.6.0: same as Request, with a seqNr chosen by the caller (EleonReplies registers the
+        /// seq before sending so the game's answer can be matched even when it comes at once).
+        /// </summary>
+        public static RequestResult Request(CmdId cmd, object data, int timeoutMs, ushort seq, out string error, bool queueOnly = false)
+        {
             error = null;
             if (_api == null)
             {
@@ -361,9 +374,9 @@ namespace ZeroGBridge
                 return RequestResult.NotAvailable;
             }
 
-            var p = new Pending { Cmd = cmd, Seq = NextSeq(), Data = data };
+            var p = new Pending { Cmd = cmd, Seq = seq, Data = data };
 
-            if (!UpdateIsTicking)
+            if (!queueOnly && !UpdateIsTicking)
             {
                 p.Claimed = 1;
                 Execute(p);
@@ -379,6 +392,8 @@ namespace ZeroGBridge
                     error = "main thread did not run the request in time";
                     return RequestResult.Timeout;
                 }
+                // New API commands share one short deadline; old alerts keep their existing wait.
+                if (queueOnly) { error = "game request has not finished within the deadline; do not retry a mutation blindly"; return RequestResult.Timeout; }
                 // executor claimed it just now; wait for it to finish
                 p.Done.Wait(2000);
             }

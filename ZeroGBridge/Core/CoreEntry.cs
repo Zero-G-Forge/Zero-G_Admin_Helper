@@ -38,6 +38,9 @@ namespace ZeroGBridge
             if (string.IsNullOrEmpty(ModMain.Release)) return "release name missing";
             if (AlertService.Ack("selftest", null).IndexOf("ALERT_ACK", StringComparison.Ordinal) < 0) return "AlertService not usable";
             if (typeof(IModApi).Assembly == null || typeof(ModGameAPI).Assembly == null) return "game API assemblies missing";
+            // 1.6.0: both command catalogs load and the console command is reachable
+            if (EleonRequests.All.Count < 29 || EleonRequests.Find("Request_ConsoleCommand") == null) return "Eleon request table incomplete";
+            if (ConsoleCatalog.All.Count == 0 || ConsoleCatalog.Find("kick") == null) return "console catalog empty";
             return null;
 #endif
         }

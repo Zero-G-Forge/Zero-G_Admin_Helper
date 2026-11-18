@@ -43,6 +43,20 @@ namespace ZeroGBridge
         /// </summary>
         public string ProcessIncomingCommand(string command)
         {
+            // Never echo a configured secret, including a secret accidentally pasted into a command.
+            try
+            {
+                string token = AuthConfig.GetToken();
+                if (!string.IsNullOrEmpty(token) && command != null && command.Contains(token))
+                    return JsonConvert.SerializeObject(new { type = "ERROR", status = "secret_in_command", message = "Command contains authentication material and was refused." });
+                string reply = ProcessCommand(command);
+                return !string.IsNullOrEmpty(token) && reply != null ? reply.Replace(token, "[REDACTED]") : reply;
+            }
+            catch { return JsonConvert.SerializeObject(new { type = "ERROR", status = "exception", message = "Command could not be processed safely." }); }
+        }
+
+        private string ProcessCommand(string command)
+        {
             if (string.IsNullOrEmpty(command))
             {
                 return JsonConvert.SerializeObject(new { type = "ERROR", message = "Empty command string." });
@@ -55,6 +69,11 @@ namespace ZeroGBridge
 
                 // Live server console trace
                 ZgbLog.Write($"[ZGB] -INFO- Received command from ZAH: \"{cleanCmd}\"");
+
+                // 1.6.0: command catalog, full Eleon API (api:) and server console (con: / cmd: / exec:)
+                if (ApiCommands.IsCatalogLine(lowerCmd)) return ApiCommands.Catalog();
+                if (ApiCommands.IsApiLine(lowerCmd)) return ApiCommands.HandleApi(cleanCmd);
+                if (ApiCommands.IsConsoleLine(lowerCmd)) return ApiCommands.HandleConsole(cleanCmd);
 
                 // 1. Handle live player roster query (CmdId.Request_Player_List)
                 if (lowerCmd == "plys")
@@ -104,33 +123,19 @@ namespace ZeroGBridge
                 }
 
                 // 3. Handle "save" / "backup" command
-                if (lowerCmd == "save" || lowerCmd == "backup")
+                // 1.6.0: honest not_available replies; Empyrion has no save-only command, and
+                // backups are done by ZAH over sFTP after the server stops, not by the bridge.
+                if (ApiCommands.IsSaveOrBackupLine(lowerCmd))
                 {
-                    ZgbLog.Write("[ZGB] -ACTION- Received manual 'save' directive from ZAH.");
-
-                    return JsonConvert.SerializeObject(new
-                    {
-                        type = "RESPONSE",
-                        status = "Success",
-                        action = "ServerSave",
-                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
-                        message = "World save directive acknowledged and executed."
-                    });
+                    return ApiCommands.HandleSaveOrBackup(lowerCmd);
                 }
 
                 // 4. Handle "restart" command
-                if (lowerCmd == "restart")
+                // 1.6.0: restart:<minutes> (0-15) sends say, then saveandexit <minutes>.
+                // restart:cancel sends saveandexit cancel. Bare restart is refused.
+                if (ApiCommands.IsRestartLine(lowerCmd))
                 {
-                    ZgbLog.Write("[ZGB] -ACTION- Received manual 'restart' directive from ZAH.");
-
-                    return JsonConvert.SerializeObject(new
-                    {
-                        type = "RESPONSE",
-                        status = "Initiated",
-                        action = "ServerRestart",
-                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
-                        message = "Server restart sequence initiated."
-                    });
+                    return ApiCommands.HandleRestart(cleanCmd);
                 }
 
                 // 5. Global Structure / Entity Query (1.4.2: NPC filter by faction origin/group, not by name)
@@ -483,52 +488,35 @@ namespace ZeroGBridge
                     int colonIdx = cleanCmd.IndexOf(':');
                     string playfieldName = cleanCmd.Substring(colonIdx + 1).Trim();
 
+                    // 1.6.0: optional seconds to keep it loaded: loadpf:<playfieldName>|<seconds> (default 60)
+                    float loadSeconds = 60f;
+                    int barIdx = playfieldName.LastIndexOf('|');
+                    if (barIdx > 0 && float.TryParse(playfieldName.Substring(barIdx + 1).Trim(), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out float secs) && secs > 0)
+                    {
+                        loadSeconds = secs;
+                        playfieldName = playfieldName.Substring(0, barIdx).Trim();
+                    }
+
                     if (!string.IsNullOrEmpty(playfieldName))
                     {
                         ZgbLog.Write($"[ZGB] -ACTION- Queuing load request for Playfield: \"{playfieldName}\"");
 
-                        return JsonConvert.SerializeObject(new
-                        {
-                            type = "RESPONSE",
-                            status = "Initiated",
-                            action = "LoadPlayfield",
-                            playfield = playfieldName,
-                            timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
-                            message = $"Playfield load request dispatched for {playfieldName}."
-                        });
+                        // 1.6.0: really sends Request_Load_Playfield (was acknowledge-only)
+                        return ApiCommands.LoadPlayfield(playfieldName, loadSeconds);
                     }
 
                     return JsonConvert.SerializeObject(new { type = "ERROR", message = "Invalid format. Expected: loadpf:<playfieldName>" });
                 }
 
                 // 18. Native Dedicated Engine Console Command Proxy (Full Telnet Command Service)
+                // 1.6.0: cmd:/exec: are aliases of con: and are routed to ApiCommands.HandleConsole at
+                // the top of this method (Request_ConsoleCommand). The old handler only logged the text.
+                // If modern IModApi instance is accessible, execute internally
                 if (lowerCmd.StartsWith("cmd:") || lowerCmd.StartsWith("exec:"))
                 {
-                    string innerCommand = cleanCmd.Substring(cleanCmd.IndexOf(':') + 1).Trim();
-                    ZgbLog.Write($"[ZGB] -ACTION- Executing proxied console command: \"{innerCommand}\"");
-
-                    // If modern IModApi instance is accessible, execute internally
-                    try
-                    {
-                        if (ModMain.ModApiInstance != null)
-                        {
-                            // Dispatches directly into Empyrion engine console
-                            ModMain.ModApiInstance.Log($"[ZGB Admin] Executing: {innerCommand}");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        ZgbLog.Write($"[ZGB] -WARN- Console execution exception: {ex.Message}");
-                    }
-
-                    return JsonConvert.SerializeObject(new 
-                    { 
-                        type = "RESPONSE", 
-                        status = "Executed", 
-                        command = innerCommand,
-                        timestamp = DateTime.UtcNow.ToString("dd-HH:mm:ss"),
-                        message = $"Console command '{innerCommand}' dispatched to engine."
-                    });
+                    // Dispatches directly into Empyrion engine console
+                    return ApiCommands.HandleConsole(cleanCmd);
                 }
 
                 // Fallback / General Acknowledgment

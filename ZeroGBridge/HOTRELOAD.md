@@ -10,6 +10,12 @@ ZeroGBridge is split into two DLLs:
 ZAH connections stay open across a core reload. The connection is held by the loader, so the client
 does not need to log in again.
 
+**Core 1.6.0** (`api:`, `con:`, `cmds`, real `loadpf:`) is a core-only update for the 1.5.0 loader
+(contract 1 unchanged): drop `ZeroGBridge.Core.dll` into `Updates/` and send `hot:reload`. No restart needed.
+Its self-test also checks that both command catalogs load. Commands are described in [README.md](README.md#commands-160).
+While an `api:` / `con:` command waits for the game's answer (up to its 500 ms deadline) it counts as in flight, so a
+swap waits for it like any other command.
+
 ## Mod folder layout
 
 ```

@@ -14,15 +14,16 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
 
     <Title>ZeroGBridge.Core</Title>
-    <Description>ZeroGBridge reloadable core (commands, factions, players, alerts, server view)</Description>
+    <Description>ZeroGBridge reloadable core (commands, Eleon API, console, factions, players, alerts, server view)</Description>
     <Company>Zero-G Forge</Company>
     <Product>ZeroGBridge</Product>
     <Copyright>Copyright © 2026 Zero-G Forge</Copyright>
 
     <MajorVersion>1</MajorVersion>
-    <MinorVersion>5</MinorVersion>
-    <!-- Core release name; can be overridden for test builds: -p:ReleaseVersion=1.5.0-test2 -->
-    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.5.1</ReleaseVersion>
+    <MinorVersion>6</MinorVersion>
+    <!-- Core release name; can be overridden for test builds: -p:ReleaseVersion=1.6.0-test2 -->
+    <!-- 1.6.0: full Eleon API (api:), console catalog (con:/cmds) -->
+    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.0</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
     <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>

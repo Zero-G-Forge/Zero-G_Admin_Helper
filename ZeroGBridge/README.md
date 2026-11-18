@@ -13,6 +13,12 @@ first: NPC groups that the game reports with faction id 0 (Zirax, Talon, ...) no
 `skipped(id<=1)`. Only origin 0/1 rows with id <= 1 (the default human group) count as skipped. DEBUG also logs counts
 by origin and a sample of dropped/skipped rows. The loader and the `hot:` contract are unchanged.
 
+**Core 1.6.0 (core-only, hot-swappable on the 1.5.0 loader).** Every legacy Eleon request is reachable from ZAH
+with `api:`, server console / telnet commands run for real with `con:` (`cmd:` and `exec:` are now aliases),
+and `cmds` returns both command lists as JSON so ZAH can build its menus. `loadpf:` now really sends
+`Request_Load_Playfield`. The loader, the `auth:` handshake and the `hot:` contract are unchanged. See
+[Commands (1.6.0)](#commands-160) below.
+
 Build: `ZeroGBridge.csproj` builds the loader. `CoreProject/ZeroGBridge.Core.csproj` builds the core.
 Deploy both the first time (one restart). After that, only the core changes for most patches.
 
@@ -97,3 +103,116 @@ Each reply is logged at DEBUG with its seqNr and counts, and at INFO when the co
 
 `gents` hides NPC structures by faction group (0 player, 1 private and 5 admin are kept;
 NPC groups and 255 are dropped) instead of the old faction-name blacklist.
+
+## Commands (1.6.0)
+
+Every line gets exactly one single-line JSON reply. The line ending is the server's newline
+(CRLF on the Windows dedicated server), UTF-8 without BOM. A bad command gets
+`{"type":"ERROR","status":"<code>","code":"<code>","message":"..."}`; it never stops the bridge.
+A line that contains the AuthToken is refused (`secret_in_command`) and nothing is sent to the game.
+
+### `cmds` - the command catalog
+
+`cmds` (also `help:commands`, `api:list`) returns one `COMMAND_CATALOG` line:
+
+```json
+{"type":"COMMAND_CATALOG","release":"1.6.0","eleon_count":41,"console_count":83,"zah_count":4,
+ "eleon":[{"name":"Request_Player_Info","cmd_id":17,"short_names":["player_info","playerinfo","pinfo"],
+           "param_type":"Id","param_fields":["id"],"required":["id"],"key_aliases":{},
+           "replies":["Event_Player_Info"],"wait":"data","changes_server":false,"visible_to_players":false,
+           "on_rays_list":true,"description":"...","note":null}, ...],
+ "console":[{"name":"debugmenu","aliases":["dm"],"description":"...","permission":"6+","min_permission":6,
+             "server_capable":false,"changes_server":false,"safe_without_args":false,
+             "blocked":false,"blocked_reason":null,"source":"sheet"}, ...],
+ "zah":[{"name":"restart","syntax":"restart:<minutes>","changes_server":true,"status":"implemented"},
+        {"name":"restart:cancel","syntax":"restart:cancel","changes_server":true,"status":"implemented"},
+        {"name":"save","syntax":"save","status":"not_available"},
+        {"name":"backup","syntax":"backup","status":"not_available"}]}
+```
+
+- `changes_server: true` means ZAH should put the command behind its CONFIRM step. The bridge itself still
+  runs it when asked. In-game messages and dialogs are marked too (`visible_to_players`).
+- `safe_without_args: true` (`ticks`, `time`, `saveandexit`, `stoppf`): with no arguments the command only
+  shows information, so a `con:` reply for just `ticks` says `changes_server: false`.
+- Console rows come from the command sheet (`source: "sheet"`) plus the telnet-only commands from the
+  Empyrion wiki (`source: "telnet_wiki"`: `instances`, `plys`, `remoteex`, `saveandexit`, `say`, `servers`, `stoppf`).
+  The list lives in `Core/ConsoleCatalogData.cs`.
+- `zah` lists the ZAH shortcuts: `restart:<minutes>` / `restart:cancel` (implemented), and `save` / `backup`
+  (`status: "not_available"`). These are not telnet commands.
+
+
+### `api:` - the full Eleon API
+
+```
+api:<RequestName or short name> [params]
+api:Request_Player_Info {"id":5001}
+api:player_info 5001                       (an Id request also takes a plain number)
+api:pfstats Akua                           (a PString request also takes plain text)
+api:Request_Player_AddItem {"id":5001,"item":{"id":4097,"count":10},"req_id":"z1","timeout_ms":500}
+```
+
+- The name is the `CmdId` name (case-insensitive), `Request_` dropped (`player_info`), the same without
+  underscores (`playerinfo`), or a short name from the catalog (`credits`, `getinv`, `touch`, `loadpf`, `factions` ...).
+- Params are a JSON object using the real field names of the Mif.dll param type (case-insensitive), plus the
+  friendly `key_aliases` in the catalog (`text` -> `msg`, `item` -> `itemStack`, `amount` -> `credits` ...).
+  Vectors take `{"x":1,"y":2,"z":3}`, `[1,2,3]` or `"1,2,3"`. Items take `{"id":..,"count":..,"slotIdx":..,"ammo":..,"decay":..}`.
+  Unknown or missing fields are refused (`bad_params`) before anything is sent.
+- `req_id` is echoed back. `timeout_ms` (50-500) sets the wait for the answer.
+- `Request_ConsoleCommand` gets the same checks as `con:`.
+
+Reply:
+
+```json
+{"type":"API_RESULT","req_id":"z1","request":"Request_Player_Info","cmd_id":17,"seq":40012,"status":"ok",
+ "event":"Event_Player_Info","error":null,"data":{...the event object...},"changes_server":false,
+ "elapsed_ms":21,"timeout_ms":500,"timestamp":"17-19:28:39"}
+```
+
+| `status` | Meaning |
+|---|---|
+| `ok` | The matching event came back (`event` names it, `data` holds it) |
+| `error` | The game answered `Event_Error`; `error` is the `ErrorType` (`PlayerIdNotFound`, `EntityIdNotFound` ...) |
+| `accepted` | Dialog / item exchange: shown to the player; their click comes later and is not waited for |
+| `timeout` | The game accepted the request but did not answer in time (or `Event_Ok` came without the data). Do not blindly repeat a command that changes something |
+| `not_available` | The legacy API is not attached in this process |
+| `rejected` / `exception` | `Game_Request` returned false or threw |
+
+Answers are matched by `seq` (40000-65535), so many requests can run at once. `Event_Playfield_Loaded` is also
+matched by playfield name. The game thread wait plus the answer wait are kept within the request deadline
+(500 ms by default and at most), so a slow answer never holds a ZAH connection or a hot reload for long.
+
+### `con:` - server console / telnet
+
+```
+con:<console command line>      cmd:<line> and exec:<line> work the same
+con:kick 'Solo A' "bye now"
+con:ticks                       read-only form
+```
+
+- The first word is looked up in the console catalog (main name or alias, case-insensitive). The whole line is
+  sent unchanged as `Request_ConsoleCommand(PString)`.
+- Reply: `{"type":"CONSOLE_RESULT","command":"kick","line":"kick ...","seq":40100,"status":"ok","event":"Event_Ok","changes_server":true,...}`.
+  The game only answers Ok or Error; what the command prints goes to the server log.
+- Refused, nothing sent (`type":"ERROR"`): `client_only` (no `V` in the sheet: only works in the game client
+  console), `blocked` (`replaceblocks`: never run on a server; `changemode`: does not work in multiplayer),
+  `unknown_command`, `empty`, `bad_text`.
+
+### Older commands
+
+`plys`, `gents[:<playfield>]`, `getplayfields[:all]`, `alert:{...}`, `add_player:`, and the `hot:` commands are unchanged.
+`loadpf:<playfield>[|seconds]` now sends `Request_Load_Playfield` (default 60 s) and keeps its reply keys
+(`status` is `Loaded`, `Initiated` or `Failed`).
+
+`restart:<minutes>` (integer 0-15) is a real shortcut: it sends `say 'Server restarting in <N> minute(s)'` and then
+`saveandexit <N>` on the game thread via `Request_ConsoleCommand`. The reply is one JSON line with
+`action:"ServerRestart"`, `minutes`, `executed:true/false`, and the console Ok/Error result for each step.
+`restart:cancel` sends `saveandexit cancel` (and a `say` that the restart was cancelled). Bare `restart`, or a
+minutes value that is not an integer from 0 to 15, is refused and nothing is sent. `saveandexit` saves and stops
+the server; starting it again is the host panel's job. Put this behind ZAH's CONFIRM step and a player check.
+
+`save` and `backup` stay honest and do not run: `executed:false`, `status:"not_available"`. Save replies
+`Empyrion has no save-only command; the game autosaves and saveandexit saves before stopping`. Backup replies
+`Backups are done by ZAH over sFTP after the server stops, not by the bridge`.
+
+`getcredits:`, `getinv:`, `pfstats:`, `pfents:`, `touch:`, `destroystruct:`, `msg:`, `msgfaction:`, `addcredits:` still only acknowledge;
+use their `api:` versions for the real request.
