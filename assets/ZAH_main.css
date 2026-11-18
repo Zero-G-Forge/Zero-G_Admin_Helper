@@ -1,0 +1,165 @@
+/* ZAH_main.css - Main window shell stylesheet
+   Used by the new ZAH main window only.
+   The legacy theme remains in assets/ZAH.css and is left unchanged.
+*/
+
+/* Palette (from Concept_11-17 mockups)
+   navy glass panel : rgba(8, 20, 34, 205)
+   panel border     : rgba(40, 170, 215, 110)
+   cyan accent      : #33d6ff
+   label grey-blue  : #b9cad8
+   white heading    : #eef6fb
+   Note: Qt stylesheets ignore letter-spacing; MainCockpit.apply_letter_spacing() sets it.
+*/
+
+/* Global container */
+#MainCockpitCanvas {
+    background-color: #050b14;
+}
+
+#CentralWidgetCanvas {
+    background-color: transparent;
+    border: none;
+}
+
+/* Base labels stay on-theme if a new widget is added later */
+QLabel {
+    background-color: transparent;
+    border: none;
+    color: #b9cad8;
+    font-family: "Inter", "DejaVu Sans";
+}
+
+/* Shell panels */
+#HeaderBar {
+    background-color: rgba(5, 13, 24, 215);
+    border: none;
+    border-bottom: 1px solid rgba(40, 170, 215, 70);
+    border-radius: 0px;
+}
+
+#NavColumn, #ContentArea {
+    background-color: transparent;
+    border: none;
+}
+
+#ContentPanel {
+    background-color: rgba(8, 20, 34, 205);
+    border: 1px solid rgba(40, 170, 215, 110);
+    border-radius: 10px;
+}
+
+#StatusBar {
+    background-color: rgba(8, 20, 34, 215);
+    border: 1px solid rgba(40, 170, 215, 110);
+    border-radius: 10px;
+}
+
+/* White uppercase headers */
+#AppTitleLabel {
+    color: #eef6fb;
+    font-weight: 600;
+    font-size: 22px;
+}
+
+#AppSubtitleLabel {
+    color: #33d6ff;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+#ServerNameLabel {
+    color: #7fe3ff;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* Server status dot: idle grey, offline red, online green */
+#ServerStatusDot {
+    background-color: #5d6b78;
+    border-radius: 5px;
+}
+
+#ServerStatusDot[state="offline"] {
+    background-color: #ff3355;
+}
+
+#ServerStatusDot[state="online"] {
+    background-color: #2ee66b;
+}
+
+#CtrlKLabel, #AdminNameLabel {
+    color: #c9d6e2;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+#ClockLabel {
+    color: #eef6fb;
+    font-size: 26px;
+    font-weight: 600;
+}
+
+#HeaderDivider {
+    background-color: rgba(185, 202, 216, 70);
+    border: none;
+}
+
+/* Nav column buttons */
+QPushButton#NavButton {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    color: #b9cad8;
+    font-family: "Inter", "DejaVu Sans";
+    font-size: 14px;
+    font-weight: 500;
+    text-align: left;
+    padding-left: 16px;
+}
+
+QPushButton#NavButton:hover {
+    background-color: rgba(20, 60, 90, 110);
+    border: 1px solid rgba(51, 214, 255, 60);
+    color: #dcebf5;
+}
+
+QPushButton#NavButton:checked {
+    background-color: rgba(18, 90, 125, 150);
+    border: 1px solid #33d6ff;
+    color: #a8ecff;
+}
+
+/* ALERTS & ANTI-CHEAT: smaller text so the label fits beside its badge */
+QPushButton#NavButton[compact="true"] {
+    font-size: 12px;
+}
+
+/* Red alert count badge on ALERTS & ANTI-CHEAT */
+#AlertBadge {
+    background-color: #e0263f;
+    color: #ffffff;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* Content panel title + placeholder */
+#ContentHeaderLabel {
+    color: #eef6fb;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+#ContentPlaceholderLabel {
+    color: rgba(51, 214, 255, 150);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+/* Bottom status bar fields */
+#StatusLabel {
+    color: #b9cad8;
+    font-size: 13px;
+    font-weight: 500;
+}
