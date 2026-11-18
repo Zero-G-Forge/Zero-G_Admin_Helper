@@ -2,7 +2,7 @@
 
 import os
 import sys
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QDialog
 from PyQt6.QtGui import QIcon
 
 from features.paths import asset_path
@@ -15,12 +15,20 @@ except ImportError as e:
     print(f"[ERROR] Could not load MainCockpit: {e}")
     MainCockpit = None
 
+## Load Screen 1 (The Application Loader Component)
+try:
+    from features.loading.loading_screen import ApplicationLoader
+    print("[SUCCESS] Package: ApplicationLoader Loaded")
+except ImportError as e:
+    print(f"[ERROR] Could not load ApplicationLoader: {e}")
+    ApplicationLoader = None
+
 
 def main():
     """
     Primary application entry point.
     Initializes the QApplication, applies the main window stylesheet,
-    and opens the MainCockpit shell.
+    shows the ApplicationLoader, and opens the MainCockpit shell.
     """
     print("[DEBUG] Initializing Zero-G Admin Helper (PyQt6 Mode)...")
 
@@ -55,9 +63,36 @@ def main():
         print("[ERROR] MainCockpit not found. Halting.")
         sys.exit(1)
 
+    ## PHASE 1: Loading screen. It builds the MainCockpit during its
+    ## "BUILDING MAIN WINDOW" stage. If the loader fails for any reason,
+    ## the error is logged and the main window still opens.
+    main_cockpit = None
+    loader_result = QDialog.DialogCode.Accepted
+    if ApplicationLoader is not None:
+        try:
+            print("[DEBUG] Instantiating Screen 1: Application Loading Screen...")
+            loader = ApplicationLoader(build_main_window=MainCockpit)
+            loader.show()
+            loader.start_boot_sequence()
+            loader_result = loader.exec()
+            main_cockpit = loader.main_window
+            loader.deleteLater()
+        except Exception as e:
+            print(f"[ERROR] Loading screen failed: {e}. Opening MainCockpit anyway.")
+            loader_result = QDialog.DialogCode.Accepted
+    else:
+        print("[ERROR] ApplicationLoader not found. Opening MainCockpit without it.")
+
+    ## The user closed the loading screen before it finished
+    if loader_result != QDialog.DialogCode.Accepted:
+        print("[STATUS] Initialization halted. Shutting down.")
+        sys.exit(0)
+
+    ## PHASE 2: Dashboard Handoff
     try:
+        if main_cockpit is None:
+            main_cockpit = MainCockpit()
         print("[DEBUG] Passing control to MainCockpit...")
-        main_cockpit = MainCockpit()
         main_cockpit.show()
         sys.exit(app.exec())
     except Exception as e:

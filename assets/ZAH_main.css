@@ -163,3 +163,34 @@ QPushButton#NavButton[compact="true"] {
     font-size: 13px;
     font-weight: 500;
 }
+
+/* Loading screen (features/loading/loading_screen.py)
+   Letter spacing is set in ApplicationLoader.apply_letter_spacing().
+*/
+#ApplicationLoaderCanvas {
+    background-color: #050b14;
+}
+
+#LoaderTitleLabel {
+    color: #eef6fb;
+    font-size: 32px;
+    font-weight: 600;
+}
+
+QProgressBar#LoaderProgressBar {
+    background-color: rgba(5, 13, 24, 230);
+    border: 1px solid rgba(40, 170, 215, 110);
+    border-radius: 6px;
+}
+
+QProgressBar#LoaderProgressBar::chunk {
+    background-color: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0,
+        stop: 0 #1a8fc0, stop: 1 #33d6ff);
+    border-radius: 5px;
+}
+
+#LoaderStatusLabel {
+    color: #7fe3ff;
+    font-size: 12px;
+    font-weight: 500;
+}
