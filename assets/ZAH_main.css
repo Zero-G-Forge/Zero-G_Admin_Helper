@@ -3,6 +3,8 @@
    The legacy theme remains in assets/ZAH.css and is left unchanged.
 */
 
+/* region: Palette */
+
 /* Palette (from Concept_11-17 mockups)
    navy glass panel : rgba(8, 20, 34, 205)
    panel border     : rgba(40, 170, 215, 110)
@@ -11,6 +13,10 @@
    white heading    : #eef6fb
    Note: Qt stylesheets ignore letter-spacing; MainCockpit.apply_letter_spacing() sets it.
 */
+
+/* endregion */
+
+/* region: Global Container & Base Labels */
 
 /* Global container */
 #MainCockpitCanvas {
@@ -29,6 +35,10 @@ QLabel {
     color: #b9cad8;
     font-family: "Inter", "DejaVu Sans";
 }
+
+/* endregion */
+
+/* region: Shell Panels */
 
 /* Shell panels */
 #HeaderBar {
@@ -54,6 +64,10 @@ QLabel {
     border: 1px solid rgba(40, 170, 215, 110);
     border-radius: 10px;
 }
+
+/* endregion */
+
+/* region: Header Bar */
 
 /* White uppercase headers */
 #AppTitleLabel {
@@ -105,6 +119,10 @@ QLabel {
     border: none;
 }
 
+/* endregion */
+
+/* region: Nav Column */
+
 /* Nav column buttons */
 QPushButton#NavButton {
     background-color: transparent;
@@ -144,6 +162,10 @@ QPushButton#NavButton[compact="true"] {
     font-weight: 700;
 }
 
+/* endregion */
+
+/* region: Content Panel */
+
 /* Content panel title + placeholder */
 #ContentHeaderLabel {
     color: #eef6fb;
@@ -157,12 +179,20 @@ QPushButton#NavButton[compact="true"] {
     font-weight: 500;
 }
 
+/* endregion */
+
+/* region: Status Bar */
+
 /* Bottom status bar fields */
 #StatusLabel {
     color: #b9cad8;
     font-size: 13px;
     font-weight: 500;
 }
+
+/* endregion */
+
+/* region: Loading Screen */
 
 /* Loading screen (features/loading/loading_screen.py)
    Letter spacing is set in ApplicationLoader.apply_letter_spacing().
@@ -194,3 +224,5 @@ QProgressBar#LoaderProgressBar::chunk {
     font-size: 12px;
     font-weight: 500;
 }
+
+/* endregion */

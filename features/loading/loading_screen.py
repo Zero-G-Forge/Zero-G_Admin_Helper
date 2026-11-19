@@ -3,12 +3,19 @@
 ## DESCRIPTION: Screen 1A: Zero-G Loading Screen (Splash Loader Canvas)
 ## =====================================================================
 
+## region: Imports
+
 import os
 from features.paths import asset_path, ensure_data_dir
 from PyQt6.QtWidgets import QDialog, QWidget, QLabel, QProgressBar
 from PyQt6.QtCore import QTimer, Qt, QRectF
 from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QPainterPath, QFontDatabase
 
+## endregion
+
+## region: Optional Modules
+
+## Guarded imports: if a piece is missing, the loader falls back to simpler drawing.
 try:
     from features.shared.progress_bar import ProgressBarWidget
 except ImportError as e:
@@ -20,6 +27,10 @@ try:
 except ImportError as e:
     print(f"[ERROR] ApplicationLoader: Could not load BadgePlayer: {e}")
     BadgePlayer = None
+
+## endregion
+
+## region: Loader Settings
 
 ## Loader canvas size (same as the legacy loader)
 LOADER_WIDTH = 1000
@@ -38,6 +49,10 @@ MILESTONE_MARKERS = [30, 60]
 ## Font used by every label (Inter on Zorin, DejaVu Sans as a fallback)
 CORE_FONT_FAMILIES = ["Inter", "DejaVu Sans"]
 
+## endregion
+
+
+## region: ApplicationLoader Class
 
 class ApplicationLoader(QDialog):
     """
@@ -46,6 +61,8 @@ class ApplicationLoader(QDialog):
     startup stages, then hands the built MainCockpit back to ZAH.py.
     """
 
+    ## region: Setup
+
     def __init__(self, build_main_window=None, parent=None):
         super().__init__(parent)
 
@@ -53,6 +70,7 @@ class ApplicationLoader(QDialog):
         self.build_main_window = build_main_window
         self.main_window = None
 
+        ## Progress state and drawing resources, filled in during setup.
         self.current_progress = 0
         self.pulse_offset = 0.0
         self.status_text = "STARTING UP"
@@ -85,12 +103,17 @@ class ApplicationLoader(QDialog):
             self.apply_letter_spacing()
             self._update_status_label()
 
+            ## Timer that drives the loading cycle. start_boot_sequence() starts it.
             self.boot_timer = QTimer(self)
             self.boot_timer.timeout.connect(self.advance_loading_cycle)
             print("[SUCCESS] ApplicationLoader: Loading screen initialized.")
         except Exception as e:
             print(f"[ERROR] ApplicationLoader: Failed to initialize the loading screen: {e}")
             raise
+
+    ## endregion
+
+    ## region: Images & Animation
 
     def _load_images(self):
         """Loads the plating background and the Admin Helper badge."""
@@ -138,6 +161,7 @@ class ApplicationLoader(QDialog):
         try:
             self.circuit_paths = []
 
+            ## Each path is a line of points: moveTo starts the line, lineTo adds the next corner.
             p1 = QPainterPath()
             p1.moveTo(50, 300); p1.lineTo(200, 300); p1.lineTo(260, 240); p1.lineTo(330, 240)
             self.circuit_paths.append(p1)
@@ -153,9 +177,14 @@ class ApplicationLoader(QDialog):
             print(f"[ERROR] ApplicationLoader: Failed to build circuit paths: {e}")
             self.circuit_paths = []
 
+    ## endregion
+
+    ## region: Widgets & Theme
+
     def setup_widgets(self):
         """Builds the title label, the progress bar and the status line."""
         try:
+            ## Large title under the badge, placed at a fixed pixel position.
             self.lbl_app_title = QLabel("ZERO-G ADMIN HELPER", self)
             self.lbl_app_title.setObjectName("LoaderTitleLabel")
             self.lbl_app_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -174,6 +203,7 @@ class ApplicationLoader(QDialog):
             print(f"[ERROR] ApplicationLoader: Failed to build ProgressBarWidget: {e}. Using plain bar.")
             self.transfer_bar = None
 
+        ## Fallback: plain progress bar plus a status text line.
         try:
             self.progress_bar = QProgressBar(self)
             self.progress_bar.setObjectName("LoaderProgressBar")
@@ -205,6 +235,7 @@ class ApplicationLoader(QDialog):
         is set here on each label font instead.
         """
         try:
+            ## Object name -> extra space between letters, in pixels.
             spacing_by_name = {
                 "LoaderTitleLabel": 6.0,
                 "LoaderStatusLabel": 2.5,
@@ -218,6 +249,10 @@ class ApplicationLoader(QDialog):
                 widget.setFont(font)
         except Exception as e:
             print(f"[ERROR] ApplicationLoader: Failed to apply letter spacing: {e}")
+
+    ## endregion
+
+    ## region: Boot Sequence
 
     def start_boot_sequence(self):
         """Starts the progress timer."""
@@ -264,6 +299,7 @@ class ApplicationLoader(QDialog):
         """Shows the stage text, then runs the stage. A failed stage is logged and skipped."""
         self.status_text = stage_text
         self._update_status_label()
+        ## repaint() draws right away, so the stage text shows before the stage runs.
         self.repaint()
         try:
             print(f"[INFO] ApplicationLoader: {stage_text.title()}...")
@@ -271,6 +307,10 @@ class ApplicationLoader(QDialog):
         except Exception as e:
             print(f"[ERROR] ApplicationLoader: Stage '{stage_text.title()}' failed: {e}")
             self.stage_failed = True
+
+    ## endregion
+
+    ## region: Startup Stages
 
     def _stage_check_assets(self):
         """Checks the files the main window needs are on disk."""
@@ -293,6 +333,7 @@ class ApplicationLoader(QDialog):
 
     def _stage_load_fonts(self):
         """Checks the Inter font is installed (DejaVu Sans is used if it is not)."""
+        ## List of every font family installed on this computer.
         families = QFontDatabase.families()
         if "Inter" in families:
             print("[SUCCESS] ApplicationLoader: Inter font found.")
@@ -307,9 +348,14 @@ class ApplicationLoader(QDialog):
         self.main_window = self.build_main_window()
         print("[SUCCESS] ApplicationLoader: MainCockpit built.")
 
+    ## endregion
+
+    ## region: Status Line
+
     def _update_status_label(self):
         """Writes the status line, e.g. 'CHECKING ASSETS... 12%'."""
         try:
+            ## Shared bar: progress value, title text and colour state.
             if self.transfer_bar is not None:
                 self.transfer_bar.set_progress(self.current_progress)
                 if self.current_progress < 100:
@@ -322,6 +368,7 @@ class ApplicationLoader(QDialog):
                     self.transfer_bar.set_title("ALL MODULES ONLINE")
                     self.transfer_bar.set_state("complete")
                 return
+            ## Plain fallback bar and its status text.
             self.progress_bar.setValue(self.current_progress)
             if self.current_progress < 100:
                 self.lbl_status.setText(f"{self.status_text}... {self.current_progress}%")
@@ -329,6 +376,10 @@ class ApplicationLoader(QDialog):
                 self.lbl_status.setText("ALL MODULES ONLINE")
         except Exception as e:
             print(f"[ERROR] ApplicationLoader: Failed to update status line: {e}")
+
+    ## endregion
+
+    ## region: Painting
 
     def paintEvent(self, event):
         """Paints the plating background, circuit pulse, badge and glass panel."""
@@ -363,10 +414,12 @@ class ApplicationLoader(QDialog):
 
     def _paint_circuits(self, painter):
         """Dark circuit lines with a moving cyan pulse."""
+        ## Dark base lines first, then a soft glow pen and a bright core pen for the pulse.
         painter.setPen(QPen(QColor("#11293a"), 1.5, Qt.PenStyle.SolidLine))
         for path in self.circuit_paths:
             painter.drawPath(path)
 
+        ## Dash pattern [30, 150]: 30 px of light, then a 150 px gap. The offset slides the dash along the line.
         pulse_glow_pen = QPen(QColor(51, 214, 255, 40), 5.0)
         pulse_glow_pen.setDashPattern([30, 150]); pulse_glow_pen.setDashOffset(self.pulse_offset)
         pulse_core_pen = QPen(QColor("#33d6ff"), 1.8)
@@ -386,6 +439,7 @@ class ApplicationLoader(QDialog):
             badge_pixmap = self.badge_player.current_pixmap
         if badge_pixmap.isNull():
             return
+        ## Badge is drawn 380 px square, centred left to right, 48 px from the top.
         target_size = 380.0
         target_x = (LOADER_WIDTH - target_size) / 2
         target_y = 48.0
@@ -399,6 +453,7 @@ class ApplicationLoader(QDialog):
         painter.setBrush(QColor(8, 20, 34, 205))
         painter.drawRoundedRect(panel_rect, 10, 10)
 
+        ## Numbered circles at each milestone. They turn cyan once the bar has passed them.
         bar_x = 120.0
         bar_width = 760.0
         marker_font = QFont(CORE_FONT_FAMILIES[0], 8, QFont.Weight.DemiBold)
@@ -412,6 +467,10 @@ class ApplicationLoader(QDialog):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawEllipse(QRectF(marker_x - 7, 618, 14, 14))
             painter.drawText(QRectF(marker_x - 7, 618, 14, 14), Qt.AlignmentFlag.AlignCenter, str(marker_number))
+
+    ## endregion
+
+    ## region: Shutdown
 
     def done(self, result):
         """Stops the badge animation when the loading screen finishes."""
@@ -434,3 +493,7 @@ class ApplicationLoader(QDialog):
             print(f"[ERROR] ApplicationLoader: Failed to stop boot timer: {e}")
         print("[INFO] ApplicationLoader: Loading screen closed.")
         event.accept()
+
+    ## endregion
+
+## endregion

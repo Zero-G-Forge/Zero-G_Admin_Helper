@@ -4,14 +4,25 @@
 ##              Drawn with QPainter so no image files or pip packages are needed.
 ## =====================================================================
 
+## region: Imports
+
 from PyQt6.QtCore import Qt, QPointF, QRectF
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
+
+## endregion
+
+## region: Icon Settings
 
 ## Nav icon colours: idle grey-blue, selected cyan
 NAV_ICON_IDLE = "#8fa6b8"
 NAV_ICON_ACTIVE = "#33d6ff"
+## Icons are drawn on a 64 x 64 canvas, then shrunk to fit the button.
 ICON_SIZE = 64
 
+## endregion
+
+
+## region: Drawing Helpers
 
 def _make_pen(color, width=5.0):
     """Builds a round-capped pen used by every drawn icon."""
@@ -21,6 +32,10 @@ def _make_pen(color, width=5.0):
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     return pen
 
+## endregion
+
+
+## region: Page Icon Drawings
 
 def _draw_dashboard(painter, color):
     ## Four tiles in a grid
@@ -135,6 +150,10 @@ def _draw_zerogbridge(painter, color):
     painter.drawEllipse(QRectF(4, 40, 14, 14))
     painter.drawEllipse(QRectF(46, 40, 14, 14))
 
+## endregion
+
+
+## region: Icon Lookup Table
 
 ## Page key -> drawing function
 ICON_DRAWERS = {
@@ -150,10 +169,15 @@ ICON_DRAWERS = {
     "zerogbridge": _draw_zerogbridge,
 }
 
+## endregion
+
+
+## region: Public Builders
 
 def _draw_icon_pixmap(page_key, color):
     """Draws one icon onto a transparent pixmap."""
     pixmap = QPixmap(ICON_SIZE, ICON_SIZE)
+    ## Transparent background, so only the drawn shape shows.
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     try:
@@ -161,6 +185,7 @@ def _draw_icon_pixmap(page_key, color):
         drawer = ICON_DRAWERS.get(page_key)
         if drawer is not None:
             drawer(painter, color)
+    ## finally: always runs, so the painter is closed even if drawing fails.
     finally:
         painter.end()
     return pixmap
@@ -173,6 +198,7 @@ def build_nav_icon(page_key):
     """
     try:
         icon = QIcon()
+        ## Grey picture for the normal state, cyan for the selected (checked) state.
         icon.addPixmap(_draw_icon_pixmap(page_key, NAV_ICON_IDLE), QIcon.Mode.Normal, QIcon.State.Off)
         icon.addPixmap(_draw_icon_pixmap(page_key, NAV_ICON_ACTIVE), QIcon.Mode.Normal, QIcon.State.On)
         icon.addPixmap(_draw_icon_pixmap(page_key, NAV_ICON_ACTIVE), QIcon.Mode.Active, QIcon.State.On)
@@ -188,6 +214,7 @@ def build_logo_pixmap(size=44):
     Returns an empty QPixmap if drawing fails.
     """
     try:
+        ## Drawn 4 times larger, then scaled down, so the curved edges come out smooth.
         scale = 4
         full = size * scale
         pixmap = QPixmap(full, full)
@@ -226,3 +253,5 @@ def build_logo_pixmap(size=44):
     except Exception as e:
         print(f"[ERROR] NavIcons: Failed to draw header logo: {e}")
         return QPixmap()
+
+## endregion

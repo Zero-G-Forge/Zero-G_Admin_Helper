@@ -1,4 +1,10 @@
+## =====================================================================
 ## ZAH.py
+## DESCRIPTION: Program entry point. Applies the main stylesheet, shows the
+##              loading screen, then opens the MainCockpit window.
+## =====================================================================
+
+## region: Imports
 
 import os
 import sys
@@ -6,6 +12,13 @@ from PyQt6.QtWidgets import QApplication, QDialog
 from PyQt6.QtGui import QIcon
 
 from features.paths import asset_path
+
+## endregion
+
+## region: Feature Modules
+
+## Each feature import is guarded by try/except, so a missing module is logged
+## instead of stopping the program.
 
 ## Load the main window shell. Later steps will add the loader, login, and bridge.
 try:
@@ -23,6 +36,10 @@ except ImportError as e:
     print(f"[ERROR] Could not load ApplicationLoader: {e}")
     ApplicationLoader = None
 
+## endregion
+
+
+## region: Entry Point
 
 def main():
     """
@@ -32,6 +49,7 @@ def main():
     """
     print("[DEBUG] Initializing Zero-G Admin Helper (PyQt6 Mode)...")
 
+    ## QApplication is the engine behind every window. It must exist before any widget is built.
     try:
         app = QApplication(sys.argv)
     except Exception as e:
@@ -47,6 +65,7 @@ def main():
     else:
         print(f"[WARNING] Application icon missing at: {icon_path}")
 
+    ## Apply the main stylesheet (colours, fonts, borders) to every window in the program.
     css_path = asset_path("ZAH_main.css")
     if os.path.exists(css_path):
         try:
@@ -59,6 +78,7 @@ def main():
     else:
         print(f"[WARNING] Local asset missing at: {css_path}. Using default system styles.")
 
+    ## Without the main window class there is nothing to open, so the program stops here.
     if MainCockpit is None:
         print("[ERROR] MainCockpit not found. Halting.")
         sys.exit(1)
@@ -99,6 +119,13 @@ def main():
         print(f"[ERROR] Failed to launch MainCockpit: {e}")
         sys.exit(1)
 
+## endregion
 
+
+## region: Script Start
+
+## Runs main() only when this file is started directly (not when it is imported).
 if __name__ == "__main__":
     main()
+
+## endregion

@@ -3,6 +3,8 @@
 ## DESCRIPTION: Core Main Cockpit Window Shell (Pure Layout & CSS Core)
 ## =====================================================================
 
+## region: Imports
+
 import os
 import sys
 from features.paths import asset_path
@@ -13,6 +15,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QTime, QSize
 from PyQt6.QtGui import QPainter, QPixmap, QFont
 
+## endregion
+
+## region: Optional Modules
+
+## Guarded import: if nav_icons is missing, the window still opens without icons.
 try:
     from features.dashboard.nav_icons import build_nav_icon, build_logo_pixmap
 except ImportError as e:
@@ -20,6 +27,18 @@ except ImportError as e:
     build_nav_icon = None
     build_logo_pixmap = None
 
+try:
+    from features.shared.page_loader import load_page
+    from features.shared.error_card import ErrorCard
+except ImportError as e:
+    print(f"[ERROR] MainCockpit: Could not load page_loader: {e}")
+    load_page = None
+    ErrorCard = None
+
+## endregion
+
+
+## region: Constants
 
 ## Nav pages in the mockup order: (page key, button text)
 NAV_PAGES = [
@@ -38,12 +57,18 @@ NAV_PAGES = [
 ## Font used by every label (Inter on Zorin, DejaVu Sans as a fallback)
 CORE_FONT_FAMILIES = ["Inter", "DejaVu Sans"]
 
+## endregion
+
+
+## region: MainCockpit Class
 
 class MainCockpit(QMainWindow):
     """
     Core Main Administration Cockpit Dashboard Shell.
     Maintains clean layout scaffolding and centralized CSS lookups.
     """
+
+    ## region: Window Setup
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -65,6 +90,7 @@ class MainCockpit(QMainWindow):
             self.central_widget.setObjectName("CentralWidgetCanvas")
             self.setCentralWidget(self.central_widget)
 
+            ## Empty picture until _load_background() reads the hexgrid image.
             self.background = QPixmap()
             self._load_background()
 
@@ -107,6 +133,10 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to load background: {e}")
 
+    ## endregion
+
+    ## region: Layout Zones
+
     def setup_zones(self):
         """Constructs layout zones across the central dashboard canvas."""
         ## Each zone builds inside its own try/except, so one failure
@@ -143,6 +173,10 @@ class MainCockpit(QMainWindow):
                 self.master_layout.addWidget(self.status_bar)
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to assemble layout zones: {e}")
+
+    ## endregion
+
+    ## region: Header Bar
 
     def setup_header_bar(self):
         """Builds the header: logo, title + subtitle, server status, CTRL+K, clock, admin name."""
@@ -224,6 +258,10 @@ class MainCockpit(QMainWindow):
         divider.setFixedSize(1, 30)
         return divider
 
+    ## endregion
+
+    ## region: Nav Column
+
     def setup_nav_column(self):
         """Builds the left nav column: one checkable button per page, DASHBOARD selected."""
         self.nav_column = None
@@ -236,9 +274,11 @@ class MainCockpit(QMainWindow):
             self.left_column.setContentsMargins(0, 0, 0, 0)
             self.left_column.setSpacing(8)
 
+            ## Exclusive button group: only one nav button can be checked at a time.
             self.nav_button_group = QButtonGroup(self)
             self.nav_button_group.setExclusive(True)
 
+            ## One button per entry in NAV_PAGES. A button that fails to build is skipped.
             for page_key, page_text in NAV_PAGES:
                 btn = self._make_nav_button(page_key, page_text)
                 if btn is None:
@@ -249,6 +289,7 @@ class MainCockpit(QMainWindow):
 
             self.left_column.addStretch()
 
+            ## DASHBOARD starts selected.
             if "dashboard" in self.nav_buttons:
                 self.nav_buttons["dashboard"].setChecked(True)
             print(f"[INFO] MainCockpit: Nav column built with {len(self.nav_buttons)} buttons")
@@ -269,6 +310,8 @@ class MainCockpit(QMainWindow):
             if build_nav_icon is not None:
                 btn.setIcon(build_nav_icon(page_key))
                 btn.setIconSize(QSize(22, 22))
+            ## The lambda passes this button's page key to _on_nav_clicked.
+            ## key=page_key locks in the value for each button inside the loop.
             btn.clicked.connect(lambda checked, key=page_key: self._on_nav_clicked(key))
 
             if page_key == "alerts":
@@ -291,6 +334,10 @@ class MainCockpit(QMainWindow):
             print(f"[ERROR] MainCockpit: Failed to build nav button {page_text}: {e}")
             return None
 
+    ## endregion
+
+    ## region: Content Area
+
     def setup_content_area(self):
         """Builds the content area: one glass panel with the page title and a placeholder."""
         self.content_area = None
@@ -302,6 +349,7 @@ class MainCockpit(QMainWindow):
             self.content_layout.setContentsMargins(0, 0, 0, 0)
             self.content_layout.setSpacing(0)
 
+            ## Glass panel that holds the page title and the page placeholder.
             self.content_panel = QFrame()
             self.content_panel.setObjectName("ContentPanel")
             self.content_panel_layout = QVBoxLayout(self.content_panel)
@@ -324,6 +372,10 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to build content area: {e}")
 
+    ## endregion
+
+    ## region: Status Bar
+
     def setup_status_bar(self):
         """Builds the bottom status bar: 5 evenly spaced fields, '--' until the bridge module exists."""
         self.status_bar = None
@@ -343,6 +395,7 @@ class MainCockpit(QMainWindow):
             self.lbl_players = QLabel("PLAYERS --")
             self.lbl_core_version = QLabel("CORE --")
 
+            ## Same object name and stretch for each field, so they share one style and spread evenly.
             for lbl in (
                 self.lbl_bridge_status, self.lbl_server_cpu, self.lbl_server_ram,
                 self.lbl_players, self.lbl_core_version,
@@ -354,9 +407,14 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to build status bar: {e}")
 
+    ## endregion
+
+    ## region: Header Clock
+
     def setup_clock_timer(self):
         """Starts a 1 second local timer that keeps the header clock (HH:MM) current."""
         try:
+            ## Show the time right away instead of waiting for the first tick.
             self._update_clock()
             self.clock_timer = QTimer(self)
             self.clock_timer.setObjectName("ClockTimer")
@@ -374,8 +432,13 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to update clock: {e}")
 
+    ## endregion
+
+    ## region: Navigation
+
     def _page_title(self, page_key):
         """Returns the button text for a page key, used as the content title."""
+        ## Look the key up in NAV_PAGES. Unknown keys fall back to the key in capitals.
         for key, text in NAV_PAGES:
             if key == page_key:
                 return text
@@ -390,8 +453,52 @@ class MainCockpit(QMainWindow):
             if getattr(self, "lbl_content_header", None) is not None:
                 self.lbl_content_header.setText(self._page_title(page_key))
             print(f"[INFO] MainCockpit: Page selected: {self._page_title(page_key)}")
+            ## Load the clicked page into the content area (or an ErrorCard if it fails).
+            self._show_page(page_key)
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to switch page to {page_key}: {e}")
+
+    ## Swaps the content area to the requested page.
+    ## The old widget comes out, and the new page (or an ErrorCard) goes in.
+    def _show_page(self, page_key):
+        try:
+            ## Input check: without the page loader, the placeholder stays and nothing breaks.
+            if load_page is None:
+                print(f"[ERROR] MainCockpit: page_loader missing, cannot show {page_key}")
+                return
+
+            ## Ask the loader for the page. It always hands back a widget:
+            ## the real page, or an ErrorCard if the page failed.
+            new_widget = load_page(page_key)
+
+            ## Find what is on screen now. The first time, that is the
+            ## "PAGE LOADS HERE" placeholder; after that, the last page shown.
+            old_widget = getattr(self, "current_page_widget", None)
+            if old_widget is None:
+                old_widget = getattr(self, "lbl_content_placeholder", None)
+
+            ## Take the old widget out of the layout, and let Qt delete it
+            ## safely once the current click has finished.
+            if old_widget is not None:
+                self.content_panel_layout.removeWidget(old_widget)
+                old_widget.deleteLater()
+
+            ## Put the new widget in. stretch=1 lets it fill the free space.
+            self.content_panel_layout.addWidget(new_widget, stretch=1)
+            self.current_page_widget = new_widget
+
+            ## If it is an ErrorCard, wire its Retry button back to this method,
+            ## so clicking Retry loads the same page again.
+            if ErrorCard is not None and isinstance(new_widget, ErrorCard):
+                new_widget.retry_requested.connect(self._show_page)
+
+            print(f"[INFO] MainCockpit: Showing page: {page_key}")
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to show page {page_key}: {e}")
+
+    ## endregion
+
+    ## region: Status Updates
 
     def update_server_status(self, server_name, is_connected):
         """
@@ -402,6 +509,7 @@ class MainCockpit(QMainWindow):
             self.lbl_server_name.setText(str(server_name).upper())
             state = "online" if is_connected else "offline"
             self.lbl_server_status_dot.setProperty("state", state)
+            ## unpolish/polish makes Qt re-read the CSS, so the new dot colour shows.
             self.lbl_server_status_dot.style().unpolish(self.lbl_server_status_dot)
             self.lbl_server_status_dot.style().polish(self.lbl_server_status_dot)
         except Exception as e:
@@ -411,10 +519,15 @@ class MainCockpit(QMainWindow):
         """Shows the alert count on the ALERTS & ANTI-CHEAT button; hidden when 0."""
         try:
             count = int(alert_count)
+            ## Counts above 99 show as '99+' to keep the badge small.
             self.lbl_alert_badge.setText(str(count) if count < 100 else "99+")
             self.lbl_alert_badge.setVisible(count > 0)
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to update alert badge: {e}")
+
+    ## endregion
+
+    ## region: Painting & Theme
 
     def paintEvent(self, event):
         """Force background canvas visualization mapping, scaled to cover the window."""
@@ -450,6 +563,7 @@ class MainCockpit(QMainWindow):
         is set here on each label and button font instead.
         """
         try:
+            ## Object name -> extra space between letters, in pixels.
             spacing_by_name = {
                 "AppTitleLabel": 2.0,
                 "AppSubtitleLabel": 1.5,
@@ -462,6 +576,7 @@ class MainCockpit(QMainWindow):
                 "ContentPlaceholderLabel": 2.0,
                 "StatusLabel": 1.5,
             }
+            ## Apply the spacing to every child widget whose name is in the table.
             for widget in self.findChildren(QWidget):
                 spacing = spacing_by_name.get(widget.objectName())
                 if spacing is None:
@@ -472,6 +587,10 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to apply letter spacing: {e}")
 
+    ## endregion
+
+    ## region: Shutdown
+
     def closeEvent(self, event):
         """Logs a clean shutdown when the main window is closed."""
         try:
@@ -481,3 +600,7 @@ class MainCockpit(QMainWindow):
             print(f"[ERROR] MainCockpit: Failed to stop header clock: {e}")
         print("[INFO] MainCockpit: Shutting down main window...")
         event.accept()
+
+    ## endregion
+
+## endregion

@@ -3,6 +3,8 @@
 ## DESCRIPTION: Shared image-layer progress bar (CORE TRANSFER style)
 ## =====================================================================
 
+## region: Imports
+
 import os
 import math
 from features.paths import asset_path
@@ -11,6 +13,10 @@ from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
 from PyQt6.QtGui import (
     QPainter, QPixmap, QColor, QFont, QFontMetricsF, QPen, QPolygonF, QLinearGradient, QPainterPath
 )
+
+## endregion
+
+## region: Pieces & Colours
 
 ## Folder that holds AHB-2's transparent bar pieces
 PROGRESS_BAR_FOLDER = ("additional_assets", "progress_bar")
@@ -30,6 +36,10 @@ FALLBACK_FILL_COLORS = {
     "complete": ("#14b84a", "#6dff9a"),
     "error": ("#b0102a", "#ff4d5e"),
 }
+
+## endregion
+
+## region: Piece Layout
 
 ## Where the fill track sits inside the frame image, as fractions of the frame
 ## (measured from the reference frames: track starts about 4% in from each side,
@@ -75,12 +85,20 @@ PIECE_LAYOUTS = {
     },
 }
 
+## endregion
+
+## region: Timing & Font
+
 ## Motion timer (ms). 40 ms = 25 updates a second, cheap enough for a splash.
 MOTION_TICK_MS = 40
 
 ## Font used by the title and percent (Inter on Zorin, DejaVu Sans as a fallback)
 CORE_FONT_FAMILIES = ["Inter", "DejaVu Sans"]
 
+## endregion
+
+
+## region: ProgressBarWidget Class
 
 class ProgressBarWidget(QWidget):
     """
@@ -94,6 +112,8 @@ class ProgressBarWidget(QWidget):
     bar_size "small" uses progress_bar_<piece>_small.png.
     """
 
+    ## region: Setup
+
     def __init__(self, title_text="", bar_size="main", parent=None):
         super().__init__(parent)
         self.setObjectName("ProgressBarWidget")
@@ -102,13 +122,16 @@ class ProgressBarWidget(QWidget):
         self.title_text = title_text
         self.bar_size = bar_size if bar_size in PIECE_LAYOUTS else "main"
         self.layout_spec = PIECE_LAYOUTS[self.bar_size]
+        ## Current value, colour state and animation counters.
         self.progress_value = 0
         self.bar_state = "normal"
         self.shimmer_offset = 0.0
         self.motion_phase = 0.0
+        ## Loaded images, plus a cache of copies scaled to the current widget size.
         self.pieces = {}
         self.scaled_pieces = {}
         self.scaled_for = None
+        ## Set to True after a paint error, so later paints use the plain bar.
         self.paint_failed = False
 
         try:
@@ -121,6 +144,10 @@ class ProgressBarWidget(QWidget):
         except Exception as e:
             print(f"[ERROR] ProgressBarWidget: Failed to initialize: {e}")
 
+    ## endregion
+
+    ## region: Public Methods
+
     ## ----------------------------------------------------------------
     ## Public methods
     ## ----------------------------------------------------------------
@@ -128,6 +155,7 @@ class ProgressBarWidget(QWidget):
     def set_progress(self, value):
         """Sets the fill from 0 to 100."""
         try:
+            ## Clamp to 0..100 so a bad value cannot draw outside the bar.
             self.progress_value = max(0, min(100, int(value)))
             self.update()
         except Exception as e:
@@ -154,6 +182,7 @@ class ProgressBarWidget(QWidget):
 
     def load_pieces(self):
         """Loads every image piece that exists. Missing pieces are painted instead."""
+        ## Piece names: frame, ring, then one fill and one tag per state.
         piece_names = ["frame", "ring"]
         for state in STATE_COLORS:
             piece_names.append(f"fill_{state}")
@@ -174,6 +203,10 @@ class ProgressBarWidget(QWidget):
             print(f"[SUCCESS] ProgressBarWidget: Loaded all {found} bar pieces ({self.bar_size}).")
         else:
             print(f"[INFO] ProgressBarWidget: {found} of {len(piece_names)} bar pieces found ({self.bar_size}). Painting the rest.")
+
+    ## endregion
+
+    ## region: Layout
 
     ## ----------------------------------------------------------------
     ## Layout
@@ -199,6 +232,7 @@ class ProgressBarWidget(QWidget):
         spec = self.layout_spec
         scale, left, frame_top = self._scale_and_origin()
 
+        ## Converts LAYOUT.md pixel numbers into widget pixels.
         def to_widget(x, y, w, h):
             return QRectF(left + x * scale, frame_top + y * scale, w * scale, h * scale)
 
@@ -206,6 +240,7 @@ class ProgressBarWidget(QWidget):
         frame_rect = to_widget(0, 0, frame_w, frame_h)
         track_rect = to_widget(spec["track_x"], spec["track_y"], spec["track_w"], spec["track_h"])
 
+        ## Fill end (lead edge) position, used by the ring and the tag.
         lead_design_x = spec["track_x"] + spec["track_w"] * self.progress_value / 100.0
         edge_x = left + lead_design_x * scale
 
@@ -237,6 +272,7 @@ class ProgressBarWidget(QWidget):
 
     def _scaled_piece(self, piece, scale):
         """Returns a piece pre-scaled for the current widget size (cached, so it is cheap)."""
+        ## Widget size changed: throw away the old scaled copies.
         if self.scaled_for != (self.width(), self.height()):
             self.scaled_pieces = {}
             self.scaled_for = (self.width(), self.height())
@@ -249,6 +285,10 @@ class ProgressBarWidget(QWidget):
                 Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation,
             )
         return self.scaled_pieces[piece]
+
+    ## endregion
+
+    ## region: Painting
 
     ## ----------------------------------------------------------------
     ## Painting
@@ -280,6 +320,7 @@ class ProgressBarWidget(QWidget):
         finally:
             painter.end()
 
+    ## Returns the accent colour for the current state (normal if unknown).
     def _state_color(self):
         return QColor(STATE_COLORS.get(self.bar_state, STATE_COLORS["normal"]))
 
@@ -301,6 +342,7 @@ class ProgressBarWidget(QWidget):
         if frame_pixmap is not None:
             painter.drawPixmap(frame_rect.topLeft(), frame_pixmap)
             return
+        ## No frame image: paint an outer and an inner cut-corner outline instead.
         painter.setBrush(QColor(5, 13, 24, 170))
         painter.setPen(QPen(QColor(40, 120, 255, 200), 1.5))
         painter.drawPolygon(self._cut_corner_polygon(frame_rect.adjusted(1, 1, -1, -1), frame_rect.height() * 0.28))
@@ -339,6 +381,7 @@ class ProgressBarWidget(QWidget):
             crop_w = min(crop_w, fill_pixmap.width())
             painter.drawPixmap(fill_rect.topLeft(), fill_pixmap, QRectF(0, 0, crop_w, fill_pixmap.height()))
         else:
+            ## No fill image: paint a two-colour gradient up to the fill end.
             left_color, right_color = FALLBACK_FILL_COLORS.get(self.bar_state, FALLBACK_FILL_COLORS["normal"])
             gradient = QLinearGradient(track_rect.left(), 0, track_rect.right(), 0)
             gradient.setColorAt(0.0, QColor(left_color))
@@ -377,6 +420,7 @@ class ProgressBarWidget(QWidget):
             painter.drawPixmap(pulsed, ring_pixmap, QRectF(ring_pixmap.rect()))
             painter.restore()
             return
+        ## No ring image: paint a dashed ellipse whose dashes creep along with the shimmer.
         ring_color = self._state_color()
         pen = QPen(ring_color, 1.6)
         pen.setDashPattern([4, 3])
@@ -406,6 +450,7 @@ class ProgressBarWidget(QWidget):
             painter.setPen(QPen(state_color, 1.6))
             painter.drawPolygon(self._hexagon_polygon(tag_rect.adjusted(2, 4, -2, -4)))
 
+        ## Percent text size follows the tag height.
         font = QFont(CORE_FONT_FAMILIES[0])
         font.setPixelSize(max(9, int(tag_rect.height() * 0.36)))
         font.setWeight(QFont.Weight.DemiBold)
@@ -431,6 +476,10 @@ class ProgressBarWidget(QWidget):
         painter.setPen(QColor("#eef6fb"))
         painter.drawText(QRectF(self.rect()).adjusted(0, 0, 0, -self.height() * 0.6), Qt.AlignmentFlag.AlignCenter, f"{self.title_text}  {self.progress_value}%")
 
+    ## endregion
+
+    ## region: Shape Helpers
+
     @staticmethod
     def _cut_corner_polygon(rect, cut):
         """Eight-point frame with angled corners."""
@@ -444,6 +493,7 @@ class ProgressBarWidget(QWidget):
     @staticmethod
     def _hexagon_polygon(rect):
         """Flat-sided hexagon that fills the tag rect."""
+        ## inset: how far the angled sides cut in from the left and right.
         inset = rect.width() * 0.22
         return QPolygonF([
             QPointF(rect.left() + inset, rect.top()), QPointF(rect.right() - inset, rect.top()),
@@ -451,13 +501,19 @@ class ProgressBarWidget(QWidget):
             QPointF(rect.left() + inset, rect.bottom()), QPointF(rect.left(), rect.center().y()),
         ])
 
+    ## endregion
+
+    ## region: Motion & Visibility
+
     def _on_shimmer_tick(self):
         """Moves the shimmer band, flicker and ring pulse, then repaints."""
         try:
+            ## Shimmer position runs from 0.0 to 1.0, then starts over.
             self.shimmer_offset += 0.03
             if self.shimmer_offset > 1.0:
                 self.shimmer_offset = 0.0
             self.motion_phase += MOTION_TICK_MS / 1000.0
+            ## Repaint only while visible, to save work.
             if self.isVisible():
                 self.update()
         except Exception as e:
@@ -479,3 +535,7 @@ class ProgressBarWidget(QWidget):
         except Exception as e:
             print(f"[ERROR] ProgressBarWidget: Failed to start shimmer: {e}")
         super().showEvent(event)
+
+    ## endregion
+
+## endregion
