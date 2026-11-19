@@ -226,3 +226,51 @@ QProgressBar#LoaderProgressBar::chunk {
 }
 
 /* endregion */
+
+
+
+/* region: Error Card */
+
+/* The card box itself. Same navy glass as the content panel, but with a red
+   border so a failed page stands out. "#ErrorCard" matches setObjectName("ErrorCard"). */
+#ErrorCard {
+    background-color: rgba(34, 8, 16, 205);
+    border: 1px solid rgba(255, 51, 85, 160);
+    border-radius: 8px;
+}
+
+/* The "PAGE FAILED TO LOAD" title: bold red, slightly larger than normal text. */
+#ErrorCardTitle {
+    color: #ff3355;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+/* The error message: the theme's grey-blue so long text stays easy to read. */
+#ErrorCardText {
+    color: #b9cad8;
+    font-size: 13px;
+}
+
+/* The Retry button, in its normal state: a red outline on a dark fill. */
+#ErrorCardRetry {
+    background-color: rgba(60, 14, 24, 200);
+    border: 1px solid #ff3355;
+    border-radius: 4px;
+    color: #ffd6dd;
+    padding: 6px 18px;
+    font-weight: bold;
+}
+
+/* ":hover" applies only while the mouse is over the button: a brighter fill. */
+#ErrorCardRetry:hover {
+    background-color: rgba(255, 51, 85, 90);
+    color: #ffffff;
+}
+
+/* ":pressed" applies while the button is held down: a darker fill as feedback. */
+#ErrorCardRetry:pressed {
+    background-color: rgba(255, 51, 85, 150);
+}
+
+/* endregion */
