@@ -28,6 +28,12 @@ except ImportError as e:
     print(f"[ERROR] ApplicationLoader: Could not load BadgePlayer: {e}")
     BadgePlayer = None
 
+try:
+    from features.login.login_window import LoginWindow
+except ImportError as e:
+    print(f"[ERROR] ApplicationLoader: Could not load LoginWindow: {e}")
+    LoginWindow = None
+
 ## endregion
 
 ## region: Loader Settings
@@ -81,10 +87,15 @@ class ApplicationLoader(QDialog):
         self.badge_player = None
         self.circuit_paths = []
 
+        ## Login state. ZAH.py only opens the main window if login_passed is True.
+        self.login_passed = False
+        self.signed_in_user = None
+
         ## Startup stages: (progress %, status text, stage function)
         self.boot_stages = [
             (5, "CHECKING ASSETS", self._stage_check_assets),
             (25, "PREPARING DATA FOLDER", self._stage_prepare_data),
+            (30, "USER LOGIN CHECK", self._stage_login_gate),
             (45, "LOADING FONTS", self._stage_load_fonts),
             (70, "BUILDING MAIN WINDOW", self._stage_build_main_window),
         ]
@@ -330,6 +341,35 @@ class ApplicationLoader(QDialog):
         """Makes sure data/ exists under the app root."""
         data_dir = ensure_data_dir()
         print(f"[SUCCESS] ApplicationLoader: Data folder ready: {data_dir}")
+
+    
+    def _stage_login_gate(self):
+        """30% gate: pauses the loader and shows the login window. Fails closed."""
+        ## Unlike other stages, this one never "logs and skips": any problem quits ZAH.
+        try:
+            ## The timer is stopped first; otherwise it keeps ticking behind the open login window.
+            self.boot_timer.stop()
+            if LoginWindow is None:
+                print("[ERROR] ApplicationLoader: Login window missing. Stopping for safety.")
+                self.reject()
+                return
+
+            login_window = LoginWindow(self)
+            ## exec() shows the window and waits here until it is accepted or rejected.
+            login_result = login_window.exec()
+
+            if login_result == QDialog.DialogCode.Accepted:
+                self.login_passed = True
+                self.signed_in_user = login_window.signed_in_user
+                print("[SUCCESS] ApplicationLoader: Login verified. Resuming startup...")
+                self.boot_timer.start(BOOT_TICK_MS)
+            else:
+                print("[STATUS] ApplicationLoader: Login cancelled. Shutting down.")
+                self.reject()
+        except Exception as e:
+            print(f"[ERROR] ApplicationLoader: Login gate failed: {e}. Stopping for safety.")
+            self.login_passed = False
+            self.reject()
 
     def _stage_load_fonts(self):
         """Checks the Inter font is installed (DejaVu Sans is used if it is not)."""

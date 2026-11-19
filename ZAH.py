@@ -28,6 +28,13 @@ except ImportError as e:
     print(f"[ERROR] Could not load MainCockpit: {e}")
     MainCockpit = None
 
+try:
+    from features.login.login_window import LoginWindow
+    print("[SUCCESS] Package: LoginWindow Loaded")
+except ImportError as e:
+    print(f"[ERROR] Could not load LoginWindow: {e}")
+    LoginWindow = None
+
 ## Load Screen 1 (The Application Loader Component)
 try:
     from features.loading.loading_screen import ApplicationLoader
@@ -88,6 +95,8 @@ def main():
     ## the error is logged and the main window still opens.
     main_cockpit = None
     loader_result = QDialog.DialogCode.Accepted
+    ## Becomes True only after a real login (at the loader's 30% gate, or the backup below).
+    login_passed = False
     if ApplicationLoader is not None:
         try:
             print("[DEBUG] Instantiating Screen 1: Application Loading Screen...")
@@ -96,6 +105,7 @@ def main():
             loader.start_boot_sequence()
             loader_result = loader.exec()
             main_cockpit = loader.main_window
+            login_passed = loader.login_passed
             loader.deleteLater()
         except Exception as e:
             print(f"[ERROR] Loading screen failed: {e}. Opening MainCockpit anyway.")
@@ -108,6 +118,23 @@ def main():
         print("[STATUS] Initialization halted. Shutting down.")
         sys.exit(0)
 
+    ## LOGIN SAFETY CHECK: the main window never opens without a real login.
+    ## If the loader broke before its 30% gate, the login window is shown on its own here.
+    if not login_passed:
+        try:
+            if LoginWindow is None:
+                print("[ERROR] Login window missing. Stopping for safety.")
+                sys.exit(1)
+            print("[INFO] Login not completed by the loader. Showing login window...")
+            backup_login = LoginWindow()
+            login_passed = backup_login.exec() == QDialog.DialogCode.Accepted
+        except Exception as e:
+            print(f"[ERROR] Backup login failed: {e}. Stopping for safety.")
+            login_passed = False
+        if not login_passed:
+            print("[STATUS] Login not completed. Shutting down.")
+            sys.exit(0)
+            
     ## PHASE 2: Dashboard Handoff
     try:
         if main_cockpit is None:

@@ -1,43 +1,50 @@
-cat <<EOF > .gitignore
-# Exclude Python virtual environment
-.venv/
+# =====================================================================
+# Zero-G Admin Helper (ZAH) - the one ignore file for this repo
+# Applies to the whole repo, including ZAH_Legacy/.
+# =====================================================================
 
-# Exclude compiled bytecode
+# region: Python
+.venv/
 __pycache__/
 *.py[cod]
+# endregion
 
-# Exclude IDE folders
+# region: Editors
 .vscode/
 .vs/
+# endregion
 
-# Exclude local runtime data
+# region: Local data and secrets (never pushed)
+# data/ holds server_config.json (bridge token) and owner_login.json (owner password hash).
 data/
+data/server_config.json
+data/owner_login.json
+git_token.txt
+# Every .json is local by default; the exceptions below are tracked on purpose.
 *.json
 !ZeroGBridge/ZeroGBridge.json
+!.instructions/Examples/**/*.json
+# endregion
 
-# Allow Python files inside the data directory
-!data/*.py
-
-# Exclude Token Data
-git_token.txt
-
-# Exclude scratchpad
+# region: Scratch and AI notes
 *.scratchpad/
-
-# Exclude AI Instructional Files
 AI_INSTRUCTIONS.md
-!.instruction/
-!.instruction/README.md
+# endregion
 
-# ==========================================
-# C# / ZeroGBridge Build & Runtime Exclusions
-# ==========================================
+# region: ZeroGBridge (C#) build files
+# bin/ is tracked on purpose (built mod files); obj/ and user files are not.
 !ZeroGBridge/bin/
 ZeroGBridge/obj/
+ZeroGBridge/CoreProject/obj/
 *.user
 *.suo
 *.csproj.user
-EOF
+# endregion
 
-# ZGB Portal example data (tracked)
-!.instructions/Examples/**/*.json
+# region: Legacy ZAH (kept from the original ignore file)
+# Original rules for the legacy program; most are now covered by the sections above.
+!data/*.py
+!.instruction/
+!.instruction/README.md
+ZAH_Legacy/.zah_restart.log
+# endregion
