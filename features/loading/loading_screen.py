@@ -90,6 +90,7 @@ class ApplicationLoader(QDialog):
         ## Login state. ZAH.py only opens the main window if login_passed is True.
         self.login_passed = False
         self.signed_in_user = None
+        self.signed_in_role = None
 
         ## Startup stages: (progress %, status text, stage function)
         self.boot_stages = [
@@ -361,6 +362,7 @@ class ApplicationLoader(QDialog):
             if login_result == QDialog.DialogCode.Accepted:
                 self.login_passed = True
                 self.signed_in_user = login_window.signed_in_user
+                self.signed_in_role = login_window.signed_in_role
                 print("[SUCCESS] ApplicationLoader: Login verified. Resuming startup...")
                 self.boot_timer.start(BOOT_TICK_MS)
             else:

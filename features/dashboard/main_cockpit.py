@@ -259,7 +259,8 @@ class MainCockpit(QMainWindow):
             self.header_layout.addWidget(self.lbl_clock)
             self.header_layout.addWidget(self._make_header_divider())
 
-            self.lbl_admin_name = QLabel("ADMIN: RAY")
+            ## Starts blank; set_signed_in_user() fills in the real name after login.
+            self.lbl_admin_name = QLabel("USER: --")
             self.lbl_admin_name.setObjectName("AdminNameLabel")
             self.header_layout.addWidget(self.lbl_admin_name)
             print("[INFO] MainCockpit: Header bar built")
@@ -273,6 +274,18 @@ class MainCockpit(QMainWindow):
         divider.setFixedSize(1, 30)
         return divider
 
+    ## endregion
+
+    ## region: Signed-In User
+    def set_signed_in_user(self, username, role):
+        ## Shows who is signed in, e.g. "ADMIN: PARTICLEWAVE" or "OWNER: RAY".
+        try:
+            shown_role = str(role or "user").upper()
+            shown_name = str(username or "--").upper()
+            self.lbl_admin_name.setText(f"{shown_role}: {shown_name}")
+            print(f"[INFO] MainCockpit: Signed-in user shown as {shown_role}: {shown_name}")
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Could not show signed-in user: {e}")
     ## endregion
 
     ## region: Nav Column
