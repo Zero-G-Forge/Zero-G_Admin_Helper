@@ -7,10 +7,11 @@
 ## region: Imports
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout
+    QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout, QApplication
 )
 from PyQt6.QtCore import Qt
 from features.login.owner_login import check_owner_login
+from features.login.online_login import check_online_login
 
 ## endregion
 
@@ -33,7 +34,9 @@ class LoginWindow(QDialog):
         self.setFixedSize(380, 240)
         self.failed_attempts = 0
         ## The signed-in username is kept here so later steps can show it.
-        self.signed_in_user = None
+        ## Role and session token from the online service; the owner login leaves these as owner / None.
+        self.signed_in_role = None
+        self.session_token = None
         self.setup_widgets()
 
     def setup_widgets(self):
@@ -88,14 +91,36 @@ class LoginWindow(QDialog):
                 self.lbl_message.setText("Enter a username and password")
                 return
 
+            ## Step 1: the offline owner login is checked first, so Ray can sign in with no internet.
             if check_owner_login(username, password_text):
-                print(f"[SUCCESS] LoginWindow: Signed in as {username}")
+                print(f"[SUCCESS] LoginWindow: Signed in as {username} (owner, offline)")
                 self.signed_in_user = username
+                self.signed_in_role = "owner"
                 ## accept() closes the dialog with a "yes" result.
                 self.accept()
                 return
 
+            ## Step 2: everyone else is checked by the online login service.
+            self.lbl_message.setText("Checking login...")
+            ## processEvents() lets the label redraw before the network call waits.
+            QApplication.processEvents()
+            login_result, login_details = check_online_login(username, password_text)
+
+            if login_result == "ok" and login_details is not None:
+                self.signed_in_user = username
+                self.signed_in_role = login_details["role"]
+                self.session_token = login_details["token"]
+                print(f"[SUCCESS] LoginWindow: Signed in as {username} ({self.signed_in_role}, online)")
+                self.accept()
+                return
+
+            if login_result == "offline":
+                ## A dead service is not the user's fault, so it does not count as a wrong try.
+                self.input_password.clear()
+                self.lbl_message.setText("Login service unreachable, try again")
+                return
             self.failed_attempts += 1
+            
             ## The password box is cleared after every wrong try; the password is never logged.
             self.input_password.clear()
             print(f"[WARNING] LoginWindow: Failed login {self.failed_attempts}/{MAX_LOGIN_ATTEMPTS}")
