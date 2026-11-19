@@ -35,6 +35,14 @@ except ImportError as e:
     load_page = None
     ErrorCard = None
 
+
+## Guarded import: if the bridge module is missing, the window still opens, just OFFLINE.
+try:
+    from features.bridge.command_pipe import CommandPipe
+except ImportError as e:
+    print(f"[ERROR] MainCockpit: Could not load command_pipe: {e}")
+    CommandPipe = None
+
 ## endregion
 
 
@@ -56,6 +64,10 @@ NAV_PAGES = [
 
 ## Font used by every label (Inter on Zorin, DejaVu Sans as a fallback)
 CORE_FONT_FAMILIES = ["Inter", "DejaVu Sans"]
+
+## Master switch for the live bridge. False = ZAH never connects (safe for development).
+## Only Ray flips this to True, when he wants ZAH to log in to the real server.
+BRIDGE_AUTO_CONNECT = False
 
 ## endregion
 
@@ -112,6 +124,9 @@ class MainCockpit(QMainWindow):
 
             ## 6. Live header clock (local time only, no server contact)
             self.setup_clock_timer()
+
+            ## 7. Bridge connection (background thread; only starts if the switch is on)
+            self.setup_bridge()
 
             print("[SUCCESS] Main Cockpit Dashboard structure initialized.")
         except Exception as e:
@@ -510,8 +525,11 @@ class MainCockpit(QMainWindow):
             state = "online" if is_connected else "offline"
             self.lbl_server_status_dot.setProperty("state", state)
             ## unpolish/polish makes Qt re-read the CSS, so the new dot colour shows.
-            self.lbl_server_status_dot.style().unpolish(self.lbl_server_status_dot)
-            self.lbl_server_status_dot.style().polish(self.lbl_server_status_dot)
+            ## style() can return None in rare cases, so it is saved and checked before use.
+            dot_style = self.lbl_server_status_dot.style()
+            if dot_style is not None:
+                dot_style.unpolish(self.lbl_server_status_dot)
+                dot_style.polish(self.lbl_server_status_dot)
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to update server status: {e}")
 
@@ -524,6 +542,37 @@ class MainCockpit(QMainWindow):
             self.lbl_alert_badge.setVisible(count > 0)
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to update alert badge: {e}")
+
+    ## endregion
+
+        ## region: Bridge Connection
+
+    def setup_bridge(self):
+        """Creates the CommandPipe and links its signals to the header. Starts it only if allowed."""
+        self.command_pipe = None
+        try:
+            if CommandPipe is None:
+                self.update_server_status("OFFLINE", False)
+                return
+            if not BRIDGE_AUTO_CONNECT:
+                print("[INFO] MainCockpit: Bridge auto-connect is off, staying OFFLINE")
+                self.update_server_status("OFFLINE", False)
+                return
+
+            self.command_pipe = CommandPipe(parent=self)
+            ## connect() links a signal to a method. Qt delivers it on the window thread,
+            ## so update_server_status can safely change the header widgets.
+            self.command_pipe.connection_changed.connect(self.update_server_status)
+            self.command_pipe.reply_received.connect(self._on_bridge_reply)
+            ## start() launches the thread, and Qt then calls CommandPipe.run() in the background.
+            self.command_pipe.start()
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to set up bridge connection: {e}")
+            self.update_server_status("OFFLINE", False)
+
+    def _on_bridge_reply(self, command_str, reply_text):
+        """Receives each bridge reply. Pages will use these later; for now it only logs."""
+        print(f"[INFO] MainCockpit: Reply received for {command_str.split(':')[0]}")
 
     ## endregion
 
@@ -598,6 +647,15 @@ class MainCockpit(QMainWindow):
                 self.clock_timer.stop()
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to stop header clock: {e}")
+
+        try:
+            ## Saved to a local name and checked, so Pylance (and Python) know it exists.
+            command_pipe = getattr(self, "command_pipe", None)
+            if command_pipe is not None:
+                command_pipe.stop()
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to stop bridge connection: {e}")
+
         print("[INFO] MainCockpit: Shutting down main window...")
         event.accept()
 
