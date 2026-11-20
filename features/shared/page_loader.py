@@ -31,6 +31,7 @@ PAGE_MODULES = {
     "scheduler": "features.scheduler.scheduler_page",
     "bans_audit": "features.bans_audit.bans_audit_page",
     "zerogbridge": "features.zerogbridge.zerogbridge_page",
+    "settings": "features.settings.settings_page",
 }
 
 ## endregion

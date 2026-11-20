@@ -43,6 +43,13 @@ except ImportError as e:
     print(f"[ERROR] MainCockpit: Could not load command_pipe: {e}")
     CommandPipe = None
 
+## Guarded import: if app_settings is missing, auto-connect stays off.
+try:
+    from features.settings.app_settings import load_app_settings
+except ImportError as e:
+    print(f"[ERROR] MainCockpit: Could not load app_settings: {e}")
+    load_app_settings = None
+
 ## endregion
 
 
@@ -60,14 +67,11 @@ NAV_PAGES = [
     ("scheduler", "SCHEDULER"),
     ("bans_audit", "BANS & AUDIT"),
     ("zerogbridge", "ZEROGBRIDGE"),
+    ("settings", "SETTINGS"),
 ]
 
 ## Font used by every label (Inter on Zorin, DejaVu Sans as a fallback)
 CORE_FONT_FAMILIES = ["Inter", "DejaVu Sans"]
-
-## Master switch for the live bridge. False = ZAH never connects (safe for development).
-## Only Ray flips this to True, when he wants ZAH to log in to the real server.
-BRIDGE_AUTO_CONNECT = False
 
 ## endregion
 
@@ -567,7 +571,9 @@ class MainCockpit(QMainWindow):
             if CommandPipe is None:
                 self.update_server_status("OFFLINE", False)
                 return
-            if not BRIDGE_AUTO_CONNECT:
+            ## The saved setting decides. If settings can't load, it stays off (fail closed).
+            auto_connect = load_app_settings()["bridge_auto_connect"] if load_app_settings else False
+            if not auto_connect:
                 print("[INFO] MainCockpit: Bridge auto-connect is off, staying OFFLINE")
                 self.update_server_status("OFFLINE", False)
                 return

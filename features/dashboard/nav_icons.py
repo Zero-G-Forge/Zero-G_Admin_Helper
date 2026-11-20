@@ -150,6 +150,16 @@ def _draw_zerogbridge(painter, color):
     painter.drawEllipse(QRectF(4, 40, 14, 14))
     painter.drawEllipse(QRectF(46, 40, 14, 14))
 
+def _draw_settings(painter, color):
+    ## Gear: eight teeth around a ring, with a hole in the middle
+    painter.setPen(_make_pen(color, 7))
+    for x1, y1, x2, y2 in ((32, 5, 32, 13), (32, 51, 32, 59), (5, 32, 13, 32), (51, 32, 59, 32),
+                           (13, 13, 19, 19), (45, 45, 51, 51), (51, 13, 45, 19), (13, 51, 19, 45)):
+        painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+    painter.setPen(_make_pen(color, 6))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(16, 16, 32, 32))
+
 ## endregion
 
 
@@ -167,6 +177,7 @@ ICON_DRAWERS = {
     "scheduler": _draw_scheduler,
     "bans_audit": _draw_bans_audit,
     "zerogbridge": _draw_zerogbridge,
+    "settings": _draw_settings,
 }
 
 ## endregion
