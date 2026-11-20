@@ -4,7 +4,7 @@
 ## typed password against a saved hash. The real password is never stored.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 ## hashlib.scrypt is Python's built-in slow password hash; secrets makes random salt;
 ## hmac.compare_digest compares safely (same time whether it matches early or late).
@@ -12,10 +12,10 @@ import hashlib
 import hmac
 import secrets
 
-## endregion
+# endregion
 
 
-## region: Constants
+# region Constants
 
 ## scrypt cost settings. Higher N = slower to guess. These are common safe values.
 SCRYPT_N = 2 ** 14
@@ -24,10 +24,10 @@ SCRYPT_P = 1
 ## Salt = random bytes mixed in, so two identical passwords never give the same hash.
 SALT_BYTES = 16
 
-## endregion
+# endregion
 
 
-## region: Hashing Helpers
+# region Hashing Helpers
 
 ## Returns (salt_hex, hash_hex) for a new password. Both are plain text, safe to save to a file.
 def hash_password(password_text):
@@ -61,4 +61,4 @@ def check_password(password_text, salt_hex, hash_hex):
         print(f"[ERROR] PasswordHashing: Could not check password: {e}")
         return False
 
-## endregion
+# endregion

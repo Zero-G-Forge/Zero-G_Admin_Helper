@@ -4,21 +4,21 @@
 ## Has a title, the error text, and a Retry button.
 ## ==========================================
 
-## region: Imports
+# region Imports
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QFrame, QLabel, QPushButton, QVBoxLayout
 
-## endregion
+# endregion
 
 
-## region: ErrorCard Class
+# region ErrorCard Class
 
 class ErrorCard(QFrame):
     ## Fires when Retry is clicked, sends the page name along
     retry_requested = pyqtSignal(str)
 
-    ## region: Setup
+    # region Setup
 
     def __init__(self, page_name, error_text, parent=None):
         super().__init__(parent)
@@ -56,15 +56,15 @@ class ErrorCard(QFrame):
         layout.addWidget(self.btn_retry, alignment=Qt.AlignmentFlag.AlignLeft)
         layout.addStretch()
 
-    ## endregion
+    # endregion
 
-    ## region: Click Handlers
+    # region Click Handlers
 
     def _on_retry_clicked(self):
         print(f"[INFO] ErrorCard: Retry clicked for {self.page_name}")
         ## Announce the retry so the page loader can try this page again.
         self.retry_requested.emit(self.page_name)
 
-    ## endregion
+    # endregion
 
-## endregion
+# endregion

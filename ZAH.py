@@ -4,7 +4,7 @@
 ##              loading screen, then opens the MainCockpit window.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 import os
 import sys
@@ -13,9 +13,9 @@ from PyQt6.QtGui import QIcon
 
 from features.paths import asset_path
 
-## endregion
+# endregion
 
-## region: Feature Modules
+# region Feature Modules
 
 ## Each feature import is guarded by try/except, so a missing module is logged
 ## instead of stopping the program.
@@ -43,10 +43,10 @@ except ImportError as e:
     print(f"[ERROR] Could not load ApplicationLoader: {e}")
     ApplicationLoader = None
 
-## endregion
+# endregion
 
 
-## region: Entry Point
+# region Entry Point
 
 def main():
     """
@@ -154,13 +154,13 @@ def main():
         print(f"[ERROR] Failed to launch MainCockpit: {e}")
         sys.exit(1)
 
-## endregion
+# endregion
 
 
-## region: Script Start
+# region Script Start
 
 ## Runs main() only when this file is started directly (not when it is imported).
 if __name__ == "__main__":
     main()
 
-## endregion
+# endregion

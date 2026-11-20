@@ -4,17 +4,17 @@
 ## The auth token (input_pass) is used for the bridge login and is never printed.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 ## json reads the settings file; data_path builds a safe path into the data/ folder
 ## on both Linux and Windows.
 import json
 from features.paths import data_path
 
-## endregion
+# endregion
 
 
-## region: Constants
+# region Constants
 
 ## The settings file name inside data/. Kept out of git by .gitignore.
 SERVER_CONFIG_FILE = "server_config.json"
@@ -22,11 +22,11 @@ SERVER_CONFIG_FILE = "server_config.json"
 ## ZeroGBridge listens on this port unless a profile stores a different bridge_port.
 DEFAULT_BRIDGE_PORT = "30500"
 
-## endregion
+# endregion
 
 
 
-## region: Profile Loading
+# region Profile Loading
 
 ## Reads data/server_config.json and returns the chosen server as a dictionary,
 ## or None if the file is missing, unreadable, or has no servers saved.
@@ -71,4 +71,4 @@ def get_active_profile():
         print(f"[ERROR] ServerSettings: Could not read {SERVER_CONFIG_FILE}: {e}")
         return None
 
-## endregion
+# endregion

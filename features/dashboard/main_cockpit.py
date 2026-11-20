@@ -3,7 +3,7 @@
 ## DESCRIPTION: Core Main Cockpit Window Shell (Pure Layout & CSS Core)
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 import os
 import sys
@@ -15,9 +15,9 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QTimer, QTime, QSize
 from PyQt6.QtGui import QPainter, QPixmap, QFont
 
-## endregion
+# endregion
 
-## region: Optional Modules
+# region Optional Modules
 
 ## Guarded import: if nav_icons is missing, the window still opens without icons.
 try:
@@ -50,10 +50,19 @@ except ImportError as e:
     print(f"[ERROR] MainCockpit: Could not load app_settings: {e}")
     load_app_settings = None
 
-## endregion
+    load_app_settings = None
+
+## Guarded import: if clickable_label is missing, the bridge field is a plain label (not clickable).
+try:
+    from features.shared.clickable_label import ClickableLabel
+except ImportError as e:
+    print(f"[ERROR] MainCockpit: Could not load clickable_label: {e}")
+    ClickableLabel = None
+
+# endregion
 
 
-## region: Constants
+# region Constants
 
 ## Nav pages in the mockup order: (page key, button text)
 NAV_PAGES = [
@@ -73,10 +82,10 @@ NAV_PAGES = [
 ## Font used by every label (Inter on Zorin, DejaVu Sans as a fallback)
 CORE_FONT_FAMILIES = ["Inter", "DejaVu Sans"]
 
-## endregion
+# endregion
 
 
-## region: MainCockpit Class
+# region MainCockpit Class
 
 class MainCockpit(QMainWindow):
     """
@@ -84,7 +93,7 @@ class MainCockpit(QMainWindow):
     Maintains clean layout scaffolding and centralized CSS lookups.
     """
 
-    ## region: Window Setup
+    # region Window Setup
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -152,9 +161,9 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to load background: {e}")
 
-    ## endregion
+    # endregion
 
-    ## region: Layout Zones
+    # region Layout Zones
 
     def setup_zones(self):
         """Constructs layout zones across the central dashboard canvas."""
@@ -193,9 +202,9 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to assemble layout zones: {e}")
 
-    ## endregion
+    # endregion
 
-    ## region: Header Bar
+    # region Header Bar
 
     def setup_header_bar(self):
         """Builds the header: logo, title + subtitle, server status, CTRL+K, clock, admin name."""
@@ -278,9 +287,9 @@ class MainCockpit(QMainWindow):
         divider.setFixedSize(1, 30)
         return divider
 
-    ## endregion
+    # endregion
 
-    ## region: Signed-In User
+    # region Signed-In User
     def set_signed_in_user(self, username, role):
         ## Shows who is signed in, e.g. "ADMIN: PARTICLEWAVE" or "OWNER: RAY".
         try:
@@ -290,9 +299,9 @@ class MainCockpit(QMainWindow):
             print(f"[INFO] MainCockpit: Signed-in user shown as {shown_role}: {shown_name}")
         except Exception as e:
             print(f"[ERROR] MainCockpit: Could not show signed-in user: {e}")
-    ## endregion
+    # endregion
 
-    ## region: Nav Column
+    # region Nav Column
 
     def setup_nav_column(self):
         """Builds the left nav column: one checkable button per page, DASHBOARD selected."""
@@ -366,9 +375,9 @@ class MainCockpit(QMainWindow):
             print(f"[ERROR] MainCockpit: Failed to build nav button {page_text}: {e}")
             return None
 
-    ## endregion
+    # endregion
 
-    ## region: Content Area
+    # region Content Area
 
     def setup_content_area(self):
         """Builds the content area: one glass panel with the page title and a placeholder."""
@@ -404,9 +413,9 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to build content area: {e}")
 
-    ## endregion
+    # endregion
 
-    ## region: Status Bar
+    # region Status Bar
 
     def setup_status_bar(self):
         """Builds the bottom status bar: 5 evenly spaced fields, '--' until the bridge module exists."""
@@ -420,7 +429,16 @@ class MainCockpit(QMainWindow):
             self.status_layout.setContentsMargins(16, 4, 16, 4)
             self.status_layout.setSpacing(0)
 
-            self.lbl_bridge_status = QLabel("ZEROGBRIDGE DISCONNECTED")
+            ## The bridge field is clickable when ClickableLabel loaded; otherwise a plain QLabel.
+            if ClickableLabel is not None:
+                self.lbl_bridge_status = ClickableLabel("ZEROGBRIDGE DISCONNECTED")
+                ## A click opens the ZeroGBridge page, same as its nav button.
+                self.lbl_bridge_status.clicked.connect(self._on_bridge_status_clicked)
+                self.lbl_bridge_status.setToolTip("Open ZeroGBridge")
+            else:
+                self.lbl_bridge_status = QLabel("ZEROGBRIDGE DISCONNECTED")
+
+            self.lbl_bridge_status.setProperty("state", "offline")
             self.lbl_bridge_status.setProperty("state", "offline")
             self.lbl_server_cpu = QLabel("CPU --")
             self.lbl_server_ram = QLabel("RAM --")
@@ -439,9 +457,9 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to build status bar: {e}")
 
-    ## endregion
+    # endregion
 
-    ## region: Header Clock
+    # region Header Clock
 
     def setup_clock_timer(self):
         """Starts a 1 second local timer that keeps the header clock (HH:MM) current."""
@@ -464,9 +482,9 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to update clock: {e}")
 
-    ## endregion
+    # endregion
 
-    ## region: Navigation
+    # region Navigation
 
     def _page_title(self, page_key):
         """Returns the button text for a page key, used as the content title."""
@@ -528,10 +546,9 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to show page {page_key}: {e}")
 
-    ## endregion
+    # endregion
 
-    ## region: Status Updates
-
+    # region Status Updates
     def update_server_status(self, server_name, is_connected):
         """
         Updates the header server name and status dot.
@@ -547,8 +564,37 @@ class MainCockpit(QMainWindow):
             if dot_style is not None:
                 dot_style.unpolish(self.lbl_server_status_dot)
                 dot_style.polish(self.lbl_server_status_dot)
+            ## The status bar gets the same news as the header dot, so they always agree.
+            self.update_bridge_status(is_connected)
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to update server status: {e}")
+            
+    def update_bridge_status(self, is_connected):
+        """Updates the ZEROGBRIDGE field in the bottom status bar."""
+        try:
+            ## getattr(..., None) gives None instead of crashing if the status bar failed to build.
+            lbl = getattr(self, "lbl_bridge_status", None)
+            if lbl is None:
+                return
+            ## Only a real, logged-in connection says CONNECTED (never fake data in the UI).
+            if is_connected:
+                lbl.setText("ZEROGBRIDGE CONNECTED")
+                lbl.setProperty("state", "online")
+            else:
+                lbl.setText("ZEROGBRIDGE DISCONNECTED")
+                lbl.setProperty("state", "offline")
+            ## Same unpolish/polish trick as the dot, so any CSS for "state" re-applies.
+            lbl_style = lbl.style()
+            if lbl_style is not None:
+                lbl_style.unpolish(lbl)
+                lbl_style.polish(lbl)
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to update bridge status: {e}")
+
+    def _on_bridge_status_clicked(self):
+        """Opens the ZeroGBridge page when the status bar field is clicked."""
+        ## Reuses the nav click, so the ZEROGBRIDGE button lights up and the page loads.
+        self._on_nav_clicked("zerogbridge")
 
     def update_alert_badge(self, alert_count):
         """Shows the alert count on the ALERTS & ANTI-CHEAT button; hidden when 0."""
@@ -560,9 +606,9 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to update alert badge: {e}")
 
-    ## endregion
+    # endregion
 
-        ## region: Bridge Connection
+    # region Bridge Connection
 
     def setup_bridge(self):
         """Creates the CommandPipe and links its signals to the header. Starts it only if allowed."""
@@ -593,9 +639,9 @@ class MainCockpit(QMainWindow):
         """Receives each bridge reply. Pages will use these later; for now it only logs."""
         print(f"[INFO] MainCockpit: Reply received for {command_str.split(':')[0]}")
 
-    ## endregion
+    # endregion
 
-    ## region: Painting & Theme
+    # region Painting & Theme
 
     def paintEvent(self, event):
         """Force background canvas visualization mapping, scaled to cover the window."""
@@ -655,9 +701,9 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to apply letter spacing: {e}")
 
-    ## endregion
+    # endregion
 
-    ## region: Shutdown
+    # region Shutdown
 
     def closeEvent(self, event):
         """Logs a clean shutdown when the main window is closed."""
@@ -678,6 +724,6 @@ class MainCockpit(QMainWindow):
         print("[INFO] MainCockpit: Shutting down main window...")
         event.accept()
 
-    ## endregion
+    # endregion
 
-## endregion
+# endregion

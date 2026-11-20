@@ -5,23 +5,23 @@
 ## the real password is never written anywhere.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 import json
 from features.paths import data_path
 from features.login.password_hashing import hash_password, check_password
 
-## endregion
+# endregion
 
 
-## region: Constants
+# region Constants
 
 OWNER_LOGIN_FILE = "owner_login.json"
 
-## endregion
+# endregion
 
 
-## region: Owner Login Helpers
+# region Owner Login Helpers
 
 ## Writes a new owner login. Returns True on success. Overwrites any older owner login.
 def save_owner_login(username, password_text):
@@ -65,4 +65,4 @@ def check_owner_login(username, password_text):
         return False
     return check_password(password_text, owner_record.get("salt"), owner_record.get("password_hash"))
 
-## endregion
+# endregion

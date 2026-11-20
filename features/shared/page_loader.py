@@ -4,16 +4,16 @@
 ## If a page fails, an ErrorCard is shown instead and ZAH keeps running.
 ## ==========================================
 
-## region: Imports
+# region Imports
 
 import importlib
 import traceback
 
 from features.shared.error_card import ErrorCard
 
-## endregion
+# endregion
 
-## region: Page Table
+# region Page Table
 
 ## `{ }` is a dictionary, which is a lookup table. The left side is the key (the nav button's name), and the right side is where that page's code lives.
 ## `"features.players.players_page"` is a path with dots instead of slashes. It means the file `features/players/players_page.py`.
@@ -34,10 +34,10 @@ PAGE_MODULES = {
     "settings": "features.settings.settings_page",
 }
 
-## endregion
+# endregion
 
 
-## region: Page Loading
+# region Page Loading
 
 ## Builds the page for one nav button.
 ## Returns the page widget, or an ErrorCard if anything goes wrong.
@@ -67,4 +67,4 @@ def load_page(page_key):
         ## Short version on the card, e.g. "ModuleNotFoundError: No module named ..."
         return ErrorCard(page_key, f"{type(error).__name__}: {error}")
 
-## endregion
+# endregion

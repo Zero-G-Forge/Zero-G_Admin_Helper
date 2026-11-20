@@ -4,7 +4,7 @@
 ## For now it checks the offline owner login; the online login service is added in 5b.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout, QApplication
@@ -13,18 +13,18 @@ from PyQt6.QtCore import Qt
 from features.login.owner_login import check_owner_login
 from features.login.online_login import check_online_login
 
-## endregion
+# endregion
 
 
-## region: Constants
+# region Constants
 
 ## After this many wrong tries the dialog closes and ZAH quits.
 MAX_LOGIN_ATTEMPTS = 5
 
-## endregion
+# endregion
 
 
-## region: LoginWindow Class
+# region LoginWindow Class
 
 class LoginWindow(QDialog):
     def __init__(self, parent=None):
@@ -132,4 +132,4 @@ class LoginWindow(QDialog):
             print(f"[ERROR] LoginWindow: Login check failed: {e}")
             self.lbl_message.setText("Login error, see log")
 
-## endregion
+# endregion

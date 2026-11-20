@@ -3,21 +3,21 @@
 ## ZAH's own options. Each change is saved right away to data/app_settings.json.
 ## ==========================================
 
-## region: Imports
+# region Imports
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QWidget, QLabel, QCheckBox, QVBoxLayout
 
 from features.settings.app_settings import load_app_settings, save_app_setting
 
-## endregion
+# endregion
 
 
-## region: SettingsPage Class
+# region SettingsPage Class
 
 class SettingsPage(QWidget):
 
-    ## region: Setup
+    # region Setup
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,9 +51,9 @@ class SettingsPage(QWidget):
         self.lbl_bridge_note.setWordWrap(True)
         layout.addWidget(self.lbl_bridge_note)
 
-    ## endregion
+    # endregion
 
-    ## region: Handlers
+    # region Handlers
 
     ## Saves the new value. If the save fails, the box flips back so it never shows a setting that isn't real.
     def _on_bridge_auto_connect_toggled(self, is_checked):
@@ -63,15 +63,15 @@ class SettingsPage(QWidget):
             self.chk_bridge_auto_connect.setChecked(not is_checked)
             self.chk_bridge_auto_connect.blockSignals(False)
 
-    ## endregion
+    # endregion
 
-## endregion
+# endregion
 
 
-## region: Page Entry
+# region Page Entry
 
 ## page_loader calls this to build the page.
 def create_page():
     return SettingsPage()
 
-## endregion
+# endregion

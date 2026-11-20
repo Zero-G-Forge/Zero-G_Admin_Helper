@@ -4,17 +4,17 @@
 ## Any problem reading the file falls back to the safe defaults.
 ## ==========================================
 
-## region: Imports
+# region Imports
 
 import json
 import os
 
 from features.paths import DATA_DIR
 
-## endregion
+# endregion
 
 
-## region: Constants
+# region Constants
 
 ## data/ is git-ignored, so these settings stay on this PC only.
 APP_SETTINGS_FILE = os.path.join(DATA_DIR, "app_settings.json")
@@ -25,10 +25,10 @@ DEFAULT_SETTINGS = {
     "bridge_auto_connect": False,
 }
 
-## endregion
+# endregion
 
 
-## region: Load & Save
+# region Load & Save
 
 ## Returns every setting as a dictionary. Missing keys get their default value,
 ## so an old file from an earlier version still works.
@@ -63,4 +63,4 @@ def save_app_setting(key, value):
         print(f"[ERROR] AppSettings: Could not save {key}: {e}")
         return False
 
-## endregion
+# endregion

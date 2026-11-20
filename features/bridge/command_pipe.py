@@ -5,7 +5,7 @@
 ## so the window stays responsive and the bridge is never flooded.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 ## queue.Queue is a thread-safe line: the window adds commands, the thread takes them.
 import queue
@@ -21,10 +21,10 @@ from features.bridge.bridge_connection import (
 )
 from features.bridge.server_settings import get_active_profile
 
-## endregion
+# endregion
 
 
-## region: Constants
+# region Constants
 
 ## Pause between commands, per the bridge rules (about 500 ms).
 INPUT_DELAY_SEC = 0.5
@@ -32,10 +32,10 @@ INPUT_DELAY_SEC = 0.5
 ## How long the thread waits for a new command before checking whether it should stop.
 QUEUE_CHECK_SEC = 0.25
 
-## endregion
+# endregion
 
 
-## region: CommandPipe Class
+# region CommandPipe Class
 
 class CommandPipe(QThread):
     ## Signals are messages from the thread back to the window.
@@ -148,4 +148,4 @@ class CommandPipe(QThread):
             self.is_running = False
             print("[INFO] CommandPipe: Stopped")
 
-## endregion
+# endregion

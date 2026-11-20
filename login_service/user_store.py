@@ -5,7 +5,7 @@
 ## Passwords are stored only as salted scrypt hashes.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 import hashlib
 import hmac
@@ -20,10 +20,10 @@ try:
 except ImportError:
     psycopg = None
 
-## endregion
+# endregion
 
 
-## region: Constants
+# region Constants
 
 ## The test file sits next to this script. *.json is git-ignored, so it is never pushed.
 USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "users_local.json")
@@ -40,19 +40,19 @@ ALLOWED_ROLES = ("owner", "admin", "moderator")
 ## It holds the password, so it is never written in code or printed.
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
-## endregion
+# endregion
 
 
-## region: Hashing
+# region Hashing
 
 def _make_hash(password_text, salt):
     return hashlib.scrypt(password_text.encode("utf-8"), salt=salt,
                           n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P).hex()
 
-## endregion
+# endregion
 
 
-## region: Database
+# region Database
 ## True only when the driver is installed and a DATABASE_URL was given.
 def _database_enabled():
     return psycopg is not None and bool(DATABASE_URL)
@@ -89,10 +89,10 @@ def ensure_users_table():
         ## The message from psycopg doesn't include the password, but the error class name is enough here.
         print(f"[ERROR] UserStore: Could not prepare users table ({type(e).__name__})")
         return False
-## endregion
+# endregion
 
 
-## region: Database Users
+# region Database Users
 ## Reads one user row as {salt, password_hash, role}, or None if there's no such user.
 ## The %s placeholder lets psycopg pass the name safely, so a username can never run as SQL.
 def _db_get_user(username):
@@ -118,10 +118,10 @@ def _db_save_user(username, salt_hex, password_hash, role):
             """,
             (username, salt_hex, password_hash, role),
         )
-## endregion
+# endregion
 
 
-## region: User File
+# region User File
 
 ## Reads every user as {username: {salt, password_hash, role}}. A missing file means no users yet.
 def _load_users():
@@ -182,4 +182,4 @@ def check_user(username, password_text):
         print(f"[ERROR] UserStore: Could not check user: {e}")
         return None
 
-## endregion
+# endregion

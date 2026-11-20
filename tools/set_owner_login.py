@@ -5,7 +5,7 @@
 ## The password is typed hidden and only its hash is saved to data/owner_login.json.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 import os
 import sys
@@ -15,10 +15,10 @@ from getpass import getpass
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from features.login.owner_login import save_owner_login
 
-## endregion
+# endregion
 
 
-## region: Setup Steps
+# region Setup Steps
 
 def main():
     print("[INFO] SetOwnerLogin: Offline owner login setup")
@@ -37,7 +37,7 @@ def main():
 
     save_owner_login(username, first_try)
 
-## endregion
+# endregion
 
 
 ## Runs main() only when this file is started directly, not when it is imported.

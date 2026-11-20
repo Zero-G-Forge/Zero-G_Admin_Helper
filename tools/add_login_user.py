@@ -5,7 +5,7 @@
 ## The password is typed hidden and is never printed or logged.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 import os
 import sys
@@ -17,10 +17,10 @@ sys.path.insert(0, os.path.abspath(SERVICE_FOLDER))
 
 from user_store import add_user, ALLOWED_ROLES  # pyright: ignore[reportMissingImports]
 
-## endregion
+# endregion
 
 
-## region: Main
+# region Main
 
 def main():
     print("[INFO] AddLoginUser: Add a user to the ZAH login service")
@@ -52,4 +52,4 @@ def main():
 if __name__ == "__main__":
     sys.exit(main())
 
-## endregion
+# endregion

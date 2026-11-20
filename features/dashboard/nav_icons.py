@@ -4,14 +4,14 @@
 ##              Drawn with QPainter so no image files or pip packages are needed.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 from PyQt6.QtCore import Qt, QPointF, QRectF
 from PyQt6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 
-## endregion
+# endregion
 
-## region: Icon Settings
+# region Icon Settings
 
 ## Nav icon colours: idle grey-blue, selected cyan
 NAV_ICON_IDLE = "#8fa6b8"
@@ -19,10 +19,10 @@ NAV_ICON_ACTIVE = "#33d6ff"
 ## Icons are drawn on a 64 x 64 canvas, then shrunk to fit the button.
 ICON_SIZE = 64
 
-## endregion
+# endregion
 
 
-## region: Drawing Helpers
+# region Drawing Helpers
 
 def _make_pen(color, width=5.0):
     """Builds a round-capped pen used by every drawn icon."""
@@ -32,10 +32,10 @@ def _make_pen(color, width=5.0):
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     return pen
 
-## endregion
+# endregion
 
 
-## region: Page Icon Drawings
+# region Page Icon Drawings
 
 def _draw_dashboard(painter, color):
     ## Four tiles in a grid
@@ -160,10 +160,10 @@ def _draw_settings(painter, color):
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawEllipse(QRectF(16, 16, 32, 32))
 
-## endregion
+# endregion
 
 
-## region: Icon Lookup Table
+# region Icon Lookup Table
 
 ## Page key -> drawing function
 ICON_DRAWERS = {
@@ -180,10 +180,10 @@ ICON_DRAWERS = {
     "settings": _draw_settings,
 }
 
-## endregion
+# endregion
 
 
-## region: Public Builders
+# region Public Builders
 
 def _draw_icon_pixmap(page_key, color):
     """Draws one icon onto a transparent pixmap."""
@@ -265,4 +265,4 @@ def build_logo_pixmap(size=44):
         print(f"[ERROR] NavIcons: Failed to draw header logo: {e}")
         return QPixmap()
 
-## endregion
+# endregion

@@ -4,17 +4,17 @@
 ## Every network step has a timeout so a silent server can never freeze ZAH.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 ## socket is Python's built-in "phone" for talking to another computer over the network.
 ## json reads the bridge's replies, which arrive as one line of JSON text each.
 import json
 import socket
 
-## endregion
+# endregion
 
 
-## region: Constants
+# region Constants
 
 ## How many seconds to wait for the server before giving up (connect, login, replies).
 BRIDGE_LOGIN_TIMEOUT = 5.0
@@ -23,10 +23,10 @@ BRIDGE_LOGIN_TIMEOUT = 5.0
 ## (carriage return + new line), as the bridge rules require.
 LINE_END = "\r\n"
 
-## endregion
+# endregion
 
 
-## region: Connection Helpers
+# region Connection Helpers
 
 ## Hangs up a connection safely. Called after errors and on shutdown.
 ## Safe to call even if the socket is already closed or was never opened.
@@ -143,4 +143,4 @@ def send_bridge_command(bridge_socket, command_text):
         print(f"[ERROR] BridgeConnection: Failed to send command: {e}")
         return None
 
-## endregion
+# endregion

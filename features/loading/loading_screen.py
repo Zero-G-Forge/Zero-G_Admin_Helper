@@ -3,7 +3,7 @@
 ## DESCRIPTION: Screen 1A: Zero-G Loading Screen (Splash Loader Canvas)
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 import os
 from features.paths import asset_path, ensure_data_dir
@@ -11,9 +11,9 @@ from PyQt6.QtWidgets import QDialog, QWidget, QLabel, QProgressBar
 from PyQt6.QtCore import QTimer, Qt, QRectF
 from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor, QFont, QPainterPath, QFontDatabase
 
-## endregion
+# endregion
 
-## region: Optional Modules
+# region Optional Modules
 
 ## Guarded imports: if a piece is missing, the loader falls back to simpler drawing.
 try:
@@ -34,9 +34,9 @@ except ImportError as e:
     print(f"[ERROR] ApplicationLoader: Could not load LoginWindow: {e}")
     LoginWindow = None
 
-## endregion
+# endregion
 
-## region: Loader Settings
+# region Loader Settings
 
 ## Loader canvas size (same as the legacy loader)
 LOADER_WIDTH = 1000
@@ -55,10 +55,10 @@ MILESTONE_MARKERS = [30, 60]
 ## Font used by every label (Inter on Zorin, DejaVu Sans as a fallback)
 CORE_FONT_FAMILIES = ["Inter", "DejaVu Sans"]
 
-## endregion
+# endregion
 
 
-## region: ApplicationLoader Class
+# region ApplicationLoader Class
 
 class ApplicationLoader(QDialog):
     """
@@ -67,7 +67,7 @@ class ApplicationLoader(QDialog):
     startup stages, then hands the built MainCockpit back to ZAH.py.
     """
 
-    ## region: Setup
+    # region Setup
 
     def __init__(self, build_main_window=None, parent=None):
         super().__init__(parent)
@@ -123,9 +123,9 @@ class ApplicationLoader(QDialog):
             print(f"[ERROR] ApplicationLoader: Failed to initialize the loading screen: {e}")
             raise
 
-    ## endregion
+    # endregion
 
-    ## region: Images & Animation
+    # region Images & Animation
 
     def _load_images(self):
         """Loads the plating background and the Admin Helper badge."""
@@ -189,9 +189,9 @@ class ApplicationLoader(QDialog):
             print(f"[ERROR] ApplicationLoader: Failed to build circuit paths: {e}")
             self.circuit_paths = []
 
-    ## endregion
+    # endregion
 
-    ## region: Widgets & Theme
+    # region Widgets & Theme
 
     def setup_widgets(self):
         """Builds the title label, the progress bar and the status line."""
@@ -262,9 +262,9 @@ class ApplicationLoader(QDialog):
         except Exception as e:
             print(f"[ERROR] ApplicationLoader: Failed to apply letter spacing: {e}")
 
-    ## endregion
+    # endregion
 
-    ## region: Boot Sequence
+    # region Boot Sequence
 
     def start_boot_sequence(self):
         """Starts the progress timer."""
@@ -320,9 +320,9 @@ class ApplicationLoader(QDialog):
             print(f"[ERROR] ApplicationLoader: Stage '{stage_text.title()}' failed: {e}")
             self.stage_failed = True
 
-    ## endregion
+    # endregion
 
-    ## region: Startup Stages
+    # region Startup Stages
 
     def _stage_check_assets(self):
         """Checks the files the main window needs are on disk."""
@@ -390,9 +390,9 @@ class ApplicationLoader(QDialog):
         self.main_window = self.build_main_window()
         print("[SUCCESS] ApplicationLoader: MainCockpit built.")
 
-    ## endregion
+    # endregion
 
-    ## region: Status Line
+    # region Status Line
 
     def _update_status_label(self):
         """Writes the status line, e.g. 'CHECKING ASSETS... 12%'."""
@@ -419,9 +419,9 @@ class ApplicationLoader(QDialog):
         except Exception as e:
             print(f"[ERROR] ApplicationLoader: Failed to update status line: {e}")
 
-    ## endregion
+    # endregion
 
-    ## region: Painting
+    # region Painting
 
     def paintEvent(self, event):
         """Paints the plating background, circuit pulse, badge and glass panel."""
@@ -510,9 +510,9 @@ class ApplicationLoader(QDialog):
             painter.drawEllipse(QRectF(marker_x - 7, 618, 14, 14))
             painter.drawText(QRectF(marker_x - 7, 618, 14, 14), Qt.AlignmentFlag.AlignCenter, str(marker_number))
 
-    ## endregion
+    # endregion
 
-    ## region: Shutdown
+    # region Shutdown
 
     def done(self, result):
         """Stops the badge animation when the loading screen finishes."""
@@ -536,6 +536,6 @@ class ApplicationLoader(QDialog):
         print("[INFO] ApplicationLoader: Loading screen closed.")
         event.accept()
 
-    ## endregion
+    # endregion
 
-## endregion
+# endregion

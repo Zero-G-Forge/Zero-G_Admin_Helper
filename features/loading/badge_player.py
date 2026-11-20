@@ -3,7 +3,7 @@
 ## DESCRIPTION: Looping badge animation for the loading screen
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 import os
 import glob
@@ -11,9 +11,9 @@ from features.paths import asset_path
 from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap
 
-## endregion
+# endregion
 
-## region: Animation Settings
+# region Animation Settings
 
 ## Frame folder made from assets/branding/ZAH_badge_anim.webm
 ## (400 px PNG frames, real alpha from the webm, no audio, loop already blended)
@@ -23,10 +23,10 @@ BADGE_ANIM_FOLDER = ("branding", "ZAH_badge_anim")
 ## The source video runs at 24 fps
 BADGE_ANIM_FPS = 24
 
-## endregion
+# endregion
 
 
-## region: BadgePlayer Class
+# region BadgePlayer Class
 
 class BadgePlayer(QObject):
     """
@@ -39,7 +39,7 @@ class BadgePlayer(QObject):
     ## Signal sent each time a new frame is ready, so the loading screen repaints.
     frame_changed = pyqtSignal()
 
-    ## region: Setup
+    # region Setup
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -68,9 +68,9 @@ class BadgePlayer(QObject):
             self.frame_paths = []
             self.current_pixmap = QPixmap()
 
-    ## endregion
+    # endregion
 
-    ## region: Playback Controls
+    # region Playback Controls
 
     def is_ready(self):
         """True when at least one frame loaded."""
@@ -92,9 +92,9 @@ class BadgePlayer(QObject):
         except Exception as e:
             print(f"[ERROR] BadgePlayer: Failed to stop badge animation: {e}")
 
-    ## endregion
+    # endregion
 
-    ## region: Timer Handlers
+    # region Timer Handlers
 
     def _on_frame_tick(self):
         """Shows the next frame, wrapping back to the first one."""
@@ -110,6 +110,6 @@ class BadgePlayer(QObject):
             print(f"[ERROR] BadgePlayer: Failed to show badge frame: {e}")
             self.stop()
 
-    ## endregion
+    # endregion
 
-## endregion
+# endregion

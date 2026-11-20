@@ -4,17 +4,17 @@
 ## Used for every user except the owner, who signs in offline.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 import os
 import json
 import urllib.request
 import urllib.error
 
-## endregion
+# endregion
 
 
-## region: Constants
+# region Constants
 
 ## The service's web address. ZAH_LOGIN_URL can override it for local tests,
 ## e.g. http://127.0.0.1:8765. The default is the ZAH-BOT HTTPS address.
@@ -25,10 +25,10 @@ LOGIN_SERVICE_URL = os.environ.get(
 ## How many seconds to wait for the service before giving up.
 LOGIN_TIMEOUT_SEC = 5
 
-## endregion
+# endregion
 
 
-## region: Online Login Check
+# region Online Login Check
 
 def check_online_login(username, password_text):
     ## Returns a tuple: (result, details).
@@ -65,4 +65,4 @@ def check_online_login(username, password_text):
         print(f"[ERROR] OnlineLogin: Service unreachable: {e}")
         return "offline", None
 
-## endregion
+# endregion

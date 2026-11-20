@@ -11,13 +11,13 @@ no matter where it is launched from, e.g.
     cd /mnt/Zero-G_Files/Zero-G_Forge && Zero-G_Admin_Helper/.venv/bin/python Zero-G_Admin_Helper/ZAH.py
 """
 
-## region: Imports
+# region Imports
 
 import os
 
-## endregion
+# endregion
 
-## region: Folder Constants
+# region Folder Constants
 
 ## features/paths.py -> features/ -> app root (folder with ZAH.py)
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -25,10 +25,10 @@ APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(APP_ROOT, "data")
 ASSETS_DIR = os.path.join(APP_ROOT, "assets")
 
-## endregion
+# endregion
 
 
-## region: Path Helpers
+# region Path Helpers
 
 def ensure_data_dir() -> str:
     """Creates data/ under the app root if it is missing and returns its path."""
@@ -46,4 +46,4 @@ def asset_path(*parts: str) -> str:
     """Absolute path inside assets/."""
     return os.path.join(ASSETS_DIR, *parts)
 
-## endregion
+# endregion

@@ -4,7 +4,7 @@
 ## Answers small JSON requests over HTTP. Part 5b-1: health check only.
 ## =====================================================================
 
-## region: Imports
+# region Imports
 
 import json
 import os
@@ -15,10 +15,10 @@ import time
 from user_store import check_user, ensure_users_table
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-## endregion
+# endregion
 
 
-## region: Constants
+# region Constants
 
 ## bot-hosting gives the port in the SERVER_PORT setting; 25109 is ZAH-BOT's port.
 ## Locally it falls back to 8765 so testing never needs the real port.
@@ -38,10 +38,10 @@ MAX_BODY_BYTES = 4096
 ## They are cleared if the service restarts, so everyone signs in again (safe default).
 active_sessions = {}
 
-## endregion
+# endregion
 
 
-## region: Request Handler
+# region Request Handler
 
 class LoginRequestHandler(BaseHTTPRequestHandler):
     ## Sends one JSON reply with a status code (200 = OK, 404 = not found, and so on).
@@ -113,10 +113,10 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format_text, *args):
         print(f"[INFO] LoginService: {self.command} {self.path.split('?')[0]}")
 
-## endregion
+# endregion
 
 
-## region: Start Up
+# region Start Up
 
 def main():
     print(f"[INFO] LoginService: Starting on {SERVICE_HOST}:{SERVICE_PORT}")
@@ -136,4 +136,4 @@ def main():
 if __name__ == "__main__":
     main()
 
-## endregion
+# endregion
