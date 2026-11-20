@@ -12,7 +12,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
     QPushButton, QButtonGroup, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QTimer, QTime, QSize
+from PyQt6.QtCore import Qt, QTimer, QTime, QSize, pyqtSignal
 from PyQt6.QtGui import QPainter, QPixmap, QFont
 
 # endregion
@@ -92,7 +92,11 @@ class MainCockpit(QMainWindow):
     Core Main Administration Cockpit Dashboard Shell.
     Maintains clean layout scaffolding and centralized CSS lookups.
     """
-
+    ## (server_name, is_connected): sent every time the bridge state changes,
+    ## so any page (like ZeroGBridge) can connect() to it and update itself live.
+    ## The pipe is rebuilt on each Connect, so pages listen here, not to the pipe.
+    bridge_status_changed = pyqtSignal(str, bool)
+    
     # region Window Setup
 
     def __init__(self, parent=None):
@@ -556,6 +560,10 @@ class MainCockpit(QMainWindow):
         """
         try:
             self.lbl_server_name.setText(str(server_name).upper())
+            ## Remember the latest bridge news so pages can ask for it (e.g. the ZeroGBridge page).
+            ## bool() makes sure it is a real True/False, never some other value.
+            self.bridge_server_name = str(server_name)
+            self.bridge_connected = bool(is_connected)
             state = "online" if is_connected else "offline"
             self.lbl_server_status_dot.setProperty("state", state)
             ## unpolish/polish makes Qt re-read the CSS, so the new dot colour shows.
@@ -566,9 +574,11 @@ class MainCockpit(QMainWindow):
                 dot_style.polish(self.lbl_server_status_dot)
             ## The status bar gets the same news as the header dot, so they always agree.
             self.update_bridge_status(is_connected)
+            ## Tell any listening page about the change.
+            self.bridge_status_changed.emit(self.bridge_server_name, self.bridge_connected)
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to update server status: {e}")
-            
+
     def update_bridge_status(self, is_connected):
         """Updates the ZEROGBRIDGE field in the bottom status bar."""
         try:
@@ -624,6 +634,30 @@ class MainCockpit(QMainWindow):
                 self.update_server_status("OFFLINE", False)
                 return
 
+            ## The starting itself now lives in connect_bridge(), so the ZeroGBridge page can use it too.
+            self.connect_bridge()
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to set up bridge connection: {e}")
+            self.update_server_status("OFFLINE", False)
+
+    def connect_bridge(self):
+        """Starts a CommandPipe for the active server. Returns True if it started, False if not."""
+        try:
+            if CommandPipe is None:
+                print("[ERROR] MainCockpit: Bridge module missing, cannot connect")
+                self.update_server_status("OFFLINE", False)
+                return False
+
+            ## isRunning() is True while the thread is still going. Never start a second pipe.
+            command_pipe = getattr(self, "command_pipe", None)
+            if command_pipe is not None and command_pipe.isRunning():
+                print("[INFO] MainCockpit: Bridge already connected or connecting")
+                return False
+            ## An old pipe that has already stopped (e.g. a failed login) is thrown away first.
+            ## deleteLater() lets Qt free it safely once it is no longer busy.
+            if command_pipe is not None:
+                command_pipe.deleteLater()
+
             self.command_pipe = CommandPipe(parent=self)
             ## connect() links a signal to a method. Qt delivers it on the window thread,
             ## so update_server_status can safely change the header widgets.
@@ -631,9 +665,31 @@ class MainCockpit(QMainWindow):
             self.command_pipe.reply_received.connect(self._on_bridge_reply)
             ## start() launches the thread, and Qt then calls CommandPipe.run() in the background.
             self.command_pipe.start()
+            print("[INFO] MainCockpit: Bridge connect started")
+            return True
         except Exception as e:
-            print(f"[ERROR] MainCockpit: Failed to set up bridge connection: {e}")
+            print(f"[ERROR] MainCockpit: Failed to connect bridge: {e}")
             self.update_server_status("OFFLINE", False)
+            return False
+
+    def disconnect_bridge(self):
+        """Stops the CommandPipe (closes the bridge connection). Returns True if one was stopped."""
+        try:
+            command_pipe = getattr(self, "command_pipe", None)
+            if command_pipe is None:
+                print("[INFO] MainCockpit: No bridge connection to close")
+                return False
+            ## stop() waits (up to 3 s) for the thread to close its socket and finish.
+            command_pipe.stop()
+            self.command_pipe = None
+            ## A normal stop sends no signal, so we report the disconnect ourselves.
+            ## The server name is kept, so the header still says which server it was.
+            self.update_server_status(getattr(self, "bridge_server_name", "OFFLINE"), False)
+            print("[INFO] MainCockpit: Bridge disconnected")
+            return True
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to disconnect bridge: {e}")
+            return False
 
     def _on_bridge_reply(self, command_str, reply_text):
         """Receives each bridge reply. Pages will use these later; for now it only logs."""
