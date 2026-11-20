@@ -59,6 +59,14 @@ except ImportError as e:
     print(f"[ERROR] MainCockpit: Could not load clickable_label: {e}")
     ClickableLabel = None
 
+
+## Guarded import: if zgb_portal is missing, ZAH still runs, the portal just can't open.
+try:
+    from features.zgb_portal import ZeroGBridgePortal
+except ImportError as e:
+    print(f"[ERROR] MainCockpit: Could not load zgb_portal: {e}")
+    ZeroGBridgePortal = None
+
 # endregion
 
 
@@ -96,7 +104,7 @@ class MainCockpit(QMainWindow):
     ## so any page (like ZeroGBridge) can connect() to it and update itself live.
     ## The pipe is rebuilt on each Connect, so pages listen here, not to the pipe.
     bridge_status_changed = pyqtSignal(str, bool)
-    
+
     # region Window Setup
 
     def __init__(self, parent=None):
@@ -690,6 +698,34 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to disconnect bridge: {e}")
             return False
+
+    def open_zgb_portal(self):
+        """Opens the ZeroGBridge Portal window, or brings it to the front if it is already open."""
+        try:
+            if ZeroGBridgePortal is None:
+                print("[ERROR] MainCockpit: ZeroGBridge Portal module missing, cannot open")
+                return False
+            ## Only one portal at a time: if it's already open, just bring it forward.
+            zgb_portal = getattr(self, "zgb_portal", None)
+            if zgb_portal is not None:
+                zgb_portal.raise_()
+                zgb_portal.activateWindow()
+                return True
+            ## parent=self ties the portal to ZAH, so it closes when ZAH closes.
+            self.zgb_portal = ZeroGBridgePortal(parent=self)
+            ## The portal deletes itself when closed; destroyed tells us to forget it.
+            self.zgb_portal.destroyed.connect(self._on_zgb_portal_closed)
+            self.zgb_portal.show()
+            print("[INFO] MainCockpit: ZeroGBridge Portal opened")
+            return True
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to open ZeroGBridge Portal: {e}")
+            return False
+    def _on_zgb_portal_closed(self):
+        """Forgets the portal after its window is closed, so the next open builds a fresh one."""
+        self.zgb_portal = None
+        print("[INFO] MainCockpit: ZeroGBridge Portal closed")
+
 
     def _on_bridge_reply(self, command_str, reply_text):
         """Receives each bridge reply. Pages will use these later; for now it only logs."""

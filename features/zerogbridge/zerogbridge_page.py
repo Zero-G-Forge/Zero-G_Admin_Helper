@@ -62,6 +62,14 @@ class ZeroGBridgePage(QWidget):
         self.btn_bridge_disconnect.setEnabled(False)
         self.btn_bridge_disconnect.clicked.connect(self._on_disconnect_clicked)
         button_row.addWidget(self.btn_bridge_disconnect)
+
+        ## Opens the full ZeroGBridge Portal window (LOADER and BRIDGE tabs).
+        ## Always clickable: the portal has its own Live / Examples switch and works offline too.
+        self.btn_open_zgb_portal = QPushButton("OPEN ZGB PORTAL")
+        self.btn_open_zgb_portal.setObjectName("ZeroGBridgeButton")
+        self.btn_open_zgb_portal.clicked.connect(self._on_open_zgb_portal_clicked)
+        button_row.addWidget(self.btn_open_zgb_portal)
+
         ## addStretch pushes the two buttons to the left instead of stretching them wide.
         button_row.addStretch()
         layout.addLayout(button_row)
@@ -149,6 +157,17 @@ class ZeroGBridgePage(QWidget):
             return
         print("[INFO] ZeroGBridgePage: Disconnect clicked")
         disconnect_bridge()
+
+    ## Asks the cockpit to open the portal (or bring it to the front if it's already open).
+    def _on_open_zgb_portal_clicked(self):
+        cockpit = self.window()
+        open_zgb_portal = getattr(cockpit, "open_zgb_portal", None)
+        if open_zgb_portal is None:
+            print("[ERROR] ZeroGBridgePage: Cockpit has no open_zgb_portal, cannot open portal")
+            return
+        print("[INFO] ZeroGBridgePage: Open ZGB Portal clicked")
+        open_zgb_portal()
+
 
     # endregion
 
