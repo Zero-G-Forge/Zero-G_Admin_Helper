@@ -12,7 +12,7 @@ import secrets
 import time
 
 ## user_store.py sits in the same folder, so it can be imported by name.
-from user_store import check_user
+from user_store import check_user, ensure_users_table
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ## endregion
@@ -120,6 +120,9 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
 
 def main():
     print(f"[INFO] LoginService: Starting on {SERVICE_HOST}:{SERVICE_PORT}")
+    ## Make sure ZAH-DB has its users table before any login comes in.
+    ## With no DATABASE_URL (local testing), this just prints a WARN and the JSON file is used.
+    ensure_users_table()
     ## ThreadingHTTPServer answers several requests at once, so one slow client can't block others.
     server = ThreadingHTTPServer((SERVICE_HOST, SERVICE_PORT), LoginRequestHandler)
     try:
