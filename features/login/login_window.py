@@ -34,7 +34,7 @@ class LoginWindow(QDialog):
         self.setFixedSize(380, 240)
         self.failed_attempts = 0
         ## The signed-in username is kept here so later steps can show it.
-        ## Role and session token from the online service; the owner login leaves these as owner / None.
+        ## Role and session token from the online service; the offline developer login leaves these as developer / None.
         self.signed_in_role = None
         self.session_token = None
         self.setup_widgets()
@@ -93,9 +93,10 @@ class LoginWindow(QDialog):
 
             ## Step 1: the offline owner login is checked first, so Ray can sign in with no internet.
             if check_owner_login(username, password_text):
-                print(f"[SUCCESS] LoginWindow: Signed in as {username} (owner, offline)")
+                ## The offline login is Ray's alone, so it signs in as developer (the top role).
+                print(f"[SUCCESS] LoginWindow: Signed in as {username} (developer, offline)")
                 self.signed_in_user = username
-                self.signed_in_role = "owner"
+                self.signed_in_role = "developer"
                 ## accept() closes the dialog with a "yes" result.
                 self.accept()
                 return
