@@ -9,7 +9,7 @@
 
 from datetime import datetime
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 
 ## Guarded import: if online_login is missing, the section just says the log can't be loaded.
@@ -47,6 +47,38 @@ def make_readable_time(failed_at):
 # endregion
 
 
+# region Background Fetch
+
+## Runs fetch_failed_logins on its own thread, so the page doesn't freeze while it waits.
+## QThread calls run() on the new thread; the signal carries the answer back to the page.
+class FailedLoginFetcher(QThread):
+
+    ## Sends back (fetch_result, entries). "object" lets it carry a list or None.
+    fetch_done = pyqtSignal(str, object)
+
+    def __init__(self, session_token, limit, parent=None):
+        super().__init__(parent)
+        self.session_token = session_token
+        self.limit = limit
+
+    ## Never touch widgets in here: only the main thread may change the screen.
+    ## Fails closed: any crash is sent back as "error", which the page shows as refused.
+    def run(self):
+
+        ## Also clears Pylance's warning: it now knows fetch_failed_logins isn't None below this.
+        if fetch_failed_logins is None:
+            self.fetch_done.emit("error", None)
+            return
+        try:
+            fetch_result, entries = fetch_failed_logins(self.session_token, self.limit)
+        except Exception as e:
+            print(f"[ERROR] FailedLoginFetcher: Fetch failed: {e}")
+            fetch_result, entries = "error", None
+        self.fetch_done.emit(fetch_result, entries)
+
+# endregion
+
+
 # region BansAuditPage Class
 
 class BansAuditPage(QWidget):
@@ -61,6 +93,9 @@ class BansAuditPage(QWidget):
 
         ## True once the log has been loaded for this visit, so it isn't fetched twice in a row.
         self.has_loaded = False
+
+        ## The helper thread while a fetch is running, None otherwise. Keeping it here stops Python from deleting it mid-fetch.
+        self.fetch_thread = None
         self.setup_widgets()
 
     def setup_widgets(self):
@@ -97,13 +132,22 @@ class BansAuditPage(QWidget):
         self.tbl_failed_logins.setHorizontalHeaderLabels(FAILED_LOGIN_COLUMNS)
         self.tbl_failed_logins.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl_failed_logins.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.tbl_failed_logins.verticalHeader().setVisible(False)
+
+        ## Qt's type notes say the headers might be None, so each is checked before use (clears Pylance's warnings).
+        row_header = self.tbl_failed_logins.verticalHeader()
+        if row_header is not None:
+            row_header.setVisible(False)
 
         ## Stretch makes the columns share the full width of the page.
-        self.tbl_failed_logins.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        column_header = self.tbl_failed_logins.horizontalHeader()
+        if column_header is not None:
+            column_header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
+        ## Puts the table on the page; stretch=1 lets it fill the space below the status line.
         layout.addWidget(self.tbl_failed_logins, stretch=1)
 
     # endregion
+
 
     # region Failed Logins
 
@@ -140,16 +184,36 @@ class BansAuditPage(QWidget):
                 self.btn_failed_refresh.setEnabled(False)
                 self._show_failed_message("Sign in online as an owner to see this log.")
                 return
+
+            ## Already fetching: let that one finish instead of starting a second.
+            if self.fetch_thread is not None:
+                return
             self.btn_failed_refresh.setEnabled(True)
 
             if fetch_failed_logins is None:
                 self._show_failed_message("Login log could not be loaded, see log.")
                 return
 
-            ## The service can take up to 5 seconds; the status line says so while the page waits.
+            ## The helper thread does the waiting, so the window keeps working. REFRESH is greyed until the answer comes back.
             self.lbl_failed_status.setText("Loading...")
-            self.lbl_failed_status.repaint()
-            fetch_result, entries = fetch_failed_logins(session_token, FAILED_LOGIN_LIMIT)
+            self.btn_failed_refresh.setEnabled(False)
+            self.fetch_thread = FailedLoginFetcher(session_token, FAILED_LOGIN_LIMIT, self)
+            self.fetch_thread.fetch_done.connect(self._on_fetch_done)
+
+            ## finished is QThread's own signal; deleteLater frees the thread once it has fully stopped.
+            self.fetch_thread.finished.connect(self.fetch_thread.deleteLater)
+            self.fetch_thread.start()
+
+        except Exception as e:
+            print(f"[ERROR] BansAuditPage: Could not start the failed login fetch: {e}")
+            self.fetch_thread = None
+            self._show_failed_message("Login log could not be loaded, see log.")
+
+    ## Runs on the main thread when the helper thread sends its answer back, so it's safe to fill the table here.
+    def _on_fetch_done(self, fetch_result, entries):
+        self.fetch_thread = None
+        self.btn_failed_refresh.setEnabled(True)
+        try:
 
             if fetch_result == "offline":
                 self._show_failed_message("Login service unreachable, try REFRESH later.")
