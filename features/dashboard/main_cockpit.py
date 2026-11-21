@@ -81,6 +81,16 @@ except ImportError as e:
     print(f"[ERROR] MainCockpit: Could not load login_window: {e}")
     LoginWindow = None
 
+## Guarded import: if these are missing, LOGOUT still works, but a saved login can't be ended here.
+try:
+    from features.login.saved_session import load_session_token, clear_session_token
+    from features.login.online_login import end_online_session
+except ImportError as e:
+    print(f"[ERROR] MainCockpit: Could not load saved login helpers: {e}")
+    load_session_token = None
+    clear_session_token = None
+    end_online_session = None
+
 # endregion
 
 
@@ -371,6 +381,14 @@ class MainCockpit(QMainWindow):
 
             ## Drop the bridge connection; the next user connects again themselves.
             self.disconnect_bridge()
+
+            ## Forget "Keep me logged in": the service ends the token, then the file on this PC is deleted.
+            ## The file is deleted even if the service can't be reached, so this PC never signs itself in again.
+            if load_session_token is not None and clear_session_token is not None:
+                saved_token = load_session_token()
+                if saved_token is not None and end_online_session is not None:
+                    end_online_session(saved_token)
+                clear_session_token()
 
             ## Clearing the role makes every role check say no (fail closed).
             self.set_signed_in_user(None, None)

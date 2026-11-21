@@ -34,6 +34,16 @@ except ImportError as e:
     print(f"[ERROR] ApplicationLoader: Could not load LoginWindow: {e}")
     LoginWindow = None
 
+## Saved-login helpers. If any are missing, the saved login is skipped and the login window shows as normal.
+try:
+    from features.login.saved_session import load_session_token, clear_session_token
+    from features.login.online_login import check_saved_session
+except ImportError as e:
+    print(f"[ERROR] ApplicationLoader: Could not load saved login helpers: {e}")
+    load_session_token = None
+    clear_session_token = None
+    check_saved_session = None
+
 # endregion
 
 # region Loader Settings
@@ -343,6 +353,27 @@ class ApplicationLoader(QDialog):
         data_dir = ensure_data_dir()
         print(f"[SUCCESS] ApplicationLoader: Data folder ready: {data_dir}")
 
+    def _try_saved_session(self):
+        """Checks a saved "Keep me logged in" token. Returns {"username", "role"} or None."""
+        
+        ## Fail closed: any missing piece or problem returns None, and the login window shows.
+        try:
+            if load_session_token is None or check_saved_session is None:
+                return None
+            session_token = load_session_token()
+            if session_token is None:
+                return None
+            session_result, session_details = check_saved_session(session_token)
+            if session_result == "ok" and session_details is not None:
+                return session_details
+            
+            ## "denied" means the token is dead for good, so the file is removed. "offline" keeps it for next time.
+            if session_result == "denied" and clear_session_token is not None:
+                clear_session_token()
+            return None
+        except Exception as e:
+            print(f"[ERROR] ApplicationLoader: Saved login check failed: {e}")
+            return None
     
     def _stage_login_gate(self):
         """30% gate: pauses the loader and shows the login window. Fails closed."""
@@ -350,6 +381,16 @@ class ApplicationLoader(QDialog):
         try:
             ## The timer is stopped first; otherwise it keeps ticking behind the open login window.
             self.boot_timer.stop()
+
+            ## A saved "Keep me logged in" token is tried first. Only an "ok" from the service skips the login window.
+            saved_login = self._try_saved_session()
+            if saved_login is not None:
+                self.login_passed = True
+                self.signed_in_user = saved_login["username"]
+                self.signed_in_role = saved_login["role"]
+                print("[SUCCESS] ApplicationLoader: Saved login verified. Resuming startup...")
+                self.boot_timer.start(BOOT_TICK_MS)
+                return
             if LoginWindow is None:
                 print("[ERROR] ApplicationLoader: Login window missing. Stopping for safety.")
                 self.reject()

@@ -37,7 +37,7 @@ def check_online_login(username, password_text, remember=None):
     ##   ("offline", None)                     service could not be reached
     ## Anything strange counts as "not signed in" (fail closed).
     login_fields = {"username": username, "password": password_text}
-    
+
     ## remember is only sent when the box was ticked; without it the service gives the normal 8-hour login.
     if remember:
         login_fields["remember"] = remember
@@ -67,5 +67,63 @@ def check_online_login(username, password_text, remember=None):
         ## The password is never logged, only the reason.
         print(f"[ERROR] OnlineLogin: Service unreachable: {e}")
         return "offline", None
+
+## Asks the service if a saved "Keep me logged in" token is still good.
+## Returns the same kind of tuple as check_online_login:
+##   ("ok", {"username": ..., "role": ...})  token still good
+##   ("denied", None)                         expired, unknown, or the user was removed
+##   ("offline", None)                        service could not be reached
+def check_saved_session(session_token):
+    session_body = json.dumps({"token": session_token}).encode("utf-8")
+    session_request = urllib.request.Request(
+        LOGIN_SERVICE_URL.rstrip("/") + "/session",
+        data=session_body,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(session_request, timeout=LOGIN_TIMEOUT_SEC) as reply:
+            reply_data = json.loads(reply.read().decode("utf-8"))
+
+        ## Like a login, a 200 reply must hold both a username and a role, or it is not trusted.
+        if (isinstance(reply_data, dict) and reply_data.get("status") == "ok"
+                and reply_data.get("username") and reply_data.get("role")):
+            print(f"[SUCCESS] OnlineLogin: Saved login still good for {reply_data['username']}")
+            return "ok", {"username": reply_data["username"], "role": reply_data["role"]}
+        print("[WARNING] OnlineLogin: Service sent an unexpected session reply")
+        return "denied", None
+    except urllib.error.HTTPError as e:
+        
+        ## 401 here means the saved login ran out or was removed; the user just signs in again.
+        print(f"[INFO] OnlineLogin: Saved login no longer valid ({e.code})")
+        return "denied", None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        
+        ## No answer at all. The token is never logged, only the reason.
+        print(f"[ERROR] OnlineLogin: Service unreachable for saved login: {e}")
+        return "offline", None
+
+## Tells the service to end a token, so it can never be used again (LOGOUT).
+## Returns True if the service answered. False is not a problem: the saved file is deleted anyway.
+def end_online_session(session_token):
+    logout_body = json.dumps({"token": session_token}).encode("utf-8")
+    logout_request = urllib.request.Request(
+        LOGIN_SERVICE_URL.rstrip("/") + "/logout",
+        data=logout_body,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(logout_request, timeout=LOGIN_TIMEOUT_SEC):
+            pass
+        print("[SUCCESS] OnlineLogin: Service ended the saved login")
+        return True
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+
+        ## HTTPError is a kind of URLError, so a refusal lands here too. The token is never logged.
+        print(f"[WARNING] OnlineLogin: Could not end the saved login on the service: {e}")
+        return False
+
+
 
 # endregion

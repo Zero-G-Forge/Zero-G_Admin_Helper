@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from features.login.owner_login import check_owner_login
 from features.login.online_login import check_online_login
+from features.login.saved_session import save_session_token
 
 # endregion
 
@@ -114,6 +115,7 @@ class LoginWindow(QDialog):
 
             ## Step 1: the offline owner login is checked first, so Ray can sign in with no internet.
             if check_owner_login(username, password_text):
+                
                 ## The offline login is Ray's alone, so it signs in as developer (the top role).
                 print(f"[SUCCESS] LoginWindow: Signed in as {username} (developer, offline)")
                 self.signed_in_user = username
@@ -124,6 +126,7 @@ class LoginWindow(QDialog):
 
             ## Step 2: everyone else is checked by the online login service.
             self.lbl_message.setText("Checking login...")
+
             ## processEvents() lets the label redraw before the network call waits.
             QApplication.processEvents()
 
@@ -137,6 +140,10 @@ class LoginWindow(QDialog):
                 self.signed_in_user = username
                 self.signed_in_role = login_details["role"]
                 self.session_token = login_details["token"]
+
+                ## "Keep me logged in" was ticked, so the token is saved for the next start.
+                if remember_choice:
+                    save_session_token(self.session_token)
                 print(f"[SUCCESS] LoginWindow: Signed in as {username} ({self.signed_in_role}, online)")
                 self.accept()
                 return
