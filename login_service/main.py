@@ -22,7 +22,7 @@ from session_store import (ensure_sessions_table, create_session, check_session,
 from rate_limiter import is_locked_out, record_failure, record_success
 
 ## login_log saves every failed login in ZAH-DB (or memory when testing).
-from login_log import ensure_login_log_table, log_failed_login
+from login_log import ensure_login_log_table, log_failed_login, list_failed_logins
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -72,6 +72,23 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
             return forwarded_for.split(",")[0].strip()
         return self.client_address[0]
 
+    ## Returns the role for a login token, or None if it is unknown or expired (fails closed).
+    ## Normal logins live in active_sessions; "Keep me logged in" logins live in ZAH-DB (check_session).
+    def _token_role(self, token):
+        token = str(token or "")
+        if not token:
+            return None
+        session = active_sessions.get(token)
+        if session is not None:
+            if session["expires_at"] > time.time():
+                return session["role"]
+
+            ## Expired: forget it so it can't be used again.
+            active_sessions.pop(token, None)
+            return None
+        session_info = check_session(token)
+        return session_info["role"] if session_info else None
+
     ## do_GET runs for every GET request; self.path is the address part, like "/health".
     def do_GET(self):
         try:
@@ -86,7 +103,7 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
     ## do_POST runs for POST requests. ZAH sends {"username": ..., "password": ...} to /login.
     def do_POST(self):
         try:
-            if self.path not in ("/login", "/session", "/logout"):
+            if self.path not in ("/login", "/session", "/logout", "/failed_logins"):
                 self._send_json(404, {"status": "error", "message": "not found"})
                 return
 
@@ -121,6 +138,15 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
                 active_sessions.pop(logout_token, None)
                 delete_session(logout_token)
                 self._send_json(200, {"status": "ok"})
+                return
+
+            ## /failed_logins: owners only. ZAH sends its login token, and the newest failed logins come back.
+            ## 403 = not allowed. A bad token and a non-owner get the same reply, so nobody can test tokens.
+            if self.path == "/failed_logins":
+                if self._token_role(login_data.get("token")) != "owner":
+                    self._send_json(403, {"status": "error", "message": "not allowed"})
+                    return
+                self._send_json(200, {"status": "ok", "entries": list_failed_logins(login_data.get("limit", 50))})
                 return
 
             username = str(login_data.get("username", "")).strip()

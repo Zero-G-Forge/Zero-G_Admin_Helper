@@ -105,3 +105,43 @@ def log_failed_login(username, source, reason):
         return False
 
 # endregion
+
+
+# region Reading The Log
+
+## Biggest number of entries one request can ask for. Stops anyone asking for millions.
+MAX_LIST_LIMIT = 200
+
+## Returns the newest failed logins first, as a list of dicts:
+## {"failed_at": "2026-11-21T08:15:00+00:00", "username", "source", "reason"}.
+## Times are turned into text (ISO format) so they can go straight into a JSON reply.
+## Any problem returns an empty list (fails closed), never an error page.
+
+def list_failed_logins(limit=50):
+    try:
+        
+        ## int() turns "50" into 50; then it is kept between 1 and MAX_LIST_LIMIT.
+        limit = max(1, min(int(limit), MAX_LIST_LIMIT))
+
+        if _database_enabled():
+            with _open_database() as connection:
+                rows = connection.execute(
+                    "SELECT failed_at, username, source, reason FROM failed_logins ORDER BY failed_at DESC LIMIT %s",
+                    (limit,),
+                ).fetchall()
+
+        else:
+            
+            ## The memory list is oldest first, so it is flipped to put the newest on top.
+            rows = [(e["failed_at"], e["username"], e["source"], e["reason"]) for e in reversed(local_failed_logins)][:limit]
+            
+        return [
+            {"failed_at": failed_at.isoformat(), "username": username, "source": source, "reason": reason}
+            for failed_at, username, source, reason in rows
+        ]
+    
+    except Exception as e:
+        print(f"[ERROR] LoginLog: Could not read failed logins ({type(e).__name__})")
+        return []
+
+# endregion
