@@ -67,6 +67,13 @@ except ImportError as e:
     print(f"[ERROR] MainCockpit: Could not load zgb_portal: {e}")
     ZeroGBridgePortal = None
 
+## Guarded import: if roles is missing, every role check says no (fail closed).
+try:
+    from features.shared.roles import has_role_at_least
+except ImportError as e:
+    print(f"[ERROR] MainCockpit: Could not load roles: {e}")
+    has_role_at_least = None
+
 # endregion
 
 
@@ -121,6 +128,9 @@ class MainCockpit(QMainWindow):
             ## Page state: nav buttons by page key, and the page shown now
             self.nav_buttons = {}
             self.active_page = "dashboard"
+
+            ## Nobody is signed in yet, so there is no role; every role check says no until set_signed_in_user runs.
+            self.signed_in_role = None
 
             ## 2. Central UI Canvas
             self.central_widget = QWidget()
@@ -305,13 +315,22 @@ class MainCockpit(QMainWindow):
     def set_signed_in_user(self, username, role):
         ## Shows who is signed in, e.g. "ADMIN: PARTICLEWAVE" or "OWNER: RAY".
         try:
+            ## Keep the role (lowercase, like the database) so pages can check it later.
+            self.signed_in_role = str(role).strip().lower() if role else None
             shown_role = str(role or "user").upper()
             shown_name = str(username or "--").upper()
             self.lbl_admin_name.setText(f"{shown_role}: {shown_name}")
             print(f"[INFO] MainCockpit: Signed-in user shown as {shown_role}: {shown_name}")
         except Exception as e:
             print(f"[ERROR] MainCockpit: Could not show signed-in user: {e}")
+    def user_has_role(self, needed_role):
+        ## Pages ask the cockpit, e.g. user_has_role("developer"), instead of checking role names themselves.
+        ## If roles.py failed to load, the answer is always no (fail closed).
+        if has_role_at_least is None:
+            return False
+        return has_role_at_least(self.signed_in_role, needed_role)
     # endregion
+
 
     # region Nav Column
 

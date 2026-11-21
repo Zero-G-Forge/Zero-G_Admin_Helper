@@ -868,6 +868,10 @@ class HotReloadPanel(QWidget):
         self._start_live_action("rollback", lambda src=self.source: src.rollback(), "hot rollback")
 
     def _start_live_action(self, kind: str, fn, label: str) -> None:
+        ## Last line of defense: nothing live is sent unless the developer is signed in.
+        if not self._is_developer():
+            self._log(f"Live {kind} is developer only. Nothing was sent.", "warn")
+            return
         src = self.source
         self._live_action = True
         self._set_busy(True)
@@ -1263,11 +1267,25 @@ class HotReloadPanel(QWidget):
 
     # ----- actions ---------------------------------------------------------
 
+    ## Walks up the parents (panel -> portal -> cockpit) until it finds the cockpit's user_has_role.
+    ## If no cockpit is found (e.g. the portal run on its own), the answer is no (fail closed).
+    def _is_developer(self) -> bool:
+        widget = self.parent()
+        while widget is not None:
+            user_has_role = getattr(widget, "user_has_role", None)
+            if user_has_role is not None:
+                return bool(user_has_role("developer"))
+            widget = widget.parent()
+        return False
+
     def _set_busy(self, busy: bool) -> None:
         self.state.busy = busy
         enabled = not busy
         live = self.source.is_live
         can_send = enabled and (not live or self.state.connection == "Online")
+        ## Live Reload/Rollback change the server, so only the developer gets them.
+        if live and not self._is_developer():
+            can_send = False
         self.btn_browse.setEnabled(enabled and not live)
         self.btn_reload.setEnabled(can_send)
         self.btn_rollback_prev.setEnabled(can_send)
