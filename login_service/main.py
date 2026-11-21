@@ -13,6 +13,11 @@ import time
 
 ## user_store.py sits in the same folder, so it can be imported by name.
 from user_store import check_user, ensure_users_table
+
+## session_store keeps the "Keep me logged in" sessions
+## (ZAH-DB, or memory when testing).
+from session_store import (ensure_sessions_table, create_session, check_session, delete_session, REMEMBER_CHOICES,)
+
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # endregion
@@ -67,7 +72,7 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
     ## do_POST runs for POST requests. ZAH sends {"username": ..., "password": ...} to /login.
     def do_POST(self):
         try:
-            if self.path != "/login":
+            if self.path not in ("/login", "/session", "/logout"):
                 self._send_json(404, {"status": "error", "message": "not found"})
                 return
 
@@ -85,6 +90,24 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
                 self._send_json(400, {"status": "error", "message": "bad request"})
                 return
 
+            ## /session: ZAH asks "is this saved token still good, and who is it?" 401 for expired, unknown or deleted users. The role comes fresh from users.
+            if self.path == "/session":
+                session_info = check_session(
+                    login_data.get("token", ""))
+                if session_info is None:
+                    self._send_json(401, {"status": "error", "message": "session expired or unknown"})
+                    return
+                self._send_json(200, {"status": "ok", "username": session_info["username"], "role": session_info["role"]})
+                return
+
+            ## /logout: ends the token everywhere it might live, so it can never be used again. It answers ok even for an unknown token, so nobody can test tokens.
+            if self.path == "/logout":
+                logout_token = str(login_data.get("token", ""))
+                active_sessions.pop(logout_token, None)
+                delete_session(logout_token)
+                self._send_json(200, {"status": "ok"})
+                return
+
             username = str(login_data.get("username", "")).strip()
             role = check_user(username, login_data.get("password", ""))
 
@@ -93,6 +116,21 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
             if role is None:
                 print(f"[WARNING] LoginService: Failed login for {username or '(blank)'}")
                 self._send_json(401, {"status": "error", "message": "wrong username or password"})
+                return
+
+            ## "Keep me logged in": a remember choice saves the session (ZAH-DB) for that long. A made-up choice is refused; no choice keeps the normal 8-hour login.
+            remember = login_data.get("remember")
+            if remember:
+                if remember not in REMEMBER_CHOICES:
+                    self._send_json(400, {"status": "error", "message": "bad remember choice"})
+                    return
+                session_token = create_session(username, remember)
+                if session_token is None:
+                    self._send_json(500, { "status": "error", "message": "server error"})
+                    return
+                print(f"[SUCCESS] LoginService: {username.lower()}"
+                      f" signed in ({role}, remembered {remember})")
+                self._send_json(200, {"status": "ok", "token": session_token, "role": role, "remember": remember})
                 return
 
             ## token_urlsafe(32) makes a long random pass that cannot be guessed.
@@ -123,6 +161,11 @@ def main():
     ## Make sure ZAH-DB has its users table before any login comes in.
     ## With no DATABASE_URL (local testing), this just prints a WARN and the JSON file is used.
     ensure_users_table()
+
+    ## Then the sessions table (after users, because
+    ## each session points at a user).
+    ensure_sessions_table()
+
     ## ThreadingHTTPServer answers several requests at once, so one slow client can't block others.
     server = ThreadingHTTPServer((SERVICE_HOST, SERVICE_PORT), LoginRequestHandler)
     try:
