@@ -44,6 +44,13 @@ except ImportError as e:
     clear_session_token = None
     check_saved_session = None
 
+## Developer offline remember. If it's missing, the developer just signs in as normal.
+try:
+    from features.login.offline_remember import check_offline_remember
+except ImportError as e:
+    print(f"[ERROR] ApplicationLoader: Could not load offline remember: {e}")
+    check_offline_remember = None
+
 # endregion
 
 # region Loader Settings
@@ -358,6 +365,12 @@ class ApplicationLoader(QDialog):
         
         ## Fail closed: any missing piece or problem returns None, and the login window shows.
         try:
+
+            ## The developer's offline note is checked first; it needs no internet.
+            if check_offline_remember is not None:
+                developer_name = check_offline_remember()
+                if developer_name is not None:
+                    return {"username": developer_name, "role": "developer"}
             if load_session_token is None or check_saved_session is None:
                 return None
             session_token = load_session_token()

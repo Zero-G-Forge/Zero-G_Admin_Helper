@@ -13,6 +13,7 @@ from PyQt6.QtCore import Qt
 from features.login.owner_login import check_owner_login
 from features.login.online_login import check_online_login
 from features.login.saved_session import save_session_token
+from features.login.offline_remember import save_offline_remember
 
 # endregion
 
@@ -120,6 +121,11 @@ class LoginWindow(QDialog):
                 print(f"[SUCCESS] LoginWindow: Signed in as {username} (developer, offline)")
                 self.signed_in_user = username
                 self.signed_in_role = "developer"
+
+                ## "Keep me logged in" ticked: save the signed note on this PC only.
+                if self.chk_remember.isChecked():
+                    save_offline_remember(username, self.combo_remember.currentData())
+                    
                 ## accept() closes the dialog with a "yes" result.
                 self.accept()
                 return

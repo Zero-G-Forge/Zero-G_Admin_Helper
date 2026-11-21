@@ -91,6 +91,13 @@ except ImportError as e:
     clear_session_token = None
     end_online_session = None
 
+## Guarded import: if offline remember is missing, there's no developer note to clear.
+try:
+    from features.login.offline_remember import clear_offline_remember
+except ImportError as e:
+    print(f"[ERROR] MainCockpit: Could not load offline remember: {e}")
+    clear_offline_remember = None
+
 # endregion
 
 
@@ -389,6 +396,10 @@ class MainCockpit(QMainWindow):
                 if saved_token is not None and end_online_session is not None:
                     end_online_session(saved_token)
                 clear_session_token()
+
+            ## Also forget the developer's offline "Keep me logged in", if there is one.
+            if clear_offline_remember is not None:
+                clear_offline_remember()
 
             ## Clearing the role makes every role check say no (fail closed).
             self.set_signed_in_user(None, None)
