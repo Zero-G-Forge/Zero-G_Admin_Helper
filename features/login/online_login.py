@@ -33,8 +33,9 @@ LOGIN_TIMEOUT_SEC = 5
 def check_online_login(username, password_text, remember=None):
     ## Returns a tuple: (result, details).
     ##   ("ok", {"role": ..., "token": ...})  login accepted
-    ##   ("denied", None)                      wrong username or password
-    ##   ("offline", None)                     service could not be reached
+    ##   ("denied", None)                     wrong username or password
+    ##   ("offline", None)                    service could not be reached
+    ##   ("locked", None)                     too many failed attempts, wait and try again
     ## Anything strange counts as "not signed in" (fail closed).
     login_fields = {"username": username, "password": password_text}
 
@@ -60,6 +61,11 @@ def check_online_login(username, password_text, remember=None):
         return "denied", None
     except urllib.error.HTTPError as e:
         ## HTTPError means the service answered, but said no (401, 400...).
+
+        ## 429 = too many failed tries; the service is locking this name out for a while.
+        if e.code == 429:
+            print("[WARNING] OnlineLogin: Service says too many tries (429)")
+            return "locked", None
         print(f"[WARNING] OnlineLogin: Service refused login ({e.code})")
         return "denied", None
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:

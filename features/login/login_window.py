@@ -159,6 +159,12 @@ class LoginWindow(QDialog):
                 self.input_password.clear()
                 self.lbl_message.setText("Login service unreachable, try again")
                 return
+
+            ## Locked out by the service. It is not counted as a wrong try here, because the service already counted it.
+            if login_result == "locked":
+                self.input_password.clear()
+                self.lbl_message.setText("Too many tries, wait 15 minutes")
+                return
             self.failed_attempts += 1
             
             ## The password box is cleared after every wrong try; the password is never logged.
