@@ -108,6 +108,7 @@ class ApplicationLoader(QDialog):
         self.login_passed = False
         self.signed_in_user = None
         self.signed_in_role = None
+        self.session_token = None
 
         ## Startup stages: (progress %, status text, stage function)
         self.boot_stages = [
@@ -378,6 +379,9 @@ class ApplicationLoader(QDialog):
                 return None
             session_result, session_details = check_saved_session(session_token)
             if session_result == "ok" and session_details is not None:
+
+                ## Hand the token along too, so the cockpit can use it for owner-only things.
+                session_details["token"] = session_token
                 return session_details
             
             ## "denied" means the token is dead for good, so the file is removed. "offline" keeps it for next time.
@@ -401,6 +405,7 @@ class ApplicationLoader(QDialog):
                 self.login_passed = True
                 self.signed_in_user = saved_login["username"]
                 self.signed_in_role = saved_login["role"]
+                self.session_token = saved_login.get("token")
                 print("[SUCCESS] ApplicationLoader: Saved login verified. Resuming startup...")
                 self.boot_timer.start(BOOT_TICK_MS)
                 return
@@ -417,6 +422,7 @@ class ApplicationLoader(QDialog):
                 self.login_passed = True
                 self.signed_in_user = login_window.signed_in_user
                 self.signed_in_role = login_window.signed_in_role
+                self.session_token = login_window.session_token
                 print("[SUCCESS] ApplicationLoader: Login verified. Resuming startup...")
                 self.boot_timer.start(BOOT_TICK_MS)
             else:

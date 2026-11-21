@@ -158,6 +158,9 @@ class MainCockpit(QMainWindow):
             ## Nobody is signed in yet, so there is no role; every role check says no until set_signed_in_user runs.
             self.signed_in_role = None
 
+            ## The online token, used to ask the service for owner-only things like the failed login log.
+            self.session_token = None
+
             ## 2. Central UI Canvas
             self.central_widget = QWidget()
             self.central_widget.setObjectName("CentralWidgetCanvas")
@@ -346,13 +349,16 @@ class MainCockpit(QMainWindow):
     # endregion
 
     # region Signed-In User
-    def set_signed_in_user(self, username, role):
+    def set_signed_in_user(self, username, role, session_token=None):
 
         ## Shows who is signed in, e.g. "ADMIN: PARTICLEWAVE" or "OWNER: RAY".
         try:
 
             ## Keep the role (lowercase, like the database) so pages can check it later.
             self.signed_in_role = str(role).strip().lower() if role else None
+
+            ## Keep the online token too (None if there isn't one). It is never printed.
+            self.session_token = session_token or None
             shown_role = str(role or "user").upper()
             shown_name = str(username or "--").upper()
             self.lbl_admin_name.setText(f"{shown_role}: {shown_name}")
@@ -430,7 +436,7 @@ class MainCockpit(QMainWindow):
                 return
             
             ## Signed in again: show the new user, reload the page for their role, and bring the cockpit back.
-            self.set_signed_in_user(login.signed_in_user, login.signed_in_role)
+            self.set_signed_in_user(login.signed_in_user, login.signed_in_role, login.session_token)
             self._show_page(self.active_page)
             self.show()
 

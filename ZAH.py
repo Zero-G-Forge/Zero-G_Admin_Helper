@@ -100,6 +100,8 @@ def main():
     ## Who signed in, handed to the main window so its header shows the real user.
     signed_in_user = None
     signed_in_role = None
+    session_token = None
+
     if ApplicationLoader is not None:
         try:
             print("[DEBUG] Instantiating Screen 1: Application Loading Screen...")
@@ -111,6 +113,7 @@ def main():
             login_passed = loader.login_passed
             signed_in_user = loader.signed_in_user
             signed_in_role = loader.signed_in_role
+            session_token = loader.session_token
             loader.deleteLater()
         except Exception as e:
             print(f"[ERROR] Loading screen failed: {e}. Opening MainCockpit anyway.")
@@ -135,6 +138,7 @@ def main():
             login_passed = backup_login.exec() == QDialog.DialogCode.Accepted
             signed_in_user = backup_login.signed_in_user
             signed_in_role = backup_login.signed_in_role
+            session_token = backup_login.session_token
         except Exception as e:
             print(f"[ERROR] Backup login failed: {e}. Stopping for safety.")
             login_passed = False
@@ -146,7 +150,7 @@ def main():
     try:
         if main_cockpit is None:
             main_cockpit = MainCockpit()
-        main_cockpit.set_signed_in_user(signed_in_user, signed_in_role)
+        main_cockpit.set_signed_in_user(signed_in_user, signed_in_role, session_token)
         print("[DEBUG] Passing control to MainCockpit...")
         main_cockpit.show()
         sys.exit(app.exec())
