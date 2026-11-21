@@ -10,7 +10,7 @@ import sys
 from features.paths import asset_path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
-    QPushButton, QButtonGroup, QSizePolicy
+    QPushButton, QButtonGroup, QSizePolicy, QMessageBox, QApplication
 )
 from PyQt6.QtCore import Qt, QTimer, QTime, QSize, pyqtSignal
 from PyQt6.QtGui import QPainter, QPixmap, QFont
@@ -74,6 +74,13 @@ except ImportError as e:
     print(f"[ERROR] MainCockpit: Could not load roles: {e}")
     has_role_at_least = None
 
+## Guarded import: if login_window is missing, logout closes ZAH instead (fail closed).
+try:
+    from features.login.login_window import LoginWindow
+except ImportError as e:
+    print(f"[ERROR] MainCockpit: Could not load login_window: {e}")
+    LoginWindow = None
+
 # endregion
 
 
@@ -107,6 +114,7 @@ class MainCockpit(QMainWindow):
     Core Main Administration Cockpit Dashboard Shell.
     Maintains clean layout scaffolding and centralized CSS lookups.
     """
+
     ## (server_name, is_connected): sent every time the bridge state changes,
     ## so any page (like ZeroGBridge) can connect() to it and update itself live.
     ## The pipe is rebuilt on each Connect, so pages listen here, not to the pipe.
@@ -118,6 +126,7 @@ class MainCockpit(QMainWindow):
         super().__init__(parent)
 
         try:
+
             ## 1. Base UI Setup
             print("[DEBUG] MainCockpit: Initializing Structural Window...")
             self.setObjectName("MainCockpitCanvas")
@@ -189,6 +198,7 @@ class MainCockpit(QMainWindow):
 
     def setup_zones(self):
         """Constructs layout zones across the central dashboard canvas."""
+
         ## Each zone builds inside its own try/except, so one failure
         ## leaves the other zones on screen.
 
@@ -298,6 +308,13 @@ class MainCockpit(QMainWindow):
             self.lbl_admin_name = QLabel("USER: --")
             self.lbl_admin_name.setObjectName("AdminNameLabel")
             self.header_layout.addWidget(self.lbl_admin_name)
+
+            ## LOGOUT is for every role, so anyone using "Keep me logged in" can still sign out.
+            self.btn_logout = QPushButton("LOGOUT")
+            self.btn_logout.setObjectName("LogoutButton")
+            self.btn_logout.clicked.connect(self._on_logout_clicked)
+            self.header_layout.addWidget(self.btn_logout)
+
             print("[INFO] MainCockpit: Header bar built")
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to build header bar: {e}")
@@ -313,8 +330,10 @@ class MainCockpit(QMainWindow):
 
     # region Signed-In User
     def set_signed_in_user(self, username, role):
+
         ## Shows who is signed in, e.g. "ADMIN: PARTICLEWAVE" or "OWNER: RAY".
         try:
+
             ## Keep the role (lowercase, like the database) so pages can check it later.
             self.signed_in_role = str(role).strip().lower() if role else None
             shown_role = str(role or "user").upper()
@@ -324,11 +343,71 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Could not show signed-in user: {e}")
     def user_has_role(self, needed_role):
+
         ## Pages ask the cockpit, e.g. user_has_role("developer"), instead of checking role names themselves.
         ## If roles.py failed to load, the answer is always no (fail closed).
         if has_role_at_least is None:
             return False
         return has_role_at_least(self.signed_in_role, needed_role)
+
+    def _on_logout_clicked(self):
+
+        ## Signs the current user out. No role check: every user may log out.
+        try:
+            confirm = QMessageBox.question(
+                self, "Log out", "Log out of Zero-G Admin Helper?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            ## No is the default, so a stray Enter key doesn't log anyone out.
+            if confirm != QMessageBox.StandardButton.Yes:
+                return
+            
+            ## Close the portal first, so nothing stays open for the next user.
+            zgb_portal = getattr(self, "zgb_portal", None)
+            if zgb_portal is not None:
+                zgb_portal.close()
+
+            ## Drop the bridge connection; the next user connects again themselves.
+            self.disconnect_bridge()
+
+            ## Clearing the role makes every role check say no (fail closed).
+            self.set_signed_in_user(None, None)
+
+            ## Reload the page on screen so its buttons grey out for "no one signed in".
+            self._show_page(self.active_page)
+            print("[INFO] MainCockpit: User logged out")
+
+            ## Hide the cockpit while nobody is signed in.
+            self.hide()
+
+            ## Fail closed: without the login window, nobody can sign back in, so ZAH closes.
+            if LoginWindow is None:
+                print("[ERROR] MainCockpit: Login window missing, closing ZAH")
+                app = QApplication.instance()
+                if app is not None:
+                    app.quit()
+                return
+            
+            login = LoginWindow()
+
+            ## exec() waits here until the login window closes with a yes (signed in) or a no (cancel).
+            if login.exec() != LoginWindow.DialogCode.Accepted:
+                print("[STATUS] MainCockpit: Login cancelled after logout, closing ZAH")
+                app = QApplication.instance()
+                if app is not None:
+                    app.quit()
+                return
+            
+            ## Signed in again: show the new user, reload the page for their role, and bring the cockpit back.
+            self.set_signed_in_user(login.signed_in_user, login.signed_in_role)
+            self._show_page(self.active_page)
+            self.show()
+
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Logout failed: {e}")
+
     # endregion
 
 
@@ -371,6 +450,7 @@ class MainCockpit(QMainWindow):
     def _make_nav_button(self, page_key, page_text):
         """Builds one nav button. ALERTS & ANTI-CHEAT also gets the red alert badge."""
         try:
+
             ## '&' is doubled so Qt shows it instead of making a shortcut key;
             ## the leading spaces open a gap between the icon and the text
             btn = QPushButton("   " + page_text.replace("&", "&&"))
@@ -382,11 +462,13 @@ class MainCockpit(QMainWindow):
             if build_nav_icon is not None:
                 btn.setIcon(build_nav_icon(page_key))
                 btn.setIconSize(QSize(22, 22))
+
             ## The lambda passes this button's page key to _on_nav_clicked.
             ## key=page_key locks in the value for each button inside the loop.
             btn.clicked.connect(lambda checked, key=page_key: self._on_nav_clicked(key))
 
             if page_key == "alerts":
+
                 ## Longest label: smaller text (like the mockup) so it fits beside the badge
                 btn.setProperty("compact", "true")
 
@@ -463,6 +545,7 @@ class MainCockpit(QMainWindow):
             ## The bridge field is clickable when ClickableLabel loaded; otherwise a plain QLabel.
             if ClickableLabel is not None:
                 self.lbl_bridge_status = ClickableLabel("ZEROGBRIDGE DISCONNECTED")
+
                 ## A click opens the ZeroGBridge page, same as its nav button.
                 self.lbl_bridge_status.clicked.connect(self._on_bridge_status_clicked)
                 self.lbl_bridge_status.setToolTip("Open ZeroGBridge")
@@ -495,6 +578,7 @@ class MainCockpit(QMainWindow):
     def setup_clock_timer(self):
         """Starts a 1 second local timer that keeps the header clock (HH:MM) current."""
         try:
+
             ## Show the time right away instead of waiting for the first tick.
             self._update_clock()
             self.clock_timer = QTimer(self)
@@ -519,6 +603,7 @@ class MainCockpit(QMainWindow):
 
     def _page_title(self, page_key):
         """Returns the button text for a page key, used as the content title."""
+
         ## Look the key up in NAV_PAGES. Unknown keys fall back to the key in capitals.
         for key, text in NAV_PAGES:
             if key == page_key:
@@ -534,6 +619,7 @@ class MainCockpit(QMainWindow):
             if getattr(self, "lbl_content_header", None) is not None:
                 self.lbl_content_header.setText(self._page_title(page_key))
             print(f"[INFO] MainCockpit: Page selected: {self._page_title(page_key)}")
+
             ## Load the clicked page into the content area (or an ErrorCard if it fails).
             self._show_page(page_key)
         except Exception as e:
@@ -543,6 +629,7 @@ class MainCockpit(QMainWindow):
     ## The old widget comes out, and the new page (or an ErrorCard) goes in.
     def _show_page(self, page_key):
         try:
+
             ## Input check: without the page loader, the placeholder stays and nothing breaks.
             if load_page is None:
                 print(f"[ERROR] MainCockpit: page_loader missing, cannot show {page_key}")
@@ -587,20 +674,24 @@ class MainCockpit(QMainWindow):
         """
         try:
             self.lbl_server_name.setText(str(server_name).upper())
+
             ## Remember the latest bridge news so pages can ask for it (e.g. the ZeroGBridge page).
             ## bool() makes sure it is a real True/False, never some other value.
             self.bridge_server_name = str(server_name)
             self.bridge_connected = bool(is_connected)
             state = "online" if is_connected else "offline"
             self.lbl_server_status_dot.setProperty("state", state)
+
             ## unpolish/polish makes Qt re-read the CSS, so the new dot colour shows.
             ## style() can return None in rare cases, so it is saved and checked before use.
             dot_style = self.lbl_server_status_dot.style()
             if dot_style is not None:
                 dot_style.unpolish(self.lbl_server_status_dot)
                 dot_style.polish(self.lbl_server_status_dot)
+
             ## The status bar gets the same news as the header dot, so they always agree.
             self.update_bridge_status(is_connected)
+
             ## Tell any listening page about the change.
             self.bridge_status_changed.emit(self.bridge_server_name, self.bridge_connected)
         except Exception as e:
@@ -609,10 +700,12 @@ class MainCockpit(QMainWindow):
     def update_bridge_status(self, is_connected):
         """Updates the ZEROGBRIDGE field in the bottom status bar."""
         try:
+
             ## getattr(..., None) gives None instead of crashing if the status bar failed to build.
             lbl = getattr(self, "lbl_bridge_status", None)
             if lbl is None:
                 return
+
             ## Only a real, logged-in connection says CONNECTED (never fake data in the UI).
             if is_connected:
                 lbl.setText("ZEROGBRIDGE CONNECTED")
@@ -620,6 +713,7 @@ class MainCockpit(QMainWindow):
             else:
                 lbl.setText("ZEROGBRIDGE DISCONNECTED")
                 lbl.setProperty("state", "offline")
+
             ## Same unpolish/polish trick as the dot, so any CSS for "state" re-applies.
             lbl_style = lbl.style()
             if lbl_style is not None:
@@ -630,6 +724,7 @@ class MainCockpit(QMainWindow):
 
     def _on_bridge_status_clicked(self):
         """Opens the ZeroGBridge page when the status bar field is clicked."""
+
         ## Reuses the nav click, so the ZEROGBRIDGE button lights up and the page loads.
         self._on_nav_clicked("zerogbridge")
 
@@ -637,6 +732,7 @@ class MainCockpit(QMainWindow):
         """Shows the alert count on the ALERTS & ANTI-CHEAT button; hidden when 0."""
         try:
             count = int(alert_count)
+
             ## Counts above 99 show as '99+' to keep the badge small.
             self.lbl_alert_badge.setText(str(count) if count < 100 else "99+")
             self.lbl_alert_badge.setVisible(count > 0)
@@ -654,6 +750,7 @@ class MainCockpit(QMainWindow):
             if CommandPipe is None:
                 self.update_server_status("OFFLINE", False)
                 return
+
             ## The saved setting decides. If settings can't load, it stays off (fail closed).
             auto_connect = load_app_settings()["bridge_auto_connect"] if load_app_settings else False
             if not auto_connect:
@@ -680,16 +777,19 @@ class MainCockpit(QMainWindow):
             if command_pipe is not None and command_pipe.isRunning():
                 print("[INFO] MainCockpit: Bridge already connected or connecting")
                 return False
+
             ## An old pipe that has already stopped (e.g. a failed login) is thrown away first.
             ## deleteLater() lets Qt free it safely once it is no longer busy.
             if command_pipe is not None:
                 command_pipe.deleteLater()
 
             self.command_pipe = CommandPipe(parent=self)
+
             ## connect() links a signal to a method. Qt delivers it on the window thread,
             ## so update_server_status can safely change the header widgets.
             self.command_pipe.connection_changed.connect(self.update_server_status)
             self.command_pipe.reply_received.connect(self._on_bridge_reply)
+
             ## start() launches the thread, and Qt then calls CommandPipe.run() in the background.
             self.command_pipe.start()
             print("[INFO] MainCockpit: Bridge connect started")
@@ -706,9 +806,11 @@ class MainCockpit(QMainWindow):
             if command_pipe is None:
                 print("[INFO] MainCockpit: No bridge connection to close")
                 return False
+
             ## stop() waits (up to 3 s) for the thread to close its socket and finish.
             command_pipe.stop()
             self.command_pipe = None
+
             ## A normal stop sends no signal, so we report the disconnect ourselves.
             ## The server name is kept, so the header still says which server it was.
             self.update_server_status(getattr(self, "bridge_server_name", "OFFLINE"), False)
@@ -724,18 +826,22 @@ class MainCockpit(QMainWindow):
             if ZeroGBridgePortal is None:
                 print("[ERROR] MainCockpit: ZeroGBridge Portal module missing, cannot open")
                 return False
+
             ## The portal is admin and up; moderators (or no one signed in) can't open it.
             if not self.user_has_role("admin"):
                 print("[WARN] MainCockpit: ZeroGBridge Portal is admin and up, not opened")
                 return False
+
             ## Only one portal at a time: if it's already open, just bring it forward.
             zgb_portal = getattr(self, "zgb_portal", None)
             if zgb_portal is not None:
                 zgb_portal.raise_()
                 zgb_portal.activateWindow()
                 return True
+
             ## parent=self ties the portal to ZAH, so it closes when ZAH closes.
             self.zgb_portal = ZeroGBridgePortal(parent=self)
+
             ## The portal deletes itself when closed; destroyed tells us to forget it.
             self.zgb_portal.destroyed.connect(self._on_zgb_portal_closed)
             self.zgb_portal.show()
@@ -768,6 +874,7 @@ class MainCockpit(QMainWindow):
                     Qt.AspectRatioMode.KeepAspectRatioByExpanding,
                     Qt.TransformationMode.SmoothTransformation,
                 )
+
                 ## Center the cover-scaled image so the edges crop evenly
                 x = (self.width() - scaled_bg.width()) // 2
                 y = (self.height() - scaled_bg.height()) // 2
@@ -792,6 +899,7 @@ class MainCockpit(QMainWindow):
         is set here on each label and button font instead.
         """
         try:
+
             ## Object name -> extra space between letters, in pixels.
             spacing_by_name = {
                 "AppTitleLabel": 2.0,
@@ -805,6 +913,7 @@ class MainCockpit(QMainWindow):
                 "ContentPlaceholderLabel": 2.0,
                 "StatusLabel": 1.5,
             }
+
             ## Apply the spacing to every child widget whose name is in the table.
             for widget in self.findChildren(QWidget):
                 spacing = spacing_by_name.get(widget.objectName())
@@ -829,6 +938,7 @@ class MainCockpit(QMainWindow):
             print(f"[ERROR] MainCockpit: Failed to stop header clock: {e}")
 
         try:
+
             ## Saved to a local name and checked, so Pylance (and Python) know it exists.
             command_pipe = getattr(self, "command_pipe", None)
             if command_pipe is not None:

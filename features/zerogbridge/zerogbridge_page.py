@@ -20,13 +20,16 @@ class ZeroGBridgePage(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+
         ## Name that ZAH_main.css can use to style the page.
         self.setObjectName("ZeroGBridgePage")
+
         ## True once this page is listening to the cockpit's bridge_status_changed signal.
         self.is_listening = False
         self.setup_widgets()
 
     def setup_widgets(self):
+
         ## Top-to-bottom stack, pushed to the top of the page.
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -53,6 +56,7 @@ class ZeroGBridgePage(QWidget):
         self.btn_bridge_connect = QPushButton("CONNECT")
         self.btn_bridge_connect.setObjectName("ZeroGBridgeButton")
         self.btn_bridge_connect.setEnabled(False)
+
         ## clicked fires each time the button is pressed.
         self.btn_bridge_connect.clicked.connect(self._on_connect_clicked)
         button_row.addWidget(self.btn_bridge_connect)
@@ -69,6 +73,9 @@ class ZeroGBridgePage(QWidget):
         self.btn_open_zgb_portal.setObjectName("ZeroGBridgeButton")
         self.btn_open_zgb_portal.clicked.connect(self._on_open_zgb_portal_clicked)
         button_row.addWidget(self.btn_open_zgb_portal)
+
+        ## Starts greyed out; refresh_status turns it on only for admin and up.
+        self.btn_open_zgb_portal.setEnabled(False)
 
         ## addStretch pushes the two buttons to the left instead of stretching them wide.
         button_row.addStretch()
@@ -105,6 +112,7 @@ class ZeroGBridgePage(QWidget):
     ## Reads the real state from the main window (MainCockpit).
     def refresh_status(self):
         try:
+
             ## window() is the top-level window this page sits in: the MainCockpit.
             cockpit = self.window()
 
@@ -152,6 +160,7 @@ class ZeroGBridgePage(QWidget):
             return
         print("[INFO] ZeroGBridgePage: Connect clicked")
         if connect_bridge():
+
             ## While the login runs in the background, both buttons are off so it can't be double-clicked.
             self.lbl_bridge_state.setText("STATUS: CONNECTING...")
             self.btn_bridge_connect.setEnabled(False)
