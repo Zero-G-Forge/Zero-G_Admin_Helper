@@ -30,15 +30,18 @@ LOGIN_TIMEOUT_SEC = 5
 
 # region Online Login Check
 
-def check_online_login(username, password_text):
+def check_online_login(username, password_text, remember=None):
     ## Returns a tuple: (result, details).
     ##   ("ok", {"role": ..., "token": ...})  login accepted
     ##   ("denied", None)                      wrong username or password
     ##   ("offline", None)                     service could not be reached
     ## Anything strange counts as "not signed in" (fail closed).
-    login_body = json.dumps(
-        {"username": username, "password": password_text}
-    ).encode("utf-8")
+    login_fields = {"username": username, "password": password_text}
+    
+    ## remember is only sent when the box was ticked; without it the service gives the normal 8-hour login.
+    if remember:
+        login_fields["remember"] = remember
+    login_body = json.dumps(login_fields).encode("utf-8")
     login_request = urllib.request.Request(
         LOGIN_SERVICE_URL.rstrip("/") + "/login",
         data=login_body,

@@ -7,7 +7,7 @@
 # region Imports
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout, QApplication
+    QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout, QApplication, QCheckBox, QComboBox
 )
 from PyQt6.QtCore import Qt
 from features.login.owner_login import check_owner_login
@@ -31,7 +31,7 @@ class LoginWindow(QDialog):
         super().__init__(parent)
         self.setObjectName("LoginWindow")
         self.setWindowTitle("Zero-G Admin Helper - Login")
-        self.setFixedSize(380, 240)
+        self.setFixedSize(380, 275)
         self.failed_attempts = 0
         ## The signed-in username is kept here so later steps can show it.
         ## Role and session token from the online service; the offline developer login leaves these as developer / None.
@@ -60,6 +60,26 @@ class LoginWindow(QDialog):
         ## Pressing Enter in the password box works the same as clicking LOGIN.
         self.input_password.returnPressed.connect(self._on_login_clicked)
 
+        ## "Keep me logged in" row: a checkbox plus a dropdown for how long.
+        remember_row = QHBoxLayout()
+        self.chk_remember = QCheckBox("Keep me logged in")
+        self.chk_remember.setObjectName("LoginRemember")
+        self.combo_remember = QComboBox()
+        self.combo_remember.setObjectName("LoginRememberTime")
+
+        ## addItem(shown text, hidden data). The hidden data must match the service's REMEMBER_CHOICES keys exactly.
+        self.combo_remember.addItem("8 hours", "8h")
+        self.combo_remember.addItem("12 hours", "12h")
+        self.combo_remember.addItem("1 day", "1d")
+        self.combo_remember.addItem("7 days", "7d")
+        self.combo_remember.addItem("Unlimited", "unlimited")
+
+        ## The dropdown stays greyed out until the box is ticked. toggled sends True or False, which goes straight into setEnabled.
+        self.combo_remember.setEnabled(False)
+        self.chk_remember.toggled.connect(self.combo_remember.setEnabled)
+        remember_row.addWidget(self.chk_remember)
+        remember_row.addWidget(self.combo_remember)
+
         self.lbl_message = QLabel("")
         self.lbl_message.setObjectName("LoginMessage")
         self.lbl_message.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -79,6 +99,7 @@ class LoginWindow(QDialog):
         layout.addWidget(self.lbl_title)
         layout.addWidget(self.input_username)
         layout.addWidget(self.input_password)
+        layout.addLayout(remember_row)
         layout.addWidget(self.lbl_message)
         layout.addLayout(button_row)
 
@@ -105,7 +126,12 @@ class LoginWindow(QDialog):
             self.lbl_message.setText("Checking login...")
             ## processEvents() lets the label redraw before the network call waits.
             QApplication.processEvents()
-            login_result, login_details = check_online_login(username, password_text)
+
+            ## Only send a remember choice when the box is ticked. currentData() gives the hidden value, like "7d".
+            remember_choice = None
+            if self.chk_remember.isChecked():
+                remember_choice = self.combo_remember.currentData()
+            login_result, login_details = check_online_login(username, password_text, remember_choice)
 
             if login_result == "ok" and login_details is not None:
                 self.signed_in_user = username
