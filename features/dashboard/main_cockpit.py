@@ -724,6 +724,10 @@ class MainCockpit(QMainWindow):
             if ZeroGBridgePortal is None:
                 print("[ERROR] MainCockpit: ZeroGBridge Portal module missing, cannot open")
                 return False
+            ## The portal is admin and up; moderators (or no one signed in) can't open it.
+            if not self.user_has_role("admin"):
+                print("[WARN] MainCockpit: ZeroGBridge Portal is admin and up, not opened")
+                return False
             ## Only one portal at a time: if it's already open, just bring it forward.
             zgb_portal = getattr(self, "zgb_portal", None)
             if zgb_portal is not None:

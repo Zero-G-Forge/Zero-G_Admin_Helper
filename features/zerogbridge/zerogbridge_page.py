@@ -107,18 +107,27 @@ class ZeroGBridgePage(QWidget):
         try:
             ## window() is the top-level window this page sits in: the MainCockpit.
             cockpit = self.window()
+
+            ## Greyed out unless the signed-in user is admin and up (fails closed if the cockpit isn't found).
+            ## This lives here, not in setup_widgets, because the page isn't inside the cockpit yet when it's built.
+            user_has_role = getattr(cockpit, "user_has_role", None)
+            self.btn_open_zgb_portal.setEnabled(bool(user_has_role and user_has_role("admin")))
+
             ## Fail closed: if the cockpit hasn't recorded any bridge news, say UNKNOWN, never a guess.
             server_name = getattr(cockpit, "bridge_server_name", None)
             is_connected = getattr(cockpit, "bridge_connected", None)
             if server_name is None or is_connected is None:
                 self.lbl_bridge_server.setText("SERVER: --")
                 self.lbl_bridge_state.setText("STATUS: UNKNOWN")
+
                 ## Unknown state: both buttons stay off (fail closed).
                 self.btn_bridge_connect.setEnabled(False)
                 self.btn_bridge_disconnect.setEnabled(False)
                 return
+            
             self.lbl_bridge_server.setText(f"SERVER: {str(server_name).upper()}")
             self.lbl_bridge_state.setText("STATUS: CONNECTED" if is_connected else "STATUS: DISCONNECTED")
+            
             ## Only the button that makes sense right now is clickable.
             self.btn_bridge_connect.setEnabled(not is_connected)
             self.btn_bridge_disconnect.setEnabled(bool(is_connected))
