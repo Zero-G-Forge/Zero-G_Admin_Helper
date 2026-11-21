@@ -130,6 +130,41 @@ def end_online_session(session_token):
         print(f"[WARNING] OnlineLogin: Could not end the saved login on the service: {e}")
         return False
 
+## Asks the service for the newest failed logins (owners only).
+## Returns the same kind of tuple as the others:
+##   ("ok", [ {"failed_at", "username", "source", "reason"}, more entries ])  list received
+##   ("denied", None)                                                        not an owner, or the token ran out
+##   ("offline", None)                                                       service could not be reached
+
+def fetch_failed_logins(session_token, limit=50):
+    fetch_body = json.dumps({"token": session_token, "limit": limit}).encode("utf-8")
+    fetch_request = urllib.request.Request(
+        LOGIN_SERVICE_URL.rstrip("/") + "/failed_logins",
+        data=fetch_body,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(fetch_request, timeout=LOGIN_TIMEOUT_SEC) as reply:
+            reply_data = json.loads(reply.read().decode("utf-8"))
+
+        ## A 200 reply must hold a real list, or it is not trusted.
+        if (isinstance(reply_data, dict) and reply_data.get("status") == "ok"
+                and isinstance(reply_data.get("entries"), list)):
+            print(f"[SUCCESS] OnlineLogin: Got {len(reply_data['entries'])} failed login entries")
+            return "ok", reply_data["entries"]
+        print("[WARNING] OnlineLogin: Service sent an unexpected failed login reply")
+        return "denied", None
+    except urllib.error.HTTPError as e:
+        
+        ## 403 means this login is not an owner, or its token ran out. The token is never logged.
+        print(f"[WARNING] OnlineLogin: Service refused the failed login list ({e.code})")
+        return "denied", None
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        
+        ## No answer at all (no internet, service down).
+        print(f"[ERROR] OnlineLogin: Service unreachable for failed login list: {e}")
+        return "offline", None
 
 
 # endregion
