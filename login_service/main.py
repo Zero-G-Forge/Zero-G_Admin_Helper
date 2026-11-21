@@ -18,6 +18,12 @@ from user_store import check_user, ensure_users_table
 ## (ZAH-DB, or memory when testing).
 from session_store import (ensure_sessions_table, create_session, check_session, delete_session, REMEMBER_CHOICES,)
 
+## rate_limiter counts failed logins and locks out guessing.
+from rate_limiter import is_locked_out, record_failure, record_success
+
+## login_log saves every failed login in ZAH-DB (or memory when testing).
+from login_log import ensure_login_log_table, log_failed_login
+
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 # endregion
@@ -49,6 +55,7 @@ active_sessions = {}
 # region Request Handler
 
 class LoginRequestHandler(BaseHTTPRequestHandler):
+
     ## Sends one JSON reply with a status code (200 = OK, 404 = not found, and so on).
     def _send_json(self, status_code, reply_data):
         reply_bytes = json.dumps(reply_data).encode("utf-8")
@@ -57,6 +64,13 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(reply_bytes)))
         self.end_headers()
         self.wfile.write(reply_bytes)
+
+    ## The address the request came from. Behind bot-hosting's proxy, the real address is the first one in X-Forwarded-For.
+    def _client_source(self):
+        forwarded_for = self.headers.get("X-Forwarded-For", "")
+        if forwarded_for:
+            return forwarded_for.split(",")[0].strip()
+        return self.client_address[0]
 
     ## do_GET runs for every GET request; self.path is the address part, like "/health".
     def do_GET(self):
@@ -81,6 +95,7 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
             if body_length <= 0 or body_length > MAX_BODY_BYTES:
                 self._send_json(400, {"status": "error", "message": "bad request"})
                 return
+
             ## Junk that is not JSON (or not a {...} object) is the client's fault: 400, not 500.
             try:
                 login_data = json.loads(self.rfile.read(body_length).decode("utf-8"))
@@ -109,14 +124,28 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
                 return
 
             username = str(login_data.get("username", "")).strip()
+            source = self._client_source()
+
+            ## 429 = too many tries. Checked before the password, so a locked account can't be guessed at all.
+            if is_locked_out(username, source):
+                print(f"[WARNING] LoginService: Too many failed logins for {username or '(blank)'}, refused")
+                log_failed_login(username, source, "locked out")
+                self._send_json(429, {"status": "error", "message": "too many tries, wait and try again"})
+                return
+
             role = check_user(username, login_data.get("password", ""))
 
             ## 401 = not allowed. The same message for a wrong user or wrong password,
             ## so nobody can use it to find out which usernames exist.
             if role is None:
                 print(f"[WARNING] LoginService: Failed login for {username or '(blank)'}")
+                record_failure(username, source)
+                log_failed_login(username, source, "wrong password")
                 self._send_json(401, {"status": "error", "message": "wrong username or password"})
                 return
+
+            ## Good login: clear this username's failed tries.
+            record_success(username)
 
             ## "Keep me logged in": a remember choice saves the session (ZAH-DB) for that long. A made-up choice is refused; no choice keeps the normal 8-hour login.
             remember = login_data.get("remember")
@@ -158,6 +187,7 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
 
 def main():
     print(f"[INFO] LoginService: Starting on {SERVICE_HOST}:{SERVICE_PORT}")
+
     ## Make sure ZAH-DB has its users table before any login comes in.
     ## With no DATABASE_URL (local testing), this just prints a WARN and the JSON file is used.
     ensure_users_table()
@@ -165,6 +195,9 @@ def main():
     ## Then the sessions table (after users, because
     ## each session points at a user).
     ensure_sessions_table()
+
+    ## Then the failed login log table.
+    ensure_login_log_table()
 
     ## ThreadingHTTPServer answers several requests at once, so one slow client can't block others.
     server = ThreadingHTTPServer((SERVICE_HOST, SERVICE_PORT), LoginRequestHandler)
