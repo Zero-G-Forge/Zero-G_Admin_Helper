@@ -204,6 +204,35 @@ QPushButton#NavSubButton[compact="true"] {
     background: transparent;
 }
 
+/* Pop-out menu for WORLD, LIBRARY and SETTINGS: dark glass panel with a thin cyan edge */
+QMenu#NavGroupMenu {
+    background-color: rgba(8, 18, 30, 245);
+    border: 1px solid rgba(51, 214, 255, 110);
+    border-radius: 8px;
+    padding: 6px;
+    color: #c8d8e4;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 1px;
+}
+
+/* One row per page: room for the icon on the left */
+QMenu#NavGroupMenu::item {
+    padding: 9px 28px 9px 10px;
+    border-radius: 5px;
+    background: transparent;
+}
+
+/* Row under the mouse: soft cyan fill and cyan text */
+QMenu#NavGroupMenu::item:selected {
+    background-color: rgba(51, 214, 255, 38);
+    color: #33d6ff;
+}
+
+QMenu#NavGroupMenu::icon {
+    padding-left: 6px;
+}
+
 /* ALERTS & ANTI-CHEAT: smaller text so the label fits beside its badge */
 QPushButton#NavButton[compact="true"] {
     font-size: 12px;

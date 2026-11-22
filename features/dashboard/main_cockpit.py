@@ -10,10 +10,10 @@ import sys
 from features.paths import asset_path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
-    QPushButton, QButtonGroup, QSizePolicy, QMessageBox, QApplication, QScrollArea
+    QPushButton, QButtonGroup, QSizePolicy, QMessageBox, QApplication, QScrollArea, QMenu
 )
-from PyQt6.QtCore import Qt, QTimer, QTime, QSize, pyqtSignal
-from PyQt6.QtGui import QPainter, QPixmap, QFont
+from PyQt6.QtCore import Qt, QTimer, QTime, QSize, QPoint, pyqtSignal
+from PyQt6.QtGui import QPainter, QPixmap, QFont, QAction, QIcon
 
 # endregion
 
@@ -132,7 +132,7 @@ NAV_GROUPS = {
     "settings": ("SETTINGS", "settings", ["alerts", "bans_audit", "users", "ecf_editor", "backups"]),
 }
 
-## Top-to-bottom order of the nav column. A key found in NAV_GROUPS becomes a fold-out group.
+## Top-to-bottom order of the nav column. A key found in NAV_GROUPS becomes a pop-out menu group.
 NAV_LAYOUT = ["dashboard", "chat", "players", "factions", "world", "scheduler", "zerogbridge", "library", "settings"]
 
 ## Font used by every label (Inter on Zorin, DejaVu Sans as a fallback)
@@ -490,13 +490,13 @@ class MainCockpit(QMainWindow):
             self.nav_button_group = QButtonGroup(self)
             self.nav_button_group.setExclusive(True)
 
-            ## Fold-out group bookkeeping: the box holding each group's buttons, each group's
-            ## title button and arrow, and which group each child page belongs to.
-            self.nav_group_boxes = {}
-            self.nav_group_arrows = {}
+            ## Pop-out group bookkeeping: each group's title button, and which group each child page belongs to.
+            ## alert_count is kept so the ALERTS & ANTI-CHEAT row in the SETTINGS menu can show it.
+            self.nav_group_titles = {}
             self.nav_child_group = {}
+            self.alert_count = 0
 
-            ## One button (or fold-out group) per entry in NAV_LAYOUT. A button that fails to build is skipped.
+            ## One button (or pop-out group) per entry in NAV_LAYOUT. A button that fails to build is skipped.
             for item_key in NAV_LAYOUT:
                 if item_key in NAV_GROUPS:
                     self._add_nav_group(item_key)
@@ -564,80 +564,124 @@ class MainCockpit(QMainWindow):
             return None
 
     def _add_nav_group(self, group_key):
-        """Adds one fold-out group: a title button with an arrow, and a box of smaller buttons under it."""
+        """Adds one pop-out group: a title button with a ▸ arrow. Clicking it pops a menu of its pages out to the right."""
         try:
             group_title, title_page, child_keys = NAV_GROUPS[group_key]
 
-            ## Title button. SETTINGS opens its own page; WORLD and LIBRARY only fold.
-            if title_page is not None:
-                btn_title = self._make_nav_button(title_page, group_title)
-            else:
-                btn_title = self._make_nav_button(group_key, group_title, opens_page=False)
+            ## Title button. SETTINGS also opens its own page; WORLD and LIBRARY only pop their menu out.
+            ## All titles are checkable, so the title lights up while one of its pages is showing.
+            btn_title = self._make_nav_button(title_page if title_page is not None else group_key, group_title, opens_page=False)
             if btn_title is None:
                 return
+            btn_title.setCheckable(True)
+            self.nav_button_group.addButton(btn_title)
+            self.nav_group_titles[group_key] = btn_title
             if title_page is not None:
                 self.nav_buttons[title_page] = btn_title
-                self.nav_button_group.addButton(btn_title)
+            for child_key in child_keys:
+                self.nav_child_group[child_key] = group_key
 
-            ## Arrow on the right of the title: ▸ folded in, ▾ folded out.
+            ## Right side of the title: the red alert badge (SETTINGS only, since ALERTS lives in its menu), then the ▸ arrow.
             arrow_layout = QHBoxLayout(btn_title)
             arrow_layout.setContentsMargins(0, 0, 14, 0)
+            arrow_layout.setSpacing(8)
             arrow_layout.addStretch()
+            if "alerts" in child_keys:
+
+                ## Red alert count badge, hidden while the count is 0 (moved here from the old ALERTS button)
+                self.lbl_alert_badge = QLabel("0")
+                self.lbl_alert_badge.setObjectName("AlertBadge")
+                self.lbl_alert_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.lbl_alert_badge.setFixedSize(18, 18)
+                self.lbl_alert_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+                arrow_layout.addWidget(self.lbl_alert_badge, alignment=Qt.AlignmentFlag.AlignVCenter)
+                self.lbl_alert_badge.hide()
             lbl_arrow = QLabel("▸")
             lbl_arrow.setObjectName("NavGroupArrow")
             lbl_arrow.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             arrow_layout.addWidget(lbl_arrow, alignment=Qt.AlignmentFlag.AlignVCenter)
-            self.nav_group_arrows[group_key] = lbl_arrow
 
-            ## A click on the title folds the group in or out.
-            btn_title.clicked.connect(lambda checked, key=group_key: self._toggle_nav_group(key))
+            ## A click on the title pops its menu out.
+            btn_title.clicked.connect(lambda checked, key=group_key: self._on_nav_group_clicked(key))
             self.left_column.addWidget(btn_title)
-
-            ## The box of child buttons, indented a little and hidden until the group is opened.
-            group_box = QWidget()
-            group_box.setObjectName("NavGroupBox")
-            group_box_layout = QVBoxLayout(group_box)
-            group_box_layout.setContentsMargins(18, 0, 0, 0)
-            group_box_layout.setSpacing(4)
-            for child_key in child_keys:
-                btn_child = self._make_nav_button(child_key, self._page_title(child_key), is_sub=True)
-                if btn_child is None:
-                    continue
-                self.nav_buttons[child_key] = btn_child
-                self.nav_button_group.addButton(btn_child)
-                self.nav_child_group[child_key] = group_key
-                group_box_layout.addWidget(btn_child)
-            group_box.setVisible(False)
-            self.nav_group_boxes[group_key] = group_box
-            self.left_column.addWidget(group_box)
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to build nav group {group_key}: {e}")
 
-    def _toggle_nav_group(self, group_key):
-        """Folds a nav group out if it is closed, or in if it is open."""
-        group_box = self.nav_group_boxes.get(group_key)
-        if group_box is None:
-            return
-        self._set_nav_group_open(group_key, not group_box.isVisible())
-
-    def _set_nav_group_open(self, group_key, is_open):
-        """Shows or hides a group's buttons and flips its arrow."""
+    def _on_nav_group_clicked(self, group_key):
+        """A group title was clicked: SETTINGS opens its page first, then the group's menu pops out."""
         try:
-            group_box = self.nav_group_boxes.get(group_key)
-            if group_box is None:
-                return
+            group_title, title_page, child_keys = NAV_GROUPS[group_key]
+            if title_page is not None:
+                self._on_nav_clicked(title_page)
+            self._show_nav_group_menu(group_key)
 
-            ## Only one group open at a time: opening one folds the others in, so the column stays short.
-            if is_open:
-                for other_key in self.nav_group_boxes:
-                    if other_key != group_key and self.nav_group_boxes[other_key].isVisible():
-                        self._set_nav_group_open(other_key, False)
-            group_box.setVisible(is_open)
-            lbl_arrow = self.nav_group_arrows.get(group_key)
-            if lbl_arrow is not None:
-                lbl_arrow.setText("▾" if is_open else "▸")
+            ## The menu is closed again here. If nothing new was picked, put the highlight back on the page
+            ## that is really showing (clicking WORLD lights it up even if you then cancel the menu).
+            self._sync_nav_highlight()
         except Exception as e:
-            print(f"[ERROR] MainCockpit: Failed to fold nav group {group_key}: {e}")
+            print(f"[ERROR] MainCockpit: Failed to open nav group {group_key}: {e}")
+
+    def _build_nav_group_menu(self, group_key):
+        """Builds the pop-out menu for one group: an icon and a name per page, the page that is showing in cyan."""
+        group_title, title_page, child_keys = NAV_GROUPS[group_key]
+        menu = QMenu(self)
+        menu.setObjectName("NavGroupMenu")
+
+        ## Frameless and see-through behind, so the rounded corners in ZAH_main.css show cleanly.
+        menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint)
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        for child_key in child_keys:
+            child_text = self._page_title(child_key)
+
+            ## The ALERTS row shows the open alert count, like the badge on SETTINGS.
+            if child_key == "alerts" and self.alert_count > 0:
+                child_text = f"{child_text}  ({self.alert_count if self.alert_count < 100 else '99+'})"
+
+            ## '&' is doubled so Qt shows it instead of making a shortcut key.
+            action = QAction(child_text.replace("&", "&&"), menu)
+            if build_nav_icon is not None:
+
+                ## The page that is showing gets its cyan (selected) icon and bold text.
+                is_current = child_key == getattr(self, "active_page", None)
+                icon = build_nav_icon(child_key)
+                state = icon.State.On if is_current else icon.State.Off
+                action.setIcon(QIcon(icon.pixmap(QSize(18, 18), icon.Mode.Normal, state)))
+                if is_current:
+                    bold_font = action.font()
+                    bold_font.setBold(True)
+                    action.setFont(bold_font)
+
+            ## key=child_key locks in the value for each row inside the loop.
+            action.triggered.connect(lambda checked, key=child_key: self._on_nav_clicked(key))
+            menu.addAction(action)
+        return menu
+
+    def _show_nav_group_menu(self, group_key):
+        """Pops the group's menu out just right of its title button, lined up with the button's top."""
+        try:
+            btn_title = self.nav_group_titles.get(group_key)
+            if btn_title is None:
+                return
+            menu = self._build_nav_group_menu(group_key)
+            menu_spot = btn_title.mapToGlobal(QPoint(btn_title.width() + 8, 0))
+
+            ## exec() waits here until a row is picked or the menu is closed (click outside or Esc).
+            menu.exec(menu_spot)
+            menu.deleteLater()
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to show nav menu {group_key}: {e}")
+
+    def _sync_nav_highlight(self):
+        """Lights up the nav button for the page that is showing: its own button, or its group's title."""
+        try:
+            page_key = getattr(self, "active_page", None)
+            group_key = self.nav_child_group.get(page_key)
+            if group_key is not None and group_key in self.nav_group_titles:
+                self.nav_group_titles[group_key].setChecked(True)
+            elif page_key in self.nav_buttons:
+                self.nav_buttons[page_key].setChecked(True)
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to sync nav highlight: {e}")
 
     # endregion
 
@@ -765,17 +809,13 @@ class MainCockpit(QMainWindow):
         """Selects a nav page and updates the content title. Pages load here in a later step."""
         try:
             self.active_page = page_key
-            if page_key in self.nav_buttons:
-                self.nav_buttons[page_key].setChecked(True)
 
-            ## A page inside a closed group (e.g. USERS under SETTINGS) folds that group out, so its button shows.
-            child_group = getattr(self, "nav_child_group", {}).get(page_key)
-            if child_group is not None:
-                self._set_nav_group_open(child_group, True)
+            ## Light up the page's own button, or its group's title for a page in a pop-out menu (e.g. USERS lights SETTINGS).
+            self._sync_nav_highlight()
 
-            ## Scroll the nav so the picked button is in view. singleShot(0) waits until Qt has
-            ## laid out the newly opened group, otherwise the button's position isn't known yet.
-            picked_button = self.nav_buttons.get(page_key)
+            ## Scroll the nav so the lit button is in view. singleShot(0) waits until Qt has
+            ## finished laying out, otherwise the button's position isn't known yet.
+            picked_button = self.nav_group_titles.get(self.nav_child_group.get(page_key), self.nav_buttons.get(page_key))
             if picked_button is not None and isinstance(getattr(self, "nav_column", None), QScrollArea):
                 QTimer.singleShot(0, lambda: self.nav_column.ensureWidgetVisible(picked_button))
             if getattr(self, "lbl_content_header", None) is not None:
@@ -891,9 +931,12 @@ class MainCockpit(QMainWindow):
         self._on_nav_clicked("zerogbridge")
 
     def update_alert_badge(self, alert_count):
-        """Shows the alert count on the ALERTS & ANTI-CHEAT button; hidden when 0."""
+        """Shows the alert count on the SETTINGS button (ALERTS & ANTI-CHEAT is in its menu); hidden when 0."""
         try:
             count = int(alert_count)
+
+            ## Kept so the ALERTS & ANTI-CHEAT row in the SETTINGS menu shows the same count.
+            self.alert_count = count
 
             ## Counts above 99 show as '99+' to keep the badge small.
             self.lbl_alert_badge.setText(str(count) if count < 100 else "99+")
