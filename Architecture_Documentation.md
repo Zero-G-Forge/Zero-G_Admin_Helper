@@ -40,7 +40,7 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 | `features/login/` | Login window, password hashing, online and offline sessions |
 | `features/settings/` | Settings page and `app_settings.json` helpers |
 | `features/server_files/` | Read-only download of the server's editable files (bridge client, worker thread, local folder rules) |
-| `tests/` | Python checks for the download (`test_server_files.py`, run with pytest) |
+| `tests/` | Python checks, run with `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests -q`: download (`test_server_files.py`), downloaded-file lookups (`test_local_files.py`), validate/diff/save (`test_edit_tools.py`), and uploads, role gate, LIVE MODE and core upload against the local harness only (`test_server_writes.py`) |
 | `features/library/` | Shared Items and Blueprints library (tiles, stats, ECF loading) |
 | `features/ecf_editor/` | ECF Editor page and code view |
 | `features/pda_editor/` | PDA Editor page and YAML highlighter |

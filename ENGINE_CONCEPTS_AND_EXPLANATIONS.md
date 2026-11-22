@@ -406,6 +406,10 @@ LIVE MODE is a switch, not a setting: ZAH forgets it on every start and every si
 
 The portal's Browse button can now send a new `ZeroGBridge.Core.dll` (and its `.pdb`) into the server's `Updates/` folder. That alone does not change the running bridge. The usual Reload now confirmation appears next, and only that loads the new core. Developer only.
 
+### How the uploads were tested without touching the server
+
+The tests start the bridge's real C# file code as a small local stand-in server (`ServerFilesTest serve`), with `ZGB_TEST_MODDIR` pointing at a throwaway folder for its `Uploads/`, `Backups/` and `Updates/`. ZAH then uploads to that stand-in exactly as it would to the real one. The tests check the happy path, a refused stale upload, every "No" answer, the role gate, LIVE MODE, and a core upload. The live server was never written to.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free
