@@ -1,9 +1,10 @@
 ## ==========================================
 ## ZERO-G ADMIN HELPER - ECF EDITOR PAGE
 ## Layout follows .scratchpad/.conceptual/Concept_11-17/ECF_Editor.jpg:
-## a toolbar (file picker, DOWNLOAD, VALIDATE, SAVE, UPLOAD) across the top,
-## TRADERS on the left, ITEMS in the middle, VALIDATION and CHANGES PREVIEW on the right,
-## and a backup line along the bottom.
+## a toolbar (file picker, DOWNLOAD, VALIDATE, CHANGES PREVIEW, SAVE, UPLOAD) across the top,
+## TRADERS on the left, the ITEMS table / CODE editor filling the rest, and a backup line along the bottom.
+## (Ray, Nov 22, 2026: the VALIDATION plate was removed since VALIDATE is a button, and
+## CHANGES PREVIEW moved to a toolbar button that opens it in its own window.)
 ## Layout only for now: no ECF file is loaded yet, so every panel shows "nothing yet".
 ## UPLOAD TO SERVER changes the live server, so it stays locked until Ray OKs that step.
 ## ==========================================
@@ -16,7 +17,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QPushButton, QComboBox, QLineEdit, QListWidget, QTableWidget,
                              QAbstractItemView, QHeaderView, QPlainTextEdit, QSizePolicy,
-                             QStackedWidget, QButtonGroup)
+                             QStackedWidget, QButtonGroup, QDialog)
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
@@ -92,13 +93,19 @@ class EcfEditorPage(QWidget):
         ## It copies the whole folder of .ecf files down, so any of them can be picked and edited here.
         self.btn_download = self._make_tool_button("DOWNLOAD FOLDER FROM SERVER (READ-ONLY)", "DashActionButton")
         self.btn_validate = self._make_tool_button("VALIDATE", "DashActionButton")
+
+        ## CHANGES PREVIEW only shows the local edits, so it works now (it opens its own window).
+        self.btn_changes = self._make_tool_button("CHANGES PREVIEW", "DashActionButton")
+        self.btn_changes.setEnabled(True)
+        self.btn_changes.setToolTip("See what you changed compared to the downloaded file.")
+        self.btn_changes.clicked.connect(self._show_changes_preview)
         self.btn_save = self._make_tool_button("SAVE (BACKUP FIRST)", "DashActionButton")
 
         ## UPLOAD changes the live server, so it's amber with a lock, like the other server-changing buttons.
         self.btn_upload = self._make_tool_button("🔒  UPLOAD TO SERVER", "AlertBanButton")
-        for tool_button in (self.btn_download, self.btn_validate, self.btn_save, self.btn_upload):
+        for tool_button in (self.btn_download, self.btn_validate, self.btn_changes, self.btn_save, self.btn_upload):
             toolbar_layout.addWidget(tool_button)
-        page_grid.addWidget(toolbar_card, 0, 0, 1, 3)
+        page_grid.addWidget(toolbar_card, 0, 0, 1, 2)
 
         # endregion
 
@@ -182,34 +189,23 @@ class EcfEditorPage(QWidget):
 
         # endregion
 
-        # region Validation
-
-        ## Each check will be a line with a green tick or a red warning, e.g. "Brackets OK".
-        validation_card, validation_layout = make_card("VALIDATION")
-        self.validation_box = QFrame()
-        self.validation_box.setObjectName("DashInnerBox")
-        self.validation_box_layout = QVBoxLayout(self.validation_box)
-        self.validation_box_layout.setContentsMargins(12, 10, 12, 10)
-        self.validation_box_layout.setSpacing(8)
-        self.lbl_validation_empty = QLabel("Not validated yet.")
-        self.lbl_validation_empty.setObjectName("DashEmptyLabel")
-        self.validation_box_layout.addWidget(self.lbl_validation_empty)
-        validation_layout.addWidget(self.validation_box)
-        validation_layout.addStretch()
-        page_grid.addWidget(validation_card, 1, 2)
-
-        # endregion
-
         # region Changes Preview
 
         ## Lines added (+, green) and removed (-, red) compared to the downloaded file. Read-only.
+        ## It lives in its own window (opened by the CHANGES PREVIEW button) instead of on the page.
+        self.changes_dialog = QDialog(self)
+        self.changes_dialog.setObjectName("EcfChangesDialog")
+        self.changes_dialog.setWindowTitle("Changes Preview")
+        self.changes_dialog.resize(700, 480)
+        changes_dialog_layout = QVBoxLayout(self.changes_dialog)
+        changes_dialog_layout.setContentsMargins(0, 0, 0, 0)
         changes_card, changes_layout = make_card("CHANGES PREVIEW")
         self.txt_changes = QPlainTextEdit()
         self.txt_changes.setObjectName("EcfChangesBox")
         self.txt_changes.setReadOnly(True)
         self.txt_changes.setPlaceholderText("No changes yet.")
         changes_layout.addWidget(self.txt_changes, stretch=1)
-        page_grid.addWidget(changes_card, 2, 2)
+        changes_dialog_layout.addWidget(changes_card)
 
         # endregion
 
@@ -224,14 +220,13 @@ class EcfEditorPage(QWidget):
         self.lbl_backup.setObjectName("EcfBackupLabel")
         backup_layout.addWidget(self.lbl_backup)
         backup_layout.addStretch()
-        page_grid.addWidget(backup_card, 3, 0, 1, 3)
+        page_grid.addWidget(backup_card, 3, 0, 1, 2)
 
         # endregion
 
-        ## Column widths roughly match the mockup: 3 : 6 : 4. The cards share the height between rows 1 and 2.
+        ## Two columns now: the list (narrow) and the editor (wide), 3 : 10. The cards share the height between rows 1 and 2.
         page_grid.setColumnStretch(0, 3)
-        page_grid.setColumnStretch(1, 6)
-        page_grid.setColumnStretch(2, 4)
+        page_grid.setColumnStretch(1, 10)
         page_grid.setRowStretch(1, 1)
         page_grid.setRowStretch(2, 1)
 
@@ -279,6 +274,12 @@ class EcfEditorPage(QWidget):
     # endregion
 
     # region Helpers
+
+    def _show_changes_preview(self):
+        """Opens the Changes Preview window (or brings it to the front if it's already open)."""
+        self.changes_dialog.show()
+        self.changes_dialog.raise_()
+        self.changes_dialog.activateWindow()
 
     def _on_view_clicked(self, view_key):
         """Switches the middle card between the TABLE and CODE views and updates its title."""

@@ -832,6 +832,11 @@ QListWidget#EcfTraderList::item:selected {
     color: #ffffff;
 }
 
+/* Changes Preview window (opened by the toolbar button): same dark blue as the cockpit */
+QDialog#EcfChangesDialog {
+    background-color: #08121e;
+}
+
 /* Changes preview: monospace, like the alerts command preview */
 QPlainTextEdit#EcfChangesBox {
     background-color: rgba(5, 14, 24, 180);
