@@ -24,7 +24,8 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 - **Bridge auto-connect** is off by default and is stored in `data/app_settings.json`.
 - Commands that would change the server (kick, ban, upload, live save, restart, and similar) stay **disabled** in the user interface, with the tooltip `Coming in a later step.`, until they are wired and approved.
 - Secrets (auth token, passwords, database URL, developer key, session tokens) are never printed, logged, or committed. Local secrets live under `data/`, which is git-ignored.
-- New bridge commands need explicit approval before they are written. A file-send command for downloading server files is **not in the source yet**.
+- New bridge commands need explicit approval before they are written. The read-only `files:` commands (`files:info`, `files:list`, `files:get`) were approved and added in core 1.6.1. They can read, never write.
+- The server files download is **read-only** on both sides: the bridge only opens files with read access, and ZAH never deletes anything on this PC.
 
 ## Folder Layout
 
@@ -37,6 +38,8 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 | `features/bridge/` | Socket login, command queue thread, server profile loading |
 | `features/login/` | Login window, password hashing, online and offline sessions |
 | `features/settings/` | Settings page and `app_settings.json` helpers |
+| `features/server_files/` | Read-only download of the server's editable files (bridge client, worker thread, local folder rules) |
+| `tests/` | Python checks for the download (`test_server_files.py`, run with pytest) |
 | `features/library/` | Shared Items and Blueprints library (tiles, stats, ECF loading) |
 | `features/ecf_editor/` | ECF Editor page and code view |
 | `features/pda_editor/` | PDA Editor page and YAML highlighter |
@@ -49,6 +52,7 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 | `assets/ZAH_main.css` | Main stylesheet, organized with CSS region markers |
 | `data/` | Runtime files only (settings, sessions, server profiles). Not in git |
 | `ZeroGBridge/` | C# mod source: Loader, Core, Network, Logging |
+| `ZeroGBridge/tests/ServerFilesTest/` | C# self-checks for `Network/ServerFiles.cs` (`dotnet run`), plus a `serve` mode used by the Python tests |
 | `ZeroGBridge/bin/`, `ZeroGBridge/obj/` | Build output (not documentation targets) |
 | `ZAH_Legacy/` | Previous program, kept for reference, not part of the current app |
 | `.instructions/` | AI constraints, Markdown lint readme, and example files |
@@ -131,7 +135,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `playfields` | PLAYFIELDS | `features.playfields.playfields_page` | `PlayfieldsPage` | Layout; UNLOAD, RESTART PLAYFIELD, and WIPE disabled |
 | `scheduler` | SCHEDULER | `features.scheduler.scheduler_page` | `SchedulerPage` | Layout only |
 | `zerogbridge` | ZEROGBRIDGE | `features.zerogbridge.zerogbridge_page` | `ZeroGBridgePage` | Live connect and disconnect; portal button for admin and above |
-| `settings` | SETTINGS | `features.settings.settings_page` | `SettingsPage` | Auto-connect is live; SERVER FILES and LIVE MODE are layout only |
+| `settings` | SETTINGS | `features.settings.settings_page` | `SettingsPage` | Auto-connect is live; the read-only server files download is live (needs a bridge with `files:`); LIVE MODE is layout only |
 | `alerts` | ALERTS & ANTI-CHEAT | `features.alerts.alerts_page` | `AlertsPage` | Layout; PREVIEW BAN disabled |
 | `bans_audit` | BANS & AUDIT | `features.bans_audit.bans_audit_page` | `BansAuditPage` | Failed-login table is live (owner, or developer with key) |
 | `users` | USERS | `features.users.users_page` | `UsersPage` | Live add, edit, and remove through the login service; Live file editing checkbox is layout only |
@@ -156,6 +160,9 @@ Supporting modules (not nav pages):
 | `features/library/item_tiles.py` | Hex tiles and the wrapping tile flow area |
 | `features/library/item_stats_dialog.py` | Full stats window for one item |
 | `features/zgb_portal/` | Portal window used from the ZeroGBridge page |
+| `features/server_files/file_client.py` | Own short bridge session and the `files:` request helper (`ServerFilesSession`) |
+| `features/server_files/download_worker.py` | `ServerFileDownloadWorker` thread: list, compare, download, verify |
+| `features/server_files/file_store.py` | Local folder layout, safe local paths, manifest, time text |
 
 ## Roles
 
@@ -267,15 +274,55 @@ Rows are kept for 30 days. List calls cap the count (default 50, hard max 200).
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `bridge_auto_connect` | `False` | When true, `MainCockpit` starts `CommandPipe` at launch |
+| `server_files_last_pulled` | `""` | When the last complete download finished (ISO text with time zone). Empty means never |
+| `server_files_local_folder` | `""` | Local folder of the last download. Empty means none yet |
 
 LIVE MODE is **not** a saved setting. The switch always starts off when ZAH opens, and it is not written to the settings file.
 
-The Settings page also has a **SERVER FILES** section (layout only, controls disabled):
+The Settings page also has a **SERVER FILES** section:
 
-- Status lines: `LOCAL COPY` and `LAST PULLED`.
-- Button: `DOWNLOAD SERVER FILES (READ-ONLY)`.
-- Checkbox: `LIVE MODE: edit files directly on the server`.
+- Status lines: `LOCAL COPY` and `LAST PULLED`. Both start from the two saved keys above.
+- Button: `DOWNLOAD SERVER FILES (READ-ONLY)`. See **Server files download** below. It is enabled only while `MainCockpit.bridge_connected` is true. The page listens to `bridge_status_changed` (connected in `showEvent`), so the button follows the connection live. With no news from the cockpit it stays disabled (fail closed).
+- While a download runs: the button reads `DOWNLOADING` and is disabled, a thin progress bar (`SettingsProgressBar`) and a status line show `Downloading 412 of 906 files`.
+- Checkbox: `LIVE MODE: edit files directly on the server`. Layout only: always off and disabled, tooltip `Coming in a later step.`
 - Note: every live save will ask three times (changes preview, online-players warning, then typing the file name), and the bridge will back up the old file first.
+
+### Server files download
+
+Flow, run by `ServerFileDownloadWorker` (a `QThread`, so the window never freezes):
+
+1. Open a **separate** short bridge session with the active server profile (`ServerFilesSession`). It is not the dashboard's telemetry socket, so replies never get mixed up.
+2. `files:info`. The reply must have `protocol` 1 and a `scenario` name. An old bridge answers with its generic `RESPONSE` or an `ERROR` line, and ZAH stops with: `This server's ZeroGBridge does not have the file commands yet. Ask the owner to update the bridge.` Nothing is written locally in that case.
+3. `files:list` for each available root (`scenario`, `save`), page by page.
+4. Compare with the local manifest. A file is skipped when its size and modified time match the manifest and the local file still has that size.
+5. `files:get` in batches of 40 items. Files that do not fit the reply come back `deferred` and are asked for again. A big file arrives in chunks; ZAH asks for the next chunk with the next `offset`.
+6. Every chunk is appended to `<name>.part`. At `eof`, the byte count must equal the reported size, then the file is moved into place with `os.replace`. A file that changes on the server mid-copy is restarted (at most 2 times).
+7. The manifest is saved, even after a failure, so a retry only fetches what is missing.
+
+Local folder (under `data/server_files/`, which is git-ignored):
+
+| Path | Content |
+| --- | --- |
+| `data/server_files/<scenario>/scenario/<server path>` | Files from the active scenario, same relative paths as on the server |
+| `data/server_files/<scenario>/save/<server path>` | Files from the current save game |
+| `data/server_files/<scenario>/_manifest.json` | `files` map of `"<root>/<path>"` to `{size, mtime}` |
+
+Local safety rules (`file_store.local_target_path`): the scenario name is cleaned into a safe folder name (`safe_folder_name`). A server path is refused when it is empty, absolute, has a drive letter or `:`, has `..`, `.` or an empty part, has control characters, or would land outside the download folder. Only ZAH's own `.part` files are ever removed. Old local copies of files that no longer exist on the server are left alone.
+
+After a run: `LOCAL COPY` is always updated; `LAST PULLED` is updated only when no file failed. A run with failures says so in the status line and lists the files in the terminal.
+
+Message table:
+
+| Situation | Text shown |
+| --- | --- |
+| Old bridge (no `files:`) | `Download failed: This server's ZeroGBridge does not have the file commands yet. Ask the owner to update the bridge.` |
+| Wrong bridge password | `Download failed: The server rejected the bridge login.` |
+| Server not reachable | `Download failed: Could not reach the server (<error type>).` |
+| No server profile saved | `Download failed: No active server is saved in ZAH.` |
+| Scenario or save folder not known yet | `Download failed: The server has not reported its active scenario yet. Try again in a minute.` |
+| Some files refused | `Finished, but the server would not send N file(s). LAST PULLED was not updated. Details are in the terminal.` |
+
+The bridge password is only written to the socket. It is never printed, logged, or included in any message.
 
 ## ZeroGBridge Commands
 
@@ -286,7 +333,7 @@ Empyrion loads `ZeroGBridge.Loader.ZeroGBridgeLoader`, which implements **API v2
 - It owns the TCP listener and authentication (`BridgeListener`, `AuthConfig`).
 - It hosts `CoreHost`, which loads the reloadable core (`ZeroGBridge.Core.dll`) in its own AppDomain.
 - Game-state work is marshalled onto the **game thread** (`GameThread`, `GameGateway`), never executed on the network thread.
-- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.0** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`). Core changes can be applied with `hot:reload` when that path is used.
+- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.1** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands). Core changes can be applied with `hot:reload` when that path is used.
 
 The auth token is read from `ZeroGBridge.json` only and is never written into log lines.
 
@@ -297,6 +344,7 @@ The auth token is read from `ZeroGBridge.json` only and is never written into lo
 - ZAH's `CommandPipe` waits **0.5 seconds** between outgoing commands (`INPUT_DELAY_SEC`).
 - Login is `auth:<token>`. A good reply has `"type": "AUTH"` and `"status": "Authenticated"`. The token is sent on the wire and is never printed by ZAH.
 - `cmds`, `help:commands`, and `api:list` return a `COMMAND_CATALOG` JSON object: Eleon requests, console commands, and ZAH shortcuts.
+- File content is sent as **base64 text** inside the JSON line, so a reply is still one line with no embedded newlines and no byte-order mark.
 
 ### Shorthand commands (core dispatcher)
 
@@ -325,6 +373,9 @@ Handled in `ZeroGBridge/Network/CommandDispatcher.cs` and `ApiCommands.cs` after
 | `loadpf:` | `loadplayfield:` | Load a playfield | yes |
 | `api:<RequestName>` | short names from the catalog | Eleon request, optional JSON params | depends on the request |
 | `con:<line>` | `cmd:`, `exec:` | Dedicated console command | depends on the line |
+| `files:info` | | Read-only: which roots exist, scenario and save names, limits | no |
+| `files:list:<json>` | | Read-only: paths, sizes and times of the editable files in a root | no |
+| `files:get:<json>` | | Read-only: file bytes as base64, in chunks | no |
 
 `save` and `backup` return `status: "not_available"`. The catalog states that backups are a ZAH job after the server has stopped, not a bridge command.
 
@@ -395,7 +446,51 @@ Handled by the loader, not the core, so they still work while a core is missing 
 
 The same commands also accept a JSON body after `hot:` with keys `cmd`, `req_id`, `force`, and `version`.
 
-There is **no file-list or file-send command** in the current source.
+### Server file commands (`files:`)
+
+Core 1.6.1, `ZeroGBridge/Network/ServerFiles.cs`. Core-only: it needs a hot reload, not a loader change or a server restart. Handled at the top of `CommandDispatcher.ProcessCommand`, before the trace log line, because a download sends many commands. They are read-only and only reachable after `auth:`, like every command. Reply type is always `FILES`.
+
+Requests (one line each, JSON after the second colon):
+
+```text
+files:info
+files:list:{"root":"scenario","offset":0,"limit":1000,"req_id":"a1"}
+files:get:{"root":"scenario","items":[{"path":"Content/Configuration/Items.ecf","offset":0}],"req_id":"a2"}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `root` | `scenario` (the active scenario folder) or `save` (the current save game folder) |
+| `offset`, `limit` (list) | Paging. `limit` is 1 to 2000, default 1000 |
+| `items` (get) | 1 to 50 objects, each with `path` and an optional `offset` (byte position, default 0) |
+| `req_id` | Optional. A string or number, echoed back as a string |
+
+Replies:
+
+| Command | Success reply fields |
+| --- | --- |
+| `files:info` | `ok`, `protocol` (1), `readOnly`, `source`, `scenario`, `saveName`, `roots` (per root: `root`, `available`, `name`, `topFolders`, `allowedFolders`), `limits`, `extensions` |
+| `files:list` | `ok`, `root`, `total`, `offset`, `count`, `next` (number, or null on the last page), `files` (each `{path, size, mtime}`, sorted by path, `mtime` is ISO 8601 UTC) |
+| `files:get` | `ok`, `root`, `files`. Each entry is `{path, size, mtime, offset, length, eof, data}` (base64), or `{path, deferred: true}`, or `{path, error}` |
+
+Failure reply: `{"type":"FILES","cmd":"<name>","ok":false,"error":"<code>","message":"<text>"}` with codes `bad_request`, `unknown_root`, `root_unavailable`, `too_many_items`, `unknown_command`, `exception`. A per-item `error` is one of `bad_path`, `not_allowed`, `not_found`, `too_large`, `read_failed`.
+
+Limits: one `files:get` reply carries at most **192 KB** of raw bytes (about 256 KB of text). Items past that budget come back `deferred`. A single file over the budget arrives in pieces. A file over **16 MB** is refused. A list scan stops at 50,000 files per root and 12 folder levels. The first list page (`offset` 0) always rescans the folders; later pages reuse that scan for up to 60 seconds so paging stays consistent.
+
+Where the roots come from: `IApplication.GetPathFor(AppFolder.ActiveScenario)` and `AppFolder.SaveGame`, read on the **game thread** from `ModMain.OnApplicationUpdate` (at most every 30 seconds) and kept in memory. If the game gives no folder, `dedicated.yaml` in the server's working folder is used: only `CustomScenario` and `GameName` are read, and only plain folder names are accepted. Command handlers only read the saved values.
+
+Safety checks, in order (`NormalizeRelativePath`, `ResolveUnderRoot`):
+
+1. Root name must be `scenario` or `save`.
+2. The path text is refused when empty, longer than 260, absolute, has a drive letter or `:` (this also blocks NTFS streams), `*`, `?`, quotes, `<`, `>`, `|`, control characters, an empty or `.` or `..` segment, a segment starting or ending with a space or ending with a dot, or a Windows device name (`CON`, `NUL`, `COM1` and similar).
+3. File type must be on the list: `.ecf .yaml .yml .csv .jpg .jpeg .png`. Databases, `.json`, `.dll`, `.key` and everything else are unreachable.
+4. The first folder must be on the root's whitelist (whole folder names only), or the file must sit directly in the root. Scenario: `Content`, `SharedData/Content`. Save: `Content`, `Shared/Content`, `SharedData/Content`. The lists are the `AllowedFolders` table in `ServerFiles.cs`.
+5. The resolved full path must still start with the root folder.
+6. Neither the file nor any folder on the way may be a symlink or junction. The folder scan skips them too.
+7. Files open with `FileAccess.Read` and `FileShare.ReadWrite` only, so the running game is never blocked and nothing can be written.
+8. The auth token is never read in this code. The dispatcher still refuses any command line that contains the token, and removes it from any reply.
+
+Checks: `ZeroGBridge/tests/ServerFilesTest` (run `dotnet run` in that folder) compiles the real `ServerFiles.cs` and runs 65 checks: listing, paging, chunk reassembly byte for byte, the batch budget, every refused path shape, symlinks, and reading while another handle has the file open for writing.
 
 ## Class and Method Signatures
 
@@ -481,6 +576,37 @@ class CommandPipe(QThread):
 ```
 
 Profile fields used from `data/server_config.json` include the display name, the host address, and the bridge port. The auth token is read from the same profile and is never printed. `active_index` selects the current profile. A blank bridge port uses the built-in default from `server_settings.py`.
+
+### Server files
+
+```python
+## features/server_files/file_client.py
+class ServerFilesError(Exception):
+    kind   # config, offline, auth, timeout, closed, unsupported, protocol, refused
+class ServerFilesSession:
+    def __init__(self, profile)
+    def request(self, sub_command, payload=None)   # returns the FILES reply dictionary
+    def open(self)
+    def close(self)
+
+## features/server_files/download_worker.py
+class ServerFileDownloadWorker(QThread):
+    progress = pyqtSignal(int, int, str)     # done, total, status text
+    finished_ok = pyqtSignal(dict)           # scenario, save, folder, listed, downloaded, skipped, failed, bytes
+    failed = pyqtSignal(str)                 # one plain message
+    def __init__(self, profile_provider=None, parent=None)
+    def request_stop(self)
+    def run(self)
+
+## features/server_files/file_store.py
+def safe_folder_name(name)
+def scenario_folder(scenario_name)
+def local_target_path(base_folder, relative_path)   # None when unsafe
+def load_manifest(folder)
+def save_manifest(folder, manifest)
+def now_iso()
+def format_last_pulled(iso_text)
+```
 
 ### Login, users, and settings
 
@@ -578,6 +704,20 @@ public class CommandDispatcher
     public string ProcessIncomingCommand(string command);
 }
 
+public static class ServerFiles
+{
+    public const string Prefix = "files:";
+    public const int ProtocolVersion = 1;
+    public const long MaxFileBytes = 16L * 1024 * 1024;
+    public const int ReplyBudgetBytes = 192 * 1024;
+    public const int MaxItemsPerGet = 50;
+    public static bool IsFilesLine(string lower);
+    public static string Handle(string line);                 // files:info, files:list, files:get
+    public static void RefreshRoots(IModApi api);             // game thread, throttled
+    public static string NormalizeRelativePath(string rootName, string requested, out string error);
+    public static string ResolveUnderRoot(string rootFull, string normalizedRelative, out string error);
+}
+
 public static class ApiCommands
 {
     public const string ApiPrefix = "api:";
@@ -633,18 +773,16 @@ Widgets are targeted by `objectName` (`SettingsPage`, `DashCard`, `DashCardTitle
 
 These items have UI placeholders, agreed behaviour, or both. They are **not** implemented end-to-end. Server-changing steps stay disabled until they are approved.
 
-### SERVER FILES download through ZeroGBridge
+### SERVER FILES download: what is left
 
-- Settings button: `DOWNLOAD SERVER FILES (READ-ONLY)`.
-- The download must go through **ZeroGBridge**, not a second connector.
-- The bridge will need a new **read-only** command that lists and sends files from fixed folders only, so it cannot be pointed at arbitrary paths. That command is not in the source and still needs approval before it is written.
-- Folders to copy from the active scenario and save, into a local folder for the current server:
-  - `Content/Configuration` (ECF files)
-  - `Extras/PDA`
-  - `SharedData/Content/Images`
-  - the save-game files
-- The Settings card should show the local copy path and the last-pulled time.
-- Items, ECF Editor, and PDA Editor must then read from that downloaded folder, **never** from local base-game Content files.
+Done: the read-only `files:` bridge commands (core 1.6.1) and the working Settings download button. See **Server files download** and **Server file commands** above.
+
+Still to do:
+
+- Ray deploys the 1.6.1 core to the server (steps are in ENGINE_CONCEPTS_AND_EXPLANATIONS.md). Until then the button shows the fail-closed message.
+- Check the real scenario's folder layout with `files:info` (`topFolders`) and adjust the `AllowedFolders` table in `ServerFiles.cs` if the real folders differ. The save game folders in particular are guesses until seen on the live server.
+- Items, ECF Editor, and PDA Editor must read from `data/server_files/<scenario>/`, **never** from local base-game Content files.
+- A Cancel button for a running download (the worker already has `request_stop`).
 
 ### Item images
 

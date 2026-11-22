@@ -203,13 +203,13 @@ con:ticks                       read-only form
 save game's editable files down. It never writes, renames or deletes anything on the server. The code is
 `Network/ServerFiles.cs`; `tests/ServerFilesTest` holds its self-checks (`dotnet run`).
 
-```
+```text
 files:info
 files:list:{"root":"scenario","offset":0,"limit":1000,"req_id":"a1"}
 files:get:{"root":"scenario","items":[{"path":"Content/Configuration/Items.ecf","offset":0}],"req_id":"a2"}
 ```
 
-Every reply is one `"type":"FILES"` line. A failed request has `"ok":false,"error":"<code>","message":"..."`
+Every reply is one `"type":"FILES"` line. A failed request has `"ok":false,"error":"<code>","message":"<text>"`
 (codes: `bad_request`, `unknown_root`, `root_unavailable`, `too_many_items`, `unknown_command`, `exception`).
 
 - `files:info` returns `protocol` (1), `readOnly`, `scenario`, `saveName`, `roots` (per root: `available`, `name`,

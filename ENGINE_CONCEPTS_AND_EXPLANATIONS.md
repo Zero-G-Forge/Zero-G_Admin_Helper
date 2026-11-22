@@ -208,7 +208,7 @@ Some tasks need to see the file that is on the server right now. LIVE MODE is th
 - Only developers and owners get it by default. An owner can later grant a named admin or moderator the Live file editing permission.
 - A live save must pass three confirmations, including a check for online players and typing the file name.
 - The old file is backed up before the new one is written.
-- Until the bridge file commands and the database column exist, the switch stays disabled.
+- Until the bridge **write** commands and the database column exist, the switch stays disabled. The read-only file commands (`files:`) exist now, but reading is not writing, so they do not unlock LIVE MODE.
 
 ## The Bridge and Disabled Server-Changing Buttons
 
@@ -216,7 +216,7 @@ Some tasks need to see the file that is on the server right now. LIVE MODE is th
 
 ZeroGBridge is a mod inside the game process. ZAH does not reach into the server's disks by itself. It sends one-line commands through a logged-in TCP connection, and it reads one-line JSON replies.
 
-**Analogy:** the game is a house. The bridge is a letterbox with a lock. ZAH can only post letters (commands) that the letterbox already knows how to sort. A new kind of letter, such as "please send these files," has to be added to the letterbox first, and that change has to be approved.
+**Analogy:** the game is a house. The bridge is a letterbox with a lock. ZAH can only post letters (commands) that the letterbox already knows how to sort. A new kind of letter, such as "please send these files," has to be added to the letterbox first, and that change has to be approved. That letter now exists: the read-only `files:` commands. See the next big section.
 
 Because the letterbox sits in the game, game reads and writes run on the **game thread**. The network thread only accepts the line and hands the work over. That prevents the game and the network from grabbing the same data at the same time.
 
@@ -234,6 +234,81 @@ Connect on the ZeroGBridge page is the safe exception: it logs in to the active 
 
 `save` and `backup` are also honest about their limits: the game has no save-only console command, and backups are not a bridge command. The catalog returns `not_available` rather than pretending those words do something.
 
+## Downloading Server Files Through the Bridge
+
+### What the download does, in one picture
+
+**Analogy:** a librarian who guards two named shelves. ZAH hands the librarian a slip with a shelf name and a book title. The librarian checks the slip, fetches a **photocopy**, and passes it through the window. The librarian never hands over the original and never lets anyone walk into the stacks.
+
+- The two shelves are `scenario` (the scenario that is being played) and `save` (the current save game).
+- The librarian is the `files:` commands inside ZeroGBridge. ZAH is the person at the window.
+- The photocopy lands in `data/server_files/<scenario>/` on this PC, laid out like the server's folders.
+
+### Why the bridge only reads
+
+The window has glass in it. The bridge opens every file for **reading only** and in a mode that lets the game keep using the file at the same time. There is no command that writes, renames, or deletes. Putting changed files back on the server is a different, later step that needs its own approval.
+
+### Why the names on the slip are checked so hard
+
+A slip that says `../../somewhere/else` is an attempt to wander out of the shelf. So the bridge checks the slip in layers, like a security desk:
+
+1. The text of the name: no `..`, no full paths from the top of the disk, no drive letters, no strange characters, no names Windows treats as devices.
+2. The kind of file: only configuration, PDA, and picture types (`.ecf`, `.yaml`, `.yml`, `.csv`, `.jpg`, `.png`). A database or a password file is never on the menu.
+3. The room: only named folders inside each shelf.
+4. The real address: the bridge turns the name into a full address and proves it is still inside the shelf.
+5. Shortcuts: a folder or file that is really a pointer to somewhere else (a symlink) is refused.
+
+Each layer is cheap, and any one of them stops the common tricks. Together, a mistake in one layer is caught by the next. ZAH does its own check too: even a hostile or buggy server cannot make ZAH write outside `data/server_files/`.
+
+### Why file content travels as base64 text
+
+The bridge talks in single lines of text. A picture is bytes, and bytes can contain a line break by accident, which would cut the line in half. **Base64** is a way to write any bytes using only safe letters and digits.
+
+**Analogy:** sending a statue by post. You cannot put a statue in a letter, but you can flat-pack it and number the pieces. The receiver follows the numbers and puts the statue back together. Base64 text is about one third bigger than the original, which is the price of the flat-pack.
+
+### Why big files arrive in pieces, and small ones in batches
+
+The letterbox slot only takes so much at once. One reply carries at most about 192 KB of file data.
+
+- A small file shares the reply with others, like several letters in one delivery.
+- A file bigger than one reply comes in numbered pieces. ZAH asks for the next piece by saying where the last one ended (`offset`).
+- Whatever does not fit comes back marked `deferred`, which means "ask me again."
+
+At the end, ZAH checks that the pieces add up to the size the server announced. If a file changes on the server halfway through, ZAH starts that file over instead of gluing two versions together.
+
+### Why a download writes a `.part` file first
+
+**Analogy:** a cook plates the meal on a prep tray, and only carries it to the table when it is finished. ZAH writes into `<name>.part`, and only when every byte has arrived and the size matches does it swap the finished file into place (`os.replace`, one step). If ZAH or the PC stops halfway, the real file is never half written.
+
+### Why there is a manifest
+
+`_manifest.json` is a packing slip: for each file it notes the size and modified time that were pulled. The next download compares the server's list with the slip and fetches only what is new or changed. A first run may take a few minutes because of the half-second pause between commands. Later runs are short.
+
+Old local files are never deleted, even if the server no longer has them. Deleting is a decision for a person, not for a sync button.
+
+### Why the download uses its own connection
+
+The dashboard's connection is a radio that keeps broadcasting status lines. A download wants exact answers to exact questions. Sharing one line would mean sorting reports from answers. So the download opens a **second, short connection**, logs in the same way, and hangs up when done. The password is only ever written to that socket. It is never printed, logged, or put in an error message.
+
+### Why an old bridge fails closed
+
+The server will not have the `files:` commands until the new core is installed. An old bridge answers an unknown command with a generic "Acknowledged." ZAH sees that the answer is not a `FILES` answer, stops, writes nothing, and says: `This server's ZeroGBridge does not have the file commands yet. Ask the owner to update the bridge.` A wrong guess here could have meant treating "Acknowledged" as success and showing an empty download.
+
+### Why the bridge remembers the two folders instead of asking each time
+
+Asking the game for a folder is a game-state read, and game-state reads run on the **game thread**. The network thread must not do that. So the bridge asks the game for the scenario and save folders on the game thread (at most every 30 seconds), writes them in a notebook, and the network side only reads the notebook. If the game has not answered yet, the bridge reports `root_unavailable` and ZAH says to try again in a minute.
+
+### Why the new core can be installed without a restart
+
+ZeroGBridge is two DLLs: a small loader that never changes, and a **core** that holds all the commands. The `files:` commands live in the core, so Ray installs them with the hot reload that already exists (drop the new core DLL into the `Updates` folder, then send `hot:reload`). If the new core fails its start-up check, the old one keeps running. The loader, the port, and the connected ZAH sessions stay up.
+
+### How it was tested without touching a server
+
+- A C# check program compiles the real `ServerFiles.cs` and runs it against a temporary folder full of test files, including attack paths and symlinks.
+- The same program can act as a stand-in bridge. ZAH's Python tests download from it, change a file, and download again to prove only the changed file comes down.
+- A second stand-in plays an "old bridge" to prove the fail-closed message.
+- The Settings page is created off-screen to check the button states: off with no connection, on when connected, off while downloading.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free
@@ -245,6 +320,7 @@ The thread that draws the window is also the thread that handles clicks. If that
 ZAH uses `QThread` helpers for that walk:
 
 - `CommandPipe` keeps the bridge socket, logs in, and sends queued commands about half a second apart.
+- `ServerFileDownloadWorker` copies the server's files for the Settings download button.
 - `FailedLoginFetcher` loads the failed-login table.
 - `UserTaskRunner` lists, saves, and deletes login users.
 - The portal uses a similar "run this call in the background" helper.
@@ -257,11 +333,19 @@ Switching nav pages **deletes** the old page widget. If a `QThread` is a child o
 
 The fix is to parent those short network threads to the **application** (`QCoreApplication.instance()`), which lives until ZAH closes, and to call `deleteLater` when the thread emits `finished`. `CommandPipe` is parented to `MainCockpit` for the same reason: the cockpit outlives any one page.
 
+`ServerFileDownloadWorker` has a variation of the same rule. It can run for minutes, and the user may click to another page meanwhile. The Settings page keeps every running download in a module-level list (`RUNNING_DOWNLOADS`), so the thread is never thrown away mid-run, and each thread removes itself from the list when it finishes. The page's own signals disconnect by themselves when the page is deleted, so a finished download that nobody is watching ends quietly.
+
 `processEvents()` is used only in small spots (for example, to let a "Checking login" label redraw before a short wait). It is not a substitute for a real background thread on longer calls.
 
 ## Notable Past Fixes
 
 These are lessons already paid for in git history. Each one is written as "what broke" and "why the fix works."
+
+### A changed file was not noticed for a few seconds
+
+**What broke:** the first version of `files:list` saved its folder scan for 10 seconds so paging would be quick. A file changed and re-pulled within those 10 seconds still looked unchanged.
+
+**Why the fix works:** the first page of a list (`offset` 0) now always scans again. Later pages reuse that same scan for up to a minute, so the pages of one download agree with each other, but a new download always starts from a fresh look at the folders.
 
 ### Paths came from the wrong folder
 

@@ -4,7 +4,7 @@
 //   single-line JSON reply of "type":"FILES" (file content travels as base64 text):
 //   files:info                                  -> which roots are available and the limits
 //   files:list:{"root":"scenario|save","offset":0,"limit":1000}   -> relative path, size, mtime
-//   files:get:{"root":"...","items":[{"path":"...","offset":0}]}  -> base64 data, in chunks
+//   files:get:{"root":"scenario","items":[{"path":"<relative path>","offset":0}]}  -> base64 data, in chunks
 // Nothing here writes, renames or deletes anything. A file is only ever opened with
 // FileAccess.Read and FileShare.ReadWrite, so the running game is never blocked.
 // Safety: two whitelisted roots, whitelisted sub-folders and file types, no ".." or absolute
@@ -60,7 +60,7 @@ namespace ZeroGBridge
         // Seconds between re-reads of the two root folders from the game (done on the game thread).
         private const int RootRefreshSeconds = 30;
 
-        // File types that may be listed or sent. Everything else (.db, .json, .dll, .key ...) is never reachable.
+        // File types that may be listed or sent. Everything else (.db, .json, .dll, .key and similar) is never reachable.
         private static readonly string[] AllowedExtensions = { ".ecf", ".yaml", ".yml", ".csv", ".jpg", ".jpeg", ".png" };
 
         // Root name -> sub-folders (relative to that root) that may be read. A file directly inside the
