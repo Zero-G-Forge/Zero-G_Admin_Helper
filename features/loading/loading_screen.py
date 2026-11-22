@@ -110,6 +110,9 @@ class ApplicationLoader(QDialog):
         self.signed_in_role = None
         self.session_token = None
 
+        ## Live file editing permission (False unless the login service granted it).
+        self.signed_in_live_files = False
+
         ## Startup stages: (progress %, status text, stage function)
         self.boot_stages = [
             (5, "CHECKING ASSETS", self._stage_check_assets),
@@ -406,6 +409,7 @@ class ApplicationLoader(QDialog):
                 self.signed_in_user = saved_login["username"]
                 self.signed_in_role = saved_login["role"]
                 self.session_token = saved_login.get("token")
+                self.signed_in_live_files = saved_login.get("live_file_editing") is True
                 print("[SUCCESS] ApplicationLoader: Saved login verified. Resuming startup...")
                 self.boot_timer.start(BOOT_TICK_MS)
                 return
@@ -423,6 +427,7 @@ class ApplicationLoader(QDialog):
                 self.signed_in_user = login_window.signed_in_user
                 self.signed_in_role = login_window.signed_in_role
                 self.session_token = login_window.session_token
+                self.signed_in_live_files = getattr(login_window, "signed_in_live_files", False) is True
                 print("[SUCCESS] ApplicationLoader: Login verified. Resuming startup...")
                 self.boot_timer.start(BOOT_TICK_MS)
             else:

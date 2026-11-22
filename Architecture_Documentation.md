@@ -167,7 +167,9 @@ Supporting modules (not nav pages):
 | `features/server_files/local_files.py` | Finds the downloaded scenario folder, files in it (save copy wins), and item pictures |
 | `features/server_files/edit_store.py` | Edited copies, backups, line endings, and upload base hashes |
 | `features/shared/edit_tools.py` | Validation and diffs |
-| `features/shared/editor_actions.py` | Shared VALIDATE, CHANGES PREVIEW, and SAVE actions |
+| `features/shared/editor_actions.py` | Shared VALIDATE, CHANGES PREVIEW, SAVE, and UPLOAD TO SERVER actions |
+| `features/server_files/upload_flow.py` | The three upload confirmations, the role gate helpers, and the online-player count |
+| `features/server_files/write_worker.py` | `files:put`, `coreupload:put`, and single-file `files:get` steps, run in `ServerWriteWorker` |
 
 ## Roles
 
@@ -192,9 +194,11 @@ The login database allows only `owner`, `admin`, and `moderator`. **developer** 
 | Sign in and use the cockpit | yes | yes | yes | yes |
 | Open ZeroGBridge Portal | no | yes | yes | yes |
 | Portal live Reload and Rollback | no | no | no | yes |
+| Portal live Browse (core upload) | no | no | no | yes |
+| UPLOAD TO SERVER in the editors | only with granted permission | only with granted permission | yes | yes |
 | See Users page and manage users | no (page refuses) | moderators only, own server | own server, any of those three roles | any server, any of those three roles |
 | Failed login log on Bans & Audit | no | no | yes (session token) | yes (developer key, fail closed if missing) |
-| LIVE MODE toggle (planned) | only with granted permission | only with granted permission | always (when wired) | always (when wired) |
+| LIVE MODE toggle | only with granted permission | only with granted permission | always | always |
 | Grant Live file editing (planned) | no | no | yes | yes |
 
 Owners and admins are limited to their own server on the Users page. The login service enforces the same rules again, so the client cannot be tricked into a higher permission.
@@ -238,6 +242,12 @@ The `users` table:
 | `display_name` | Name with original capitals, for display only |
 
 There is **no Live file editing column yet**. The Users dialog shows the checkbox in the layout, disabled, until that column is added and approved.
+
+The login service already reads it, fail closed: `user_store.get_live_file_editing(username)` returns True only when the `live_file_editing` column exists and is TRUE for that user. A missing column, no database, or any error gives False. `/login` and `/session` send it back as `live_file_editing`. The column itself is added by Ray (ZAH never changes the database):
+
+```sql
+ALTER TABLE users ADD COLUMN IF NOT EXISTS live_file_editing BOOLEAN NOT NULL DEFAULT FALSE;
+```
 
 The `sessions` table:
 
@@ -285,6 +295,22 @@ The Library and both editors read only `data/server_files/<scenario>/`, the fold
 The ECF and PDA editors use `features/shared/editor_actions.py`. VALIDATE checks the current text and reports line numbers. ECF validation catches unclosed blocks, unexpected closing braces, unclosed quotes, and lines outside blocks. YAML validation catches tab indents and parse errors. CSV validation checks parsing and extra columns.
 
 CHANGES PREVIEW is a unified diff from the downloaded copy to the editor text. SAVE writes only `data/server_files/<scenario>/_edits/<root>/<path>`. Before overwriting an edit, it creates a timestamped backup under `_backups/`. The first save backs up the downloaded copy. Writes use a `.part` file and `os.replace`. The downloaded copy is kept for diffing. Line endings follow the downloaded file. `_edits/_bases.json` stores the hash of the downloaded copy an edit started from, for the later upload check.
+
+### Server uploads and LIVE MODE
+
+UPLOAD TO SERVER (ECF and PDA editors) is on only when all of these are true: a downloaded server file is open, the cockpit says the bridge is connected, and `MainCockpit.can_edit_live_files()` says yes. That is `roles.can_edit_live_files(role, flag)`: owner and developer always; admin and moderator only when the login reply had `live_file_editing` exactly True. Otherwise the button is off and its tooltip says why. The same checks run again right before the send.
+
+The upload refuses text that VALIDATE finds errors in, and text with no changes. Then it asks three times (`upload_flow.py`), and any No stops it with nothing sent:
+
+1. **Changes**: the diff, with Continue (Cancel is the default).
+2. **Players**: a fresh read-only `plys` count. Any online player gives a warning with their names. If the count cannot be read, the upload stops.
+3. **Type the name**: the exact file name must be typed.
+
+After that the edit is saved locally (backup first), and `ServerWriteWorker` sends `files:put` in 120 KB pieces with `base_sha256` from `_bases.json`. On success `edit_store.record_upload` backs up the old downloaded copy, replaces it with the uploaded bytes, updates the base, and marks the manifest so the next download fetches it again. On `changed_on_server` nothing is replaced and the editor says to download again.
+
+LIVE MODE (Settings) is a tick on the cockpit (`MainCockpit.live_mode`). It is never saved and is reset at every sign-in. It is enabled only for the same role gate with the bridge connected, and turning it on asks first (No is the default). While it is on, opening a file reads the server's current copy with `files:get` (a newer one replaces the download, backup first), the bottom line says `LIVE MODE - SAVE also uploads to the server`, and SAVE is followed by the same three-step upload.
+
+The portal's Browse button on live data uploads a new core (developer only, bridge online). It takes only a file named `ZeroGBridge.Core.dll` that starts with `MZ`, shows size, sha256 and the players line in a confirmation, sends the `.pdb` next to it first and then the dll with `coreupload:put`, and then opens the normal Reload now confirmation. Nothing loads until that is confirmed.
 
 ## Settings
 
@@ -649,7 +675,8 @@ class ServerFilesError(Exception):
     kind   # config, offline, auth, timeout, closed, unsupported, protocol, refused
 class ServerFilesSession:
     def __init__(self, profile)
-    def request(self, sub_command, payload=None)   # returns the FILES reply dictionary
+    def request(self, sub_command, payload=None, prefix="files")   # returns the FILES reply dictionary
+    # ServerFilesError.code holds the bridge error, e.g. changed_on_server
     def open(self)
     def close(self)
 
@@ -679,6 +706,28 @@ def find_file(folder, parts)                    # (root, full path), save first,
 def list_files(folder, extensions, under=None)  # [{root, path, full, label}]
 def build_image_index(folder)                   # {lower item name: picture path}
 def find_item_image(folder, item_name, image_index=None)
+
+## features/server_files/write_worker.py
+CHUNK_BYTES = 120 * 1024
+def put_file(session, root, path, data, base_sha256, report=None)   # final files:put reply
+def upload_core(session, dll_path, report=None)                     # pdb first, then dll
+def fetch_file(session, root, path)                                 # bytes
+class ServerWriteWorker(QThread):
+    progress = pyqtSignal(int, int, str)
+    finished_ok = pyqtSignal(dict)
+    failed = pyqtSignal(str, str, str)       # kind, bridge code, message
+    def __init__(self, job, profile_provider=None, parent=None)
+def start_write_worker(worker)
+
+## features/server_files/upload_flow.py
+def user_can_write_server_files(widget)   # cockpit can_edit_live_files(), False when not found
+def bridge_is_connected(widget)
+def live_mode_on(widget)
+def count_online(players_payload)         # (count, names) or (None, [])
+def fetch_players_for_upload()
+def ask_changes(parent, file_name, diff_lines)
+def ask_players(parent, online_count, names)
+def ask_type_name(parent, file_name)
 ```
 
 ### Login, users, and settings
@@ -897,6 +946,7 @@ Still to do:
 - An owner or developer may grant **Live file editing** to an individual admin or moderator on the Users page. The checkbox is already in `UserEditDialog`, hidden when the role is Owner, and disabled until a new ZAH-DB column is added (a database change that must be applied with approval).
 - Live writes are server changes. The control stays disabled until that work is approved.
 - Bridge side done (core 1.6.2): `files:put` gives the backup-first, hash-checked replace that LIVE MODE and UPLOAD will use. The ZAH side (popups, role gate, sending) is the next step.
+- Done (Nov 22, 2026): the ZAH side is wired (see **Server uploads and LIVE MODE**). Tested only against the local harness. Still open: the Users page checkbox stays disabled until the column is added and a write route exists in the login service.
 
 ### ECF and PDA editor follow-through
 
@@ -905,7 +955,7 @@ Still to wire, all against **downloaded server files** (or LIVE MODE once approv
 - **VALIDATE**
 - A real diff in **Changes Preview**
 - **SAVE** to the local copy, with a backup of the previous file
-- **UPLOAD TO SERVER** through ZeroGBridge, only with explicit approval
+- **UPLOAD TO SERVER** through ZeroGBridge, only with explicit approval (done Nov 22, 2026, see **Server uploads and LIVE MODE**)
 
 Until then, the toolbar buttons stay disabled with `Coming in a later step.` The ECF and PDA pages can already open a local folder for layout and editor testing. That path is not the long-term data source.
 

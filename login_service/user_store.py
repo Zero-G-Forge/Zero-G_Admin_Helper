@@ -229,6 +229,24 @@ def check_user(username, password_text):
         print(f"[ERROR] UserStore: Could not check user: {e}")
         return None
 
+## True only when the users.live_file_editing column exists and is TRUE for this user.
+## The column is added by the owner (ZAH does not change the database). A missing column, a missing user,
+## no database, or any error all give False (fail closed).
+def get_live_file_editing(username):
+    try:
+        if not _database_enabled():
+            return False
+        lookup_name = str(username or "").strip().lower()
+        with _open_database() as connection:
+            row = connection.execute(
+                "SELECT live_file_editing FROM users WHERE username = %s",
+                (lookup_name,),
+            ).fetchone()
+        return bool(row and row[0] is True)
+    except Exception as e:
+        print(f"[WARNING] UserStore: Live file editing not readable, treated as not granted ({type(e).__name__})")
+        return False
+
 ## Lists every user (server, name, role and date only, never password data).
 ## Returns None if the list can't be read, so ZAH can tell "error" apart from "no users".
 def list_users():

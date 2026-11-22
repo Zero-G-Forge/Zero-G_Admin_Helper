@@ -69,10 +69,11 @@ except ImportError as e:
 
 ## Guarded import: if roles is missing, every role check says no (fail closed).
 try:
-    from features.shared.roles import has_role_at_least
+    from features.shared.roles import has_role_at_least, can_edit_live_files
 except ImportError as e:
     print(f"[ERROR] MainCockpit: Could not load roles: {e}")
     has_role_at_least = None
+    can_edit_live_files = None
 
 ## Guarded import: if login_window is missing, logout closes ZAH instead (fail closed).
 try:
@@ -178,6 +179,12 @@ class MainCockpit(QMainWindow):
 
             ## Nobody is signed in yet, so there is no role; every role check says no until set_signed_in_user runs.
             self.signed_in_role = None
+
+            ## Live file editing granted to this admin or moderator by the owner (False = not granted).
+            self.signed_in_live_files = False
+
+            ## LIVE MODE switch from Settings. Never saved, so it is off every time ZAH starts.
+            self.live_mode = False
 
             ## The online token, used to ask the service for owner-only things like the failed login log.
             self.session_token = None
@@ -370,13 +377,19 @@ class MainCockpit(QMainWindow):
     # endregion
 
     # region Signed-In User
-    def set_signed_in_user(self, username, role, session_token=None):
+    def set_signed_in_user(self, username, role, session_token=None, live_file_editing=False):
 
         ## Shows who is signed in, e.g. "ADMIN: PARTICLEWAVE" or "OWNER: RAY".
         try:
 
             ## Keep the role (lowercase, like the database) so pages can check it later.
             self.signed_in_role = str(role).strip().lower() if role else None
+
+            ## Only a literal True counts as granted (fail closed).
+            self.signed_in_live_files = live_file_editing is True
+
+            ## A new sign-in always starts with LIVE MODE off.
+            self.live_mode = False
 
             ## Keep the online token too (None if there isn't one). It is never printed.
             self.session_token = session_token or None
@@ -386,6 +399,7 @@ class MainCockpit(QMainWindow):
             print(f"[INFO] MainCockpit: Signed-in user shown as {shown_role}: {shown_name}")
         except Exception as e:
             print(f"[ERROR] MainCockpit: Could not show signed-in user: {e}")
+
     def user_has_role(self, needed_role):
 
         ## Pages ask the cockpit, e.g. user_has_role("developer"), instead of checking role names themselves.
@@ -393,6 +407,13 @@ class MainCockpit(QMainWindow):
         if has_role_at_least is None:
             return False
         return has_role_at_least(self.signed_in_role, needed_role)
+
+    def can_edit_live_files(self):
+
+        ## Server file uploads and LIVE MODE: developers and owners always; admins and moderators only when granted.
+        if can_edit_live_files is None:
+            return False
+        return can_edit_live_files(self.signed_in_role, self.signed_in_live_files)
 
     def _on_logout_clicked(self):
 
@@ -458,7 +479,8 @@ class MainCockpit(QMainWindow):
             
             ## Signed in again: show the new user, go back to the DASHBOARD (ZAH always lands there), and bring the cockpit back.
             ## _on_nav_clicked also ticks the DASHBOARD button and sets the title, not just the page.
-            self.set_signed_in_user(login.signed_in_user, login.signed_in_role, login.session_token)
+            self.set_signed_in_user(login.signed_in_user, login.signed_in_role, login.session_token,
+                                    getattr(login, "signed_in_live_files", False) is True)
             self._on_nav_clicked("dashboard")
             self.show()
 

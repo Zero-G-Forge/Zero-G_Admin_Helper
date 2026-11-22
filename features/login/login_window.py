@@ -38,6 +38,9 @@ class LoginWindow(QDialog):
         ## The signed-in username is kept here so later steps can show it.
         ## Role and session token from the online service; the offline developer login leaves these as developer / None.
         self.signed_in_role = None
+
+        ## Live file editing permission from the login service (admins and moderators only need it).
+        self.signed_in_live_files = False
         self.session_token = None
         self.setup_widgets()
 
@@ -146,6 +149,7 @@ class LoginWindow(QDialog):
                 self.signed_in_user = username
                 self.signed_in_role = login_details["role"]
                 self.session_token = login_details["token"]
+                self.signed_in_live_files = login_details.get("live_file_editing") is True
 
                 ## "Keep me logged in" was ticked, so the token is saved for the next start.
                 if remember_choice:

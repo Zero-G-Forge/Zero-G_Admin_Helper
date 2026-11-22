@@ -62,7 +62,9 @@ def check_online_login(username, password_text, remember=None):
         if (isinstance(reply_data, dict) and reply_data.get("status") == "ok"
                 and reply_data.get("role") and reply_data.get("token")):
             print(f"[SUCCESS] OnlineLogin: Service accepted {username}")
-            return "ok", {"role": reply_data["role"], "token": reply_data["token"]}
+            ## live_file_editing is True only when the service says exactly true (an older service sends nothing).
+            return "ok", {"role": reply_data["role"], "token": reply_data["token"],
+                          "live_file_editing": reply_data.get("live_file_editing") is True}
         print("[WARNING] OnlineLogin: Service sent an unexpected reply")
         return "denied", None
     except urllib.error.HTTPError as e:
@@ -101,7 +103,8 @@ def check_saved_session(session_token):
         if (isinstance(reply_data, dict) and reply_data.get("status") == "ok"
                 and reply_data.get("username") and reply_data.get("role")):
             print(f"[SUCCESS] OnlineLogin: Saved login still good for {reply_data['username']}")
-            return "ok", {"username": reply_data["username"], "role": reply_data["role"]}
+            return "ok", {"username": reply_data["username"], "role": reply_data["role"],
+                          "live_file_editing": reply_data.get("live_file_editing") is True}
         print("[WARNING] OnlineLogin: Service sent an unexpected session reply")
         return "denied", None
     except urllib.error.HTTPError as e:

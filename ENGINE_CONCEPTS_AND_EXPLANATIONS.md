@@ -380,6 +380,32 @@ A command can only be used once the core that contains it is running. So core 1.
 
 `"FileWritesEnabled": false` in `ZeroGBridge.json` turns both write commands off. The bridge reads the setting on every call, so flipping it takes effect at once.
 
+## Uploading an Edit From ZAH
+
+### Three questions before anything leaves the PC
+
+A wrong config file can break the game for everyone online, so ZAH asks three different questions, each one a chance to stop:
+
+1. **What changes?** The same diff as the Changes Preview. It is easy to see an accidental deletion here.
+2. **Who is playing?** ZAH asks the bridge for the player list right then (a read-only question). If anyone is online the warning names them. If the list cannot be read, ZAH stops, because "unknown" is not the same as "nobody".
+3. **Which file?** Typing the file name by hand makes sure the right file is going up, and stops a click made out of habit.
+
+### The role gate, and why "missing" means "no"
+
+Developers and owners may always upload. An admin or moderator may only when the owner ticked **Live file editing** for them, which is a column in the users table. ZAH asks the login service, and the service answers True only when the column exists and says TRUE. If the column was never added, the question cannot be answered, and the safe answer is no. This is called failing closed: when in doubt, the door stays shut.
+
+### What happens after the upload
+
+The server now has the new file, so ZAH makes its downloaded copy match (after backing up the old copy). The diff becomes empty again, and the next upload is checked against the new fingerprint. If somebody else changed the file on the server first, the bridge refuses, nothing is replaced, and ZAH says to download again.
+
+### LIVE MODE
+
+LIVE MODE is a switch, not a setting: ZAH forgets it on every start and every sign-in. While it is on, opening a file asks the server for its current copy first, and SAVE goes straight on into the three questions. With it off, editing is purely local until UPLOAD is pressed.
+
+### Uploading a new bridge core from the portal
+
+The portal's Browse button can now send a new `ZeroGBridge.Core.dll` (and its `.pdb`) into the server's `Updates/` folder. That alone does not change the running bridge. The usual Reload now confirmation appears next, and only that loads the new core. Developer only.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free

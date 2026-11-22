@@ -12,7 +12,7 @@ import secrets
 import time
 
 ## user_store.py sits in the same folder, so it can be imported by name.
-from user_store import check_user, ensure_users_table, add_user, list_users, delete_user, set_user_role
+from user_store import check_user, ensure_users_table, add_user, list_users, delete_user, set_user_role, get_live_file_editing
 
 ## session_store keeps the "Keep me logged in" sessions
 ## (ZAH-DB, or memory when testing).
@@ -165,7 +165,9 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
                 if session_info is None:
                     self._send_json(401, {"status": "error", "message": "session expired or unknown"})
                     return
-                self._send_json(200, {"status": "ok", "username": session_info["username"], "role": session_info["role"]})
+                ## live_file_editing is False unless the users column exists and is TRUE (fail closed).
+                self._send_json(200, {"status": "ok", "username": session_info["username"], "role": session_info["role"],
+                                      "live_file_editing": get_live_file_editing(session_info["username"])})
                 return
 
             ## /logout: ends the token everywhere it might live, so it can never be used again. It answers ok even for an unknown token, so nobody can test tokens.
@@ -315,7 +317,8 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
                     return
                 print(f"[SUCCESS] LoginService: {username.lower()}"
                       f" signed in ({role}, remembered {remember})")
-                self._send_json(200, {"status": "ok", "token": session_token, "role": role, "remember": remember})
+                self._send_json(200, {"status": "ok", "token": session_token, "role": role, "remember": remember,
+                                      "live_file_editing": get_live_file_editing(username)})
                 return
 
             ## token_urlsafe(32) makes a long random pass that cannot be guessed.
@@ -327,7 +330,8 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
             }
             print(f"[SUCCESS] LoginService: {username.lower()} signed in ({role})")
             self._send_json(200, {"status": "ok", "token": session_token,
-                                  "role": role, "expires_in": SESSION_LIFETIME_SEC})
+                                  "role": role, "expires_in": SESSION_LIFETIME_SEC,
+                                  "live_file_editing": get_live_file_editing(username)})
         except Exception as e:
             print(f"[ERROR] LoginService: Login request failed: {e}")
             self._send_json(500, {"status": "error", "message": "server error"})

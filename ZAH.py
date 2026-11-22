@@ -102,6 +102,9 @@ def main():
     signed_in_role = None
     session_token = None
 
+    ## Live file editing permission for admins and moderators (False unless granted).
+    signed_in_live_files = False
+
     if ApplicationLoader is not None:
         try:
             print("[DEBUG] Instantiating Screen 1: Application Loading Screen...")
@@ -114,6 +117,7 @@ def main():
             signed_in_user = loader.signed_in_user
             signed_in_role = loader.signed_in_role
             session_token = loader.session_token
+            signed_in_live_files = getattr(loader, "signed_in_live_files", False) is True
             loader.deleteLater()
         except Exception as e:
             print(f"[ERROR] Loading screen failed: {e}. Opening MainCockpit anyway.")
@@ -139,6 +143,7 @@ def main():
             signed_in_user = backup_login.signed_in_user
             signed_in_role = backup_login.signed_in_role
             session_token = backup_login.session_token
+            signed_in_live_files = getattr(backup_login, "signed_in_live_files", False) is True
         except Exception as e:
             print(f"[ERROR] Backup login failed: {e}. Stopping for safety.")
             login_passed = False
@@ -150,7 +155,7 @@ def main():
     try:
         if main_cockpit is None:
             main_cockpit = MainCockpit()
-        main_cockpit.set_signed_in_user(signed_in_user, signed_in_role, session_token)
+        main_cockpit.set_signed_in_user(signed_in_user, signed_in_role, session_token, signed_in_live_files)
         print("[DEBUG] Passing control to MainCockpit...")
         main_cockpit.show()
         sys.exit(app.exec())

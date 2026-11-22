@@ -71,6 +71,15 @@ LIVE_UPLOAD_TIP = (
 )
 LIVE_REFRESH_MS = 30_000
 
+## Core 1.6.2: Browse on live data uploads a new core with coreupload:put (developer only, after a confirmation).
+LIVE_BROWSE_TIP = (
+    "Developer only: pick a built ZeroGBridge.Core.dll. Its .pdb (if next to it) and the dll are uploaded "
+    "to the server's Updates/ folder after a confirmation. Nothing loads until Reload now is confirmed."
+)
+
+## Builds the upload thread. A test can swap this for one that talks to the local harness.
+CREATE_CORE_WORKER = None
+
 # ---------------------------------------------------------------------------
 # Paths & theme
 # ---------------------------------------------------------------------------
@@ -749,7 +758,7 @@ class HotReloadPanel(QWidget):
         else:
             self.dll_path.setPlaceholderText("Pick a ZeroGBridge.Core.*.dll to upload…")
             self.dll_path.setText(self.state.pending_dll)
-        self.btn_browse.setToolTip(LIVE_UPLOAD_TIP if live else "Pick an example core DLL.")
+        self.btn_browse.setToolTip(LIVE_BROWSE_TIP if live else "Pick an example core DLL.")
         self.btn_sim_drop.setToolTip(
             LIVE_UPLOAD_TIP if live else "Examples only: pretend a new core DLL was copied into the incoming folder."
         )
@@ -1286,7 +1295,8 @@ class HotReloadPanel(QWidget):
         ## Live Reload/Rollback change the server, so only the developer gets them.
         if live and not self._is_developer():
             can_send = False
-        self.btn_browse.setEnabled(enabled and not live)
+        ## Live Browse uploads a core, so it follows the same developer gate as Reload.
+        self.btn_browse.setEnabled(enabled and (not live or (self._is_developer() and self.state.connection == "Online")))
         self.btn_reload.setEnabled(can_send)
         self.btn_rollback_prev.setEnabled(can_send)
         self.chk_force.setEnabled(can_send and live)
@@ -1313,6 +1323,7 @@ class HotReloadPanel(QWidget):
 
     def _on_browse(self) -> None:
         if self.source.is_live:
+            self._live_browse()
             return
         cores = self.source.cores_dir()
         start = str(cores if cores.exists() else HERE)
@@ -1325,6 +1336,72 @@ class HotReloadPanel(QWidget):
         if path:
             self.dll_path.setText(path)
             self._log(f"Selected {Path(path).name} for upload.", "cyan")
+
+    def _live_browse(self) -> None:
+        """Picks a built core, confirms, uploads it with coreupload:put, then opens the normal Reload confirmation."""
+        try:
+            if self._live_action or self.capture_mode or self.state.connection != "Online":
+                return
+            if not self._is_developer():
+                self._log("Core upload is developer only. Nothing was sent.", "warn")
+                return
+            path, _ = QFileDialog.getOpenFileName(self, "Pick the new ZeroGBridge.Core.dll", str(Path.home()),
+                                                  "ZeroGBridge core (ZeroGBridge.Core.dll)")
+            if not path:
+                return
+            if os.path.basename(path) != "ZeroGBridge.Core.dll":
+                self._log("Pick the file named ZeroGBridge.Core.dll. Nothing was sent.", "warn")
+                return
+            with open(path, "rb") as file_handle:
+                data = file_handle.read()
+            if data[:2] != b"MZ":
+                self._log("That file is not a Windows DLL. Nothing was sent.", "fail")
+                return
+            pdb_path = os.path.splitext(path)[0] + ".pdb"
+            pdb_note = (f"{os.path.basename(pdb_path)} ({os.path.getsize(pdb_path):,} bytes) goes first."
+                        if os.path.isfile(pdb_path) else "No .pdb next to it, so only the dll is sent.")
+            s = self.state
+            body = (
+                f"{self._player_warning()}{self._refresh_age()}\n\n"
+                f"Upload a new core to {s.server_name} (bridge port {s.port})?\n\n"
+                f"{path}\n{len(data):,} bytes, sha256 {hashlib.sha256(data).hexdigest()[:12]}\n{pdb_note}\n\n"
+                "The bridge checks the file, backs up what is in Updates/ and puts it there. "
+                "Nothing loads until Reload now is confirmed next."
+            )
+            if not self._confirm(f"Confirm core upload to {s.server_name}", body, "Upload core"):
+                self._log("Core upload cancelled. Nothing was sent.", "dim")
+                return
+            from features.server_files.write_worker import ServerWriteWorker, start_write_worker, upload_core
+            src = self.source
+            make_worker = CREATE_CORE_WORKER or (lambda job: ServerWriteWorker(job, profile_provider=src.profile))
+            worker = make_worker(lambda session, report: upload_core(session, path, report))
+            worker.finished_ok.connect(lambda reply, src=src: self._on_core_uploaded(src, reply))
+            worker.failed.connect(lambda kind, code, message, src=src: self._on_live_action_failed(src, "upload", message))
+            self._live_action = True
+            self._set_busy(True)
+            self.progress.setRange(0, 0)
+            self.progress.setFormat("Uploading core to Updates/…")
+            self._log(f"Uploading {os.path.basename(path)} to {s.server_name} Updates/.", "cyan")
+            self._core_worker = worker
+            start_write_worker(worker)
+        except Exception as e:
+            print(f"[ERROR] HotReloadPanel: Core upload failed to start: {e}")
+            self._log(f"Core upload failed to start: {e}", "fail")
+
+    def _on_core_uploaded(self, src, reply: dict) -> None:
+        """The core is in Updates/: shows the result, then hands over to the normal Reload confirmation."""
+        try:
+            if not self._alive() or src is not self.source:
+                return
+            self._end_live_action()
+            version = reply.get("assemblyVersion") or "?"
+            self._log(f"Core uploaded to Updates/: version {version}, sha256 {str(reply.get('sha256') or '')[:12]}.", "ok")
+            self.footer.setText(f"Core {version} is waiting in Updates/. Confirm Reload now to load it.")
+            self.state.pending_drop = f"ZeroGBridge.Core.dll {version}"
+            self.dll_path.setText(self.state.pending_drop)
+            self._live_reload()
+        except Exception as e:
+            print(f"[ERROR] HotReloadPanel: Core upload result could not be shown: {e}")
 
     def _on_auto_toggled(self, checked: bool) -> None:
         self.state.auto_reload = checked

@@ -1,6 +1,7 @@
 ## =====================================================================
 ## MODULE: features/server_files/file_client.py
 ## DESCRIPTION: Talks to ZeroGBridge's read-only files: commands (files:info, files:list, files:get).
+## (Core 1.6.2: the same session also sends files:put and coreupload:put for write_worker.py.)
 ## It opens its own short session (so it never mixes with the dashboard's telemetry socket), logs in,
 ## and sends one command at a time with the required pause between commands.
 ## Every wait has a timeout. The bridge password (input_pass) is only written to the socket,
@@ -49,8 +50,11 @@ SUPPORTED_PROTOCOL = 1
 ## protocol (reply made no sense) and refused (the bridge said no).
 class ServerFilesError(Exception):
 
-    def __init__(self, kind, message):
+    def __init__(self, kind, message, code=None):
         self.kind = kind
+
+        ## The bridge's own error code when it refused, e.g. changed_on_server (None otherwise).
+        self.code = code
         super().__init__(message)
 
 # endregion
@@ -115,14 +119,15 @@ class ServerFilesSession:
 
     ## Sends "files:<sub>:<json>" and returns the matching FILES reply as a dictionary.
     ## Raises ServerFilesError("unsupported") when the bridge does not know the command yet.
-    def request(self, sub_command, payload=None):
+    ## prefix="coreupload" sends "coreupload:<sub>:<json>" instead (same reply type).
+    def request(self, sub_command, payload=None, prefix="files"):
         if self.sock is None:
             raise ServerFilesError("closed", "The connection is not open.")
 
         body = dict(payload or {})
         request_id = f"zah-files-{uuid.uuid4().hex[:8]}"
         body["req_id"] = request_id
-        command = f"files:{sub_command}:{json.dumps(body, separators=(',', ':'))}"
+        command = f"{prefix}:{sub_command}:{json.dumps(body, separators=(',', ':'))}"
 
         ## Keep the half-second gap between commands.
         wait = COMMAND_GAP_SEC - (time.monotonic() - self.last_send_time)
@@ -163,7 +168,8 @@ class ServerFilesSession:
                 if reply.get("req_id") not in (None, request_id):
                     continue
                 if reply.get("ok") is not True:
-                    raise ServerFilesError("refused", f"The server refused the request: {reply.get('error', 'unknown')}.")
+                    raise ServerFilesError("refused", f"The server refused the request: {reply.get('error', 'unknown')}.",
+                                           reply.get("error"))
                 return reply
 
             ## An old bridge does not know files: and answers with its generic acknowledgement or an ERROR line.

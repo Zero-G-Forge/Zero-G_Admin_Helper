@@ -9,7 +9,7 @@
 # region Imports
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QWidget, QLabel, QCheckBox, QVBoxLayout, QPushButton, QProgressBar
+from PyQt6.QtWidgets import QWidget, QLabel, QCheckBox, QVBoxLayout, QPushButton, QProgressBar, QMessageBox
 
 from features.settings.app_settings import load_app_settings, save_app_setting
 from features.server_files.download_worker import ServerFileDownloadWorker
@@ -127,6 +127,7 @@ class SettingsPage(QWidget):
         self.chk_live_mode.setChecked(False)
         self.chk_live_mode.setEnabled(False)
         self.chk_live_mode.setToolTip("Coming in a later step.")
+        self.chk_live_mode.toggled.connect(self._on_live_mode_toggled)
         layout.addWidget(self.chk_live_mode)
 
         ## The warning that explains what live saves will ask for.
@@ -147,6 +148,7 @@ class SettingsPage(QWidget):
         super().showEvent(event)
         self._setup_listening()
         self._refresh_download_state()
+        self._refresh_live_mode_state()
 
     ## Connects to the cockpit's bridge_status_changed signal once, so the button follows the connection live.
     ## Qt drops the link by itself when this page is closed and deleted.
@@ -161,6 +163,57 @@ class SettingsPage(QWidget):
 
     def _on_bridge_status_changed(self, server_name, is_connected):
         self._refresh_download_state()
+        self._refresh_live_mode_state()
+
+    ## LIVE MODE is usable only for users the role gate allows, with the bridge connected (fail closed).
+    ## The tick itself lives on the cockpit (live_mode) and is never saved.
+    def _refresh_live_mode_state(self):
+        try:
+            cockpit = self.window()
+            check = getattr(cockpit, "can_edit_live_files", None)
+            allowed = bool(check()) if callable(check) else False
+            connected = getattr(cockpit, "bridge_connected", None) is True
+            self.chk_live_mode.blockSignals(True)
+            self.chk_live_mode.setChecked(getattr(cockpit, "live_mode", False) is True and allowed)
+            self.chk_live_mode.blockSignals(False)
+            self.chk_live_mode.setEnabled(allowed and connected)
+            if not allowed:
+                self.chk_live_mode.setToolTip("Developer and owner only, or an admin/moderator given Live file editing.")
+            elif not connected:
+                self.chk_live_mode.setToolTip("Connect to the server first.")
+            else:
+                self.chk_live_mode.setToolTip("Editors read the server's copy when a file opens, and SAVE also uploads "
+                                              "after the three confirmations. Off again every time ZAH starts.")
+            if not allowed and getattr(cockpit, "live_mode", False) is True:
+                cockpit.live_mode = False
+        except Exception as e:
+            print(f"[ERROR] SettingsPage: Failed to refresh LIVE MODE: {e}")
+            self.chk_live_mode.setEnabled(False)
+
+    ## Turning LIVE MODE on asks first (No is the default); turning it off never asks.
+    def _on_live_mode_toggled(self, is_checked):
+        try:
+            cockpit = self.window()
+            if is_checked:
+                check = getattr(cockpit, "can_edit_live_files", None)
+                allowed = bool(check()) if callable(check) else False
+                answer = QMessageBox.StandardButton.No
+                if allowed:
+                    answer = QMessageBox.question(
+                        self, "Turn on LIVE MODE?",
+                        "While LIVE MODE is on, SAVE in the ECF and PDA editors also uploads to the server "
+                        "(after the changes preview, the online-players warning and typing the file name).\n\n"
+                        "Turn it on?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+                if answer != QMessageBox.StandardButton.Yes:
+                    self.chk_live_mode.blockSignals(True)
+                    self.chk_live_mode.setChecked(False)
+                    self.chk_live_mode.blockSignals(False)
+                    return
+            cockpit.live_mode = bool(is_checked)
+            print(f"[INFO] SettingsPage: LIVE MODE {'on' if is_checked else 'off'}")
+        except Exception as e:
+            print(f"[ERROR] SettingsPage: LIVE MODE switch failed: {e}")
 
     ## Turns the download button on only when the cockpit says the bridge is connected, and never during a download.
     ## Fails closed: if the cockpit has no news (or isn't found), the button stays off.
