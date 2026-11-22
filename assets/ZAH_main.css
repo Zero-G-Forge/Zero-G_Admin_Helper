@@ -925,3 +925,12 @@ QSpinBox#LibraryQuantityBox {
 }
 
 /* endregion */
+
+/* region: Multi-Server Page */
+
+/* Server card and SEND buttons: smaller text than the dashboard's big buttons */
+#MultiServerPage QPushButton {
+    font-size: 13px;
+}
+
+/* endregion */

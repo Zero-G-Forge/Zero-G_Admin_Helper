@@ -220,6 +220,17 @@ def _draw_items(painter, color):
     painter.drawLine(QPointF(8, 46), QPointF(32, 58))
     painter.drawLine(QPointF(56, 46), QPointF(32, 58))
 
+def _draw_servers(painter, color):
+    ## Server rack: three stacked boxes, each with a light on the left
+    painter.setPen(_make_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    for y in (6, 24, 42):
+        painter.drawRoundedRect(QRectF(8, y, 48, 14), 3, 3)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    for y in (13, 31, 49):
+        painter.drawEllipse(QPointF(17, y), 3, 3)
+
 # endregion
 
 
@@ -245,6 +256,7 @@ ICON_DRAWERS = {
     "backups": _draw_backups,
     "bp_editor": _draw_bp_editor,
     "items": _draw_items,
+    "servers": _draw_servers,
 }
 
 # endregion

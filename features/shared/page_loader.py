@@ -37,6 +37,7 @@ PAGE_MODULES = {
     "backups": "features.backups.backups_page",
     "bp_editor": "features.bp_editor.bp_editor_page",
     "items": "features.items.items_page",
+    "servers": "features.multi_server.multi_server_page",
 }
 
 # endregion

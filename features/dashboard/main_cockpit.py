@@ -105,6 +105,9 @@ except ImportError as e:
 
 ## Nav pages in the mockup order: (page key, button text)
 NAV_PAGES = [
+
+    ## SERVERS (Multi-Server Overview) is hidden unless 2 or more servers are connected; see update_multi_server_nav.
+    ("servers", "SERVERS"),
     ("dashboard", "DASHBOARD"),
     ("chat", "CHAT"),
     ("players", "PLAYERS"),
@@ -123,8 +126,8 @@ NAV_PAGES = [
     ("items", "ITEMS"),
 ]
 
-## Fold-out nav groups: group key -> (title, page the title opens or None, child page keys).
-## A title with a page (SETTINGS) opens that page and folds its group out.
+## Pop-out nav groups: group key -> (title, page the title opens or None, child page keys).
+## A title with a page (SETTINGS) opens that page and pops its menu out.
 ## A title without a page (WORLD, LIBRARY) only folds its group in and out.
 NAV_GROUPS = {
     "world": ("WORLD", None, ["structures", "playfields"]),
@@ -133,7 +136,7 @@ NAV_GROUPS = {
 }
 
 ## Top-to-bottom order of the nav column. A key found in NAV_GROUPS becomes a pop-out menu group.
-NAV_LAYOUT = ["dashboard", "chat", "players", "factions", "world", "scheduler", "zerogbridge", "library", "settings"]
+NAV_LAYOUT = ["servers", "dashboard", "chat", "players", "factions", "world", "scheduler", "zerogbridge", "library", "settings"]
 
 ## Font used by every label (Inter on Zorin, DejaVu Sans as a fallback)
 CORE_FONT_FAMILIES = ["Inter", "DejaVu Sans"]
@@ -509,6 +512,9 @@ class MainCockpit(QMainWindow):
                 self.left_column.addWidget(btn)
 
             self.left_column.addStretch()
+
+            ## SERVERS starts hidden: it only shows once 2 or more servers are connected.
+            self.update_multi_server_nav(0)
 
             ## DASHBOARD starts selected.
             if "dashboard" in self.nav_buttons:
@@ -929,6 +935,20 @@ class MainCockpit(QMainWindow):
 
         ## Reuses the nav click, so the ZEROGBRIDGE button lights up and the page loads.
         self._on_nav_clicked("zerogbridge")
+
+    def update_multi_server_nav(self, connected_count):
+        """Shows the SERVERS nav button only while 2 or more servers are connected.
+        If it hides while its page is open, the cockpit goes back to the DASHBOARD."""
+        try:
+            self.connected_server_count = int(connected_count)
+            show_servers = self.connected_server_count >= 2
+            btn_servers = self.nav_buttons.get("servers")
+            if btn_servers is not None:
+                btn_servers.setVisible(show_servers)
+            if not show_servers and getattr(self, "active_page", None) == "servers":
+                self._on_nav_clicked("dashboard")
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to update multi-server nav: {e}")
 
     def update_alert_badge(self, alert_count):
         """Shows the alert count on the SETTINGS button (ALERTS & ANTI-CHEAT is in its menu); hidden when 0."""
