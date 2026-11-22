@@ -53,8 +53,9 @@ namespace ZeroGBridge
         // Deepest folder level the scan follows below a whitelisted sub-folder.
         public const int MaxFolderDepth = 12;
 
-        // How long (seconds) a folder scan is reused, so paging through files:list does not rescan.
-        private const int ListCacheSeconds = 10;
+        // How long (seconds) a folder scan is reused for the later pages of files:list. The first page
+        // (offset 0) always rescans, so a new list request sees changed files at once.
+        private const int ListCacheSeconds = 60;
 
         // Seconds between re-reads of the two root folders from the game (done on the game thread).
         private const int RootRefreshSeconds = 30;
@@ -437,7 +438,7 @@ namespace ZeroGBridge
             int offset = Math.Max(0, ReadInt(request, "offset", 0));
             int limit = Math.Min(MaxListPage, Math.Max(1, ReadInt(request, "limit", 1000)));
 
-            List<FileEntry> all = ScanRoot(rootName, rootFolder);
+            List<FileEntry> all = ScanRoot(rootName, rootFolder, offset == 0);
             var page = all.Skip(offset).Take(limit).Select(f => new { path = f.Path, size = f.Size, mtime = f.Mtime }).ToList();
             int next = offset + page.Count;
             ZgbLog.Write($"[ZGB] -INFO- [ServerFiles] list root={rootName} total={all.Count} offset={offset} returned={page.Count}");
@@ -466,12 +467,13 @@ namespace ZeroGBridge
 
         // Lists every allowed file under the whitelisted folders of a root. Sorted by path so paging is stable.
         // Symlinked folders and files are skipped, files over the size cap are skipped.
-        private static List<FileEntry> ScanRoot(string rootName, string rootFolder)
+        private static List<FileEntry> ScanRoot(string rootName, string rootFolder, bool forceFresh)
         {
             lock (ListCache)
             {
+                // forceFresh (first page) skips the saved scan; later pages reuse it so the paging stays consistent.
                 KeyValuePair<DateTime, List<FileEntry>> cached;
-                if (ListCache.TryGetValue(rootName, out cached) && (DateTime.UtcNow - cached.Key).TotalSeconds < ListCacheSeconds) return cached.Value;
+                if (!forceFresh && ListCache.TryGetValue(rootName, out cached) && (DateTime.UtcNow - cached.Key).TotalSeconds < ListCacheSeconds) return cached.Value;
             }
 
             var found = new List<FileEntry>();

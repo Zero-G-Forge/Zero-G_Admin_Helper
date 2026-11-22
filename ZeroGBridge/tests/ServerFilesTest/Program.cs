@@ -7,7 +7,10 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 using Eleon.Modding;
 using Newtonsoft.Json.Linq;
 using ZeroGBridge;
@@ -33,8 +36,57 @@ namespace ServerFilesTest
 
         private static JObject Run(string command) => JObject.Parse(ServerFiles.Handle(command));
 
-        private static int Main()
+        // =============================================================
+        // "serve" mode for ZAH's end-to-end test: a tiny stand-in for the bridge's TCP side that runs the REAL
+        // ServerFiles.Handle on a folder you pass in. Usage:
+        //   dotnet run -- serve <port> <scenarioFolder> <saveFolder> [old]
+        // The login token is read from the environment variable ZGB_TEST_TOKEN (never from the command line,
+        // never printed). With "old" every command gets the generic acknowledgement an old bridge gives.
+        // Lines in and out end with CRLF, as on the Windows dedicated server. Stop it with Ctrl+C or by killing it.
+        // =============================================================
+        private static int Serve(string[] args)
         {
+            int port = int.Parse(args[1]);
+            var fake = new FakeApplication { Scenario = args[2], Save = args[3] };
+            bool oldBridge = args.Length > 4 && args[4] == "old";
+            string token = Environment.GetEnvironmentVariable("ZGB_TEST_TOKEN") ?? "";
+            if (!oldBridge) ServerFiles.RefreshRoots(fake);
+            var listener = new TcpListener(IPAddress.Loopback, port);
+            listener.Start();
+            Console.WriteLine("LISTENING " + port);
+            while (true)
+            {
+                TcpClient client = listener.AcceptTcpClient();
+                new Thread(() =>
+                {
+                    try
+                    {
+                        using (client)
+                        using (var reader = new StreamReader(client.GetStream(), new UTF8Encoding(false)))
+                        using (var writer = new StreamWriter(client.GetStream(), new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\r\n" })
+                        {
+                            string first = reader.ReadLine();
+                            if (first == null || first != "auth:" + token) { writer.WriteLine("{\"type\":\"AUTH\",\"status\":\"Denied\"}"); return; }
+                            writer.WriteLine("{\"type\":\"AUTH\",\"status\":\"Authenticated\"}");
+                            string line;
+                            while ((line = reader.ReadLine()) != null)
+                            {
+                                // A telemetry line first, like the real bridge sends between replies.
+                                writer.WriteLine("{\"type\":\"METRIC\",\"fps\":60}");
+                                if (!oldBridge && line.StartsWith("files:", StringComparison.OrdinalIgnoreCase)) writer.WriteLine(ServerFiles.Handle(line));
+                                else writer.WriteLine("{\"type\":\"RESPONSE\",\"status\":\"Acknowledged\",\"command\":\"" + line.Replace("\"", "'") + "\"}");
+                            }
+                        }
+                    }
+                    catch { }
+                }) { IsBackground = true }.Start();
+            }
+        }
+
+        private static int Main(string[] args)
+        {
+            if (args.Length >= 4 && args[0] == "serve") return Serve(args);
+
             string temp = Path.Combine(Path.GetTempPath(), "zgb_files_test_" + Guid.NewGuid().ToString("N").Substring(0, 8));
             try
             {
