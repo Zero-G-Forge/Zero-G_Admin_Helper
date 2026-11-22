@@ -10,13 +10,19 @@
 
 # region Imports
 
+import os
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QPushButton, QComboBox, QLineEdit, QListWidget, QTableWidget,
-                             QAbstractItemView, QHeaderView, QPlainTextEdit, QSizePolicy)
+                             QAbstractItemView, QHeaderView, QPlainTextEdit, QSizePolicy,
+                             QStackedWidget, QButtonGroup)
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
+
+## The code-style editor (line numbers, colours, brace matching) for the CODE view.
+from features.ecf_editor.ecf_code_editor import EcfCodeEditor
 
 # endregion
 
@@ -28,6 +34,9 @@ ITEM_COLUMNS = ["ITEM NAME", "ID", "BUY PRICE", "SELL PRICE", "STOCK MIN-MAX"]
 
 ## Tooltip for every button that isn't wired up yet.
 LATER_TIP = "Coming in a later step."
+
+## The two ways to look at the file in the middle card: (key, tab text, card title).
+VIEW_TABS = [("table", "TABLE", "ITEMS"), ("code", "CODE", "CODE")]
 
 # endregion
 
@@ -63,17 +72,25 @@ class EcfEditorPage(QWidget):
         toolbar_layout.setSpacing(12)
 
         ## Which ECF file to edit, e.g. TraderNPCConfig.ecf. Empty until the files are read from the server.
+        ## After DOWNLOAD FOLDER, it lists every .ecf file in the downloaded folder.
         self.cmb_file = QComboBox()
         self.cmb_file.setObjectName("EcfFileCombo")
-        self.cmb_file.setPlaceholderText("No file loaded")
+        self.cmb_file.setPlaceholderText("No files downloaded")
         self.cmb_file.setMinimumWidth(200)
         self.cmb_file.setEnabled(False)
         self.cmb_file.setToolTip(LATER_TIP)
         toolbar_layout.addWidget(self.cmb_file)
+
+        ## Picking a file in the dropdown opens it in the CODE view.
+        self.cmb_file.currentIndexChanged.connect(self._on_file_picked)
+
+        ## Folder on this computer that holds the downloaded copies. None until a download has happened.
+        self.local_folder = None
         toolbar_layout.addStretch(1)
 
         ## DOWNLOAD only reads from the server; VALIDATE and SAVE work on the local copy.
-        self.btn_download = self._make_tool_button("DOWNLOAD FROM SERVER (READ-ONLY)", "DashActionButton")
+        ## It copies the whole folder of .ecf files down, so any of them can be picked and edited here.
+        self.btn_download = self._make_tool_button("DOWNLOAD FOLDER FROM SERVER (READ-ONLY)", "DashActionButton")
         self.btn_validate = self._make_tool_button("VALIDATE", "DashActionButton")
         self.btn_save = self._make_tool_button("SAVE (BACKUP FIRST)", "DashActionButton")
 
@@ -108,6 +125,36 @@ class EcfEditorPage(QWidget):
 
         ## The picked trader's items. A warning icon will mark rows that fail validation.
         items_card, items_layout = make_card("ITEMS")
+
+        ## Keep the card's title label so it can say ITEMS or CODE to match the view.
+        self.lbl_items_title = items_card.findChild(QLabel, "DashCardTitle")
+
+        ## TABLE / CODE tabs: the same file shown as a tidy table or as the raw .ecf code.
+        view_row = QHBoxLayout()
+        view_row.setSpacing(4)
+        self.view_group = QButtonGroup(self)
+        self.view_group.setExclusive(True)
+        self.view_buttons = {}
+        for view_key, view_text, view_title in VIEW_TABS:
+            btn_view = QPushButton(view_text)
+            btn_view.setObjectName("ChatTabButton")
+            btn_view.setCheckable(True)
+            btn_view.setMinimumHeight(30)
+            spread_letters(btn_view, 1.5)
+
+            ## The lambda passes this tab's key to _on_view_clicked.
+            btn_view.clicked.connect(lambda checked, key=view_key: self._on_view_clicked(key))
+            self.view_group.addButton(btn_view)
+            self.view_buttons[view_key] = btn_view
+            view_row.addWidget(btn_view)
+        view_row.addStretch()
+        items_layout.addLayout(view_row)
+
+        ## The stack shows one view at a time: page 0 is the table, page 1 is the code editor.
+        self.items_stack = QStackedWidget()
+        table_view = QWidget()
+        table_layout = QVBoxLayout(table_view)
+        table_layout.setContentsMargins(0, 0, 0, 0)
         self.tbl_items = QTableWidget(0, len(ITEM_COLUMNS))
         self.tbl_items.setObjectName("DashTable")
         self.tbl_items.setHorizontalHeaderLabels(ITEM_COLUMNS)
@@ -120,10 +167,17 @@ class EcfEditorPage(QWidget):
 
         ## ITEM NAME takes the spare width; the number columns fit their header text (so STOCK MIN-MAX isn't cut off).
         self.tbl_items.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        items_layout.addWidget(self.tbl_items, stretch=1)
+        table_layout.addWidget(self.tbl_items, stretch=1)
         self.lbl_items_empty = QLabel("Pick a trader to see its items.")
         self.lbl_items_empty.setObjectName("DashEmptyLabel")
-        items_layout.addWidget(self.lbl_items_empty)
+        table_layout.addWidget(self.lbl_items_empty)
+        self.items_stack.addWidget(table_view)
+
+        ## CODE view: the whole .ecf file, editable, coloured like code. It stays a local copy until SAVE.
+        self.code_editor = EcfCodeEditor()
+        self.items_stack.addWidget(self.code_editor)
+        items_layout.addWidget(self.items_stack, stretch=1)
+        self._on_view_clicked("table")
         page_grid.addWidget(items_card, 1, 1, 2, 1)
 
         # endregion
@@ -183,7 +237,57 @@ class EcfEditorPage(QWidget):
 
     # endregion
 
+    # region Local Files
+
+    def load_local_folder(self, folder_path):
+        """Fills the file dropdown with every .ecf file in a downloaded folder. Only reads this computer."""
+        self.local_folder = folder_path
+        try:
+            file_names = sorted(name for name in os.listdir(folder_path) if name.lower().endswith(".ecf"))
+
+        ## Folder missing or unreadable: show an empty, greyed dropdown instead of crashing.
+        except OSError:
+            file_names = []
+
+        ## blockSignals stops _on_file_picked firing for every name while the list is being filled.
+        self.cmb_file.blockSignals(True)
+        self.cmb_file.clear()
+        self.cmb_file.addItems(file_names)
+        self.cmb_file.setCurrentIndex(-1)
+        self.cmb_file.blockSignals(False)
+        self.cmb_file.setEnabled(bool(file_names))
+        self.cmb_file.setToolTip("Pick a file to edit." if file_names else LATER_TIP)
+        return file_names
+
+    def _on_file_picked(self, index):
+        """Opens the picked file from the local folder in the CODE view."""
+        if index < 0 or self.local_folder is None:
+            return
+        file_path = os.path.join(self.local_folder, self.cmb_file.itemText(index))
+        try:
+
+            ## errors="replace" keeps odd characters from stopping the file opening.
+            with open(file_path, encoding="utf-8", errors="replace") as ecf_file:
+                file_text = ecf_file.read()
+        except OSError:
+            self.code_editor.load_text("")
+            self.code_editor.setPlaceholderText("Could not open " + self.cmb_file.itemText(index) + ".")
+            return
+        self.code_editor.load_text(file_text)
+        self._on_view_clicked("code")
+
+    # endregion
+
     # region Helpers
+
+    def _on_view_clicked(self, view_key):
+        """Switches the middle card between the TABLE and CODE views and updates its title."""
+        for index, (tab_key, tab_text, tab_title) in enumerate(VIEW_TABS):
+            if tab_key == view_key:
+                self.view_buttons[tab_key].setChecked(True)
+                self.items_stack.setCurrentIndex(index)
+                if self.lbl_items_title is not None:
+                    self.lbl_items_title.setText(tab_title)
 
     def _make_tool_button(self, button_text, object_name):
         """Builds one toolbar button, greyed out until its step is wired up."""

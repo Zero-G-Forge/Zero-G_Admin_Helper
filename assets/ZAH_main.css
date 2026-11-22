@@ -843,6 +843,18 @@ QPlainTextEdit#EcfChangesBox {
     padding: 6px;
 }
 
+/* CODE view: dark code-editor panel. Line numbers, colours and brace matching are drawn in ecf_code_editor.py */
+QPlainTextEdit#EcfCodeEditor {
+    background-color: rgba(4, 11, 20, 230);
+    border: 1px solid rgba(40, 170, 215, 60);
+    border-radius: 6px;
+    color: #dcebf5;
+    font-family: "DejaVu Sans Mono", monospace;
+    font-size: 13px;
+    selection-background-color: rgba(51, 214, 255, 90);
+    selection-color: #ffffff;
+}
+
 /* Backup line along the bottom */
 #EcfBackupLabel {
     color: #c7d6e0;
