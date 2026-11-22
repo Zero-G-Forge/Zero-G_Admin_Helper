@@ -685,3 +685,17 @@ QPushButton#StructFilterButton:checked {
 }
 
 /* endregion */
+
+/* region: Scheduler Page */
+
+/* Scheduler page (features/scheduler/scheduler_page.py), matched to Concept_11-17/Scheduler.jpg.
+   Cards, inner boxes and "nothing yet" text reuse the Dashboard styles above.
+*/
+
+/* "TRIGGER: DAILY 04:00 CST" inside the box at the bottom of CHAIN EDITOR */
+#SchedTriggerLabel {
+    color: #8fe6ff;
+    font-size: 17px;
+}
+
+/* endregion */
