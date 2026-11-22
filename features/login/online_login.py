@@ -190,5 +190,58 @@ def fetch_failed_logins(session_token, limit=50, dev_key=None):
         print(f"[ERROR] OnlineLogin: Service unreachable for failed login list: {e}")
         return "offline", None
 
+## Sends one user manager request and returns ("ok", reply), ("denied", message) or ("offline", None).
+## The message is the service's own reason, like "you can't remove or demote your own account".
+## The token, key and password are never printed.
+def _send_user_request(route, fields, session_token, dev_key):
+    fields["token"] = session_token
+    if dev_key:
+        fields["dev_key"] = dev_key
+    user_request = urllib.request.Request(
+        LOGIN_SERVICE_URL.rstrip("/") + route,
+        data=json.dumps(fields).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(user_request, timeout=LOGIN_TIMEOUT_SEC) as reply:
+            reply_data = json.loads(reply.read().decode("utf-8"))
+        if isinstance(reply_data, dict) and reply_data.get("status") == "ok":
+            return "ok", reply_data
+        return "denied", "unexpected reply"
+    except urllib.error.HTTPError as e:
+
+        ## Refused (403, 400 or 404). Read the service's reason if it sent one.
+        try:
+            refused_message = json.loads(e.read().decode("utf-8")).get("message", "refused")
+        except Exception:
+            refused_message = "refused"
+        print(f"[WARNING] OnlineLogin: Service refused {route} ({e.code})")
+        return "denied", refused_message
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+
+        ## No answer at all (no internet, service down).
+        print(f"[ERROR] OnlineLogin: Service unreachable for {route}: {e}")
+        return "offline", None
+
+## Gets the login users: ("ok", [ {"username", "role", "created_at"}, more users ]), or ("denied" / "offline", None).
+def fetch_users(session_token, dev_key=None):
+    fetch_result, reply_data = _send_user_request("/users", {}, session_token, dev_key)
+    if fetch_result == "ok" and isinstance(reply_data, dict) and isinstance(reply_data.get("users"), list):
+        return "ok", reply_data["users"]
+    return ("offline" if fetch_result == "offline" else "denied"), None
+
+## Adds a user or resets their password (with a password), or changes only the role (password left blank).
+## server_name and server_address are the server this user belongs to. Blank means UNASSIGNED.
+def save_user(session_token, username, role, password="", dev_key=None, server_name="", server_address=""):
+    save_fields = {"username": username, "role": role, "password": password,
+                   "server_name": server_name, "server_address": server_address}
+    save_result, reply_data = _send_user_request("/users/save", save_fields, session_token, dev_key)
+    return save_result, (None if save_result == "ok" else reply_data)
+
+## Removes a user.
+def remove_user(session_token, username, dev_key=None):
+    remove_result, reply_data = _send_user_request("/users/delete", {"username": username}, session_token, dev_key)
+    return remove_result, (None if remove_result == "ok" else reply_data)
 
 # endregion

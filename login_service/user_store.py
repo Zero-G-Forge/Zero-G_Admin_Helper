@@ -83,6 +83,16 @@ def ensure_users_table():
                     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
             """)
+
+            ## Columns added after the table was first made. IF NOT EXISTS makes this safe on every start.
+            ## Users from before this get "" for both, which ZAH shows as UNASSIGNED.
+            connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS server_name TEXT NOT NULL DEFAULT ''")
+            connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS server_address TEXT NOT NULL DEFAULT ''")
+
+            ## The name with its capitals, only for showing. Sign-in still uses the lower-case username.
+            ## Users from before this get "", and ZAH shows their lower-case username instead.
+            connection.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''")
+
         print("[SUCCESS] UserStore: Users table is ready")
         return True
     except Exception as e:
@@ -107,17 +117,44 @@ def _db_get_user(username):
 
 ## Adds a user, or replaces them if the name already exists (same behavior as the JSON file).
 ## Leaving the "with" block commits the change.
-def _db_save_user(username, salt_hex, password_hash, role):
+def _db_save_user(username, salt_hex, password_hash, role, server_name="", server_address="", display_name=""):
     with _open_database() as connection:
         connection.execute(
             """
-            INSERT INTO users (username, salt, password_hash, role)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO users (username, salt, password_hash, role, server_name, server_address, display_name)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (username) DO UPDATE
-            SET salt = EXCLUDED.salt, password_hash = EXCLUDED.password_hash, role = EXCLUDED.role
+            SET salt = EXCLUDED.salt, password_hash = EXCLUDED.password_hash, role = EXCLUDED.role,
+                server_name = EXCLUDED.server_name, server_address = EXCLUDED.server_address,
+                display_name = EXCLUDED.display_name
             """,
-            (username, salt_hex, password_hash, role),
+            (username, salt_hex, password_hash, role, server_name, server_address, display_name),
         )
+
+## Reads every user as a list of {username, role, created_at}, oldest first.
+## Salts and hashes are never read here, so they can never be sent to ZAH.
+def _db_list_users():
+    with _open_database() as connection:
+        rows = connection.execute(
+            "SELECT username, role, created_at, server_name, server_address, display_name FROM users ORDER BY created_at").fetchall()
+    return [{"username": row[0], "role": row[1], "created_at": row[2].isoformat(),
+             "server_name": row[3], "server_address": row[4], "display_name": row[5]} for row in rows]
+
+## Removes one user. rowcount is how many rows were deleted, so 0 means there was no such user.
+## Their saved sessions go too, because the sessions table says ON DELETE CASCADE.
+def _db_delete_user(username):
+    with _open_database() as connection:
+        delete_result = connection.execute("DELETE FROM users WHERE username = %s", (username,))
+        return delete_result.rowcount > 0
+
+## Changes the role and server, leaving the password alone. 0 rows means there was no such user.
+def _db_set_role(username, role, server_name="", server_address="", display_name=""):
+    with _open_database() as connection:
+        update_result = connection.execute(
+            "UPDATE users SET role = %s, server_name = %s, server_address = %s, display_name = %s WHERE username = %s",
+            (role, server_name, server_address, display_name, username))
+        return update_result.rowcount > 0
+
 # endregion
 
 
@@ -136,8 +173,16 @@ def _load_users():
 
 
 ## Adds or replaces one user. Usernames are saved in lower case so "Ray" and "ray" are the same.
-def add_user(username, password_text, role):
+def add_user(username, password_text, role, server_name="", server_address=""):
+
+    ## The name as typed (capitals kept) is saved only for showing; sign-in uses the lower-case one.
+    display_name = str(username or "").strip()
     username = str(username or "").strip().lower()
+
+    ## Server details are plain labels. Cut to 100 characters so junk can't fill the database.
+    server_name = str(server_name or "").strip()[:100]
+    server_address = str(server_address or "").strip()[:100]
+
     if not username or not password_text or len(password_text) < 8:
         print("[ERROR] UserStore: Username and an 8+ character password are required")
         return False
@@ -151,11 +196,13 @@ def add_user(username, password_text, role):
         if _database_enabled():
             if not ensure_users_table():
                 return False
-            _db_save_user(username, salt.hex(), password_hash, role)
+            _db_save_user(username, salt.hex(), password_hash, role, server_name, server_address, display_name)
         ## Without one, keep using the local JSON file.
         else:
             users = _load_users()
-            users[username] = {"salt": salt.hex(), "password_hash": password_hash, "role": role}
+            users[username] = {"salt": salt.hex(), "password_hash": password_hash, "role": role,
+                               "server_name": server_name, "server_address": server_address,
+                               "display_name": display_name}
             with open(USERS_FILE, "w", encoding="utf-8") as file_handle:
                 json.dump(users, file_handle, indent=2)
         print(f"[SUCCESS] UserStore: Saved user {username} ({role})")
@@ -181,5 +228,76 @@ def check_user(username, password_text):
     except Exception as e:
         print(f"[ERROR] UserStore: Could not check user: {e}")
         return None
+
+## Lists every user (server, name, role and date only, never password data).
+## Returns None if the list can't be read, so ZAH can tell "error" apart from "no users".
+def list_users():
+    try:
+        if _database_enabled():
+            return _db_list_users()
+        users = _load_users()
+        return [{"username": name, "role": users[name].get("role"), "created_at": "",
+                 "server_name": users[name].get("server_name", ""), "server_address": users[name].get("server_address", ""),
+                 "display_name": users[name].get("display_name", "")}
+                for name in sorted(users)]
+    except Exception as e:
+        print(f"[ERROR] UserStore: Could not list users: {e}")
+        return None
+
+## Removes one user. Returns True only if they existed and are now gone. Fails closed.
+def delete_user(username):
+    username = str(username or "").strip().lower()
+    if not username:
+        return False
+    try:
+        if _database_enabled():
+            deleted = _db_delete_user(username)
+        else:
+            users = _load_users()
+            deleted = users.pop(username, None) is not None
+            if deleted:
+                with open(USERS_FILE, "w", encoding="utf-8") as file_handle:
+                    json.dump(users, file_handle, indent=2)
+        if deleted:
+            print(f"[SUCCESS] UserStore: Removed user {username}")
+        return deleted
+    except Exception as e:
+        print(f"[ERROR] UserStore: Could not remove user: {e}")
+        return False
+
+## Changes a user's role without touching their password. Fails closed on an unknown role or user.
+## They get the new role the next time they sign in.
+def set_user_role(username, role, server_name="", server_address=""):
+
+    ## Saving with different capitals (ParticleWave instead of particlewave) updates the shown name.
+    display_name = str(username or "").strip()
+    username = str(username or "").strip().lower()
+
+    ## Server details are plain labels. Cut to 100 characters so junk can't fill the database.
+    server_name = str(server_name or "").strip()[:100]
+    server_address = str(server_address or "").strip()[:100]
+
+    if not username or role not in ALLOWED_ROLES:
+        print("[ERROR] UserStore: A username and a known role are required")
+        return False
+    try:
+        if _database_enabled():
+            changed = _db_set_role(username, role, server_name, server_address, display_name)
+        else:
+            users = _load_users()
+            changed = username in users
+            if changed:
+                users[username]["role"] = role
+                users[username]["server_name"] = server_name
+                users[username]["server_address"] = server_address
+                users[username]["display_name"] = display_name
+                with open(USERS_FILE, "w", encoding="utf-8") as file_handle:
+                    json.dump(users, file_handle, indent=2)
+        if changed:
+            print(f"[SUCCESS] UserStore: {username} is now {role}")
+        return changed
+    except Exception as e:
+        print(f"[ERROR] UserStore: Could not change role: {e}")
+        return False
 
 # endregion

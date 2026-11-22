@@ -44,6 +44,13 @@ def _draw_dashboard(painter, color):
     for x, y in ((8, 8), (36, 8), (8, 36), (36, 36)):
         painter.drawRoundedRect(QRectF(x, y, 20, 20), 3, 3)
 
+def _draw_chat(painter, color):
+    ## Speech bubble
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    painter.drawRoundedRect(QRectF(6, 10, 52, 34), 8, 8)
+    tail = QPolygonF([QPointF(16, 42), QPointF(14, 56), QPointF(30, 42)])
+    painter.drawPolygon(tail)
 
 def _draw_players(painter, color):
     ## Head and shoulders
@@ -56,7 +63,6 @@ def _draw_players(painter, color):
     path.closeSubpath()
     painter.drawPath(path)
 
-
 def _draw_factions(painter, color):
     ## Flag on a pole
     painter.setPen(_make_pen(color, 5))
@@ -65,7 +71,6 @@ def _draw_factions(painter, color):
     painter.setBrush(QColor(color))
     flag = QPolygonF([QPointF(16, 8), QPointF(54, 14), QPointF(42, 24), QPointF(54, 34), QPointF(16, 34)])
     painter.drawPolygon(flag)
-
 
 def _draw_structures(painter, color):
     ## Stacked layers (blocks)
@@ -77,7 +82,6 @@ def _draw_structures(painter, color):
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawPolyline(QPolygonF([QPointF(8, 30), QPointF(32, 42), QPointF(56, 30)]))
     painter.drawPolyline(QPolygonF([QPointF(8, 42), QPointF(32, 54), QPointF(56, 42)]))
-
 
 def _draw_playfields(painter, color):
     ## Planet with a ring
@@ -92,26 +96,6 @@ def _draw_playfields(painter, color):
     painter.drawEllipse(QRectF(-28, -9, 56, 18))
     painter.restore()
 
-
-def _draw_chat(painter, color):
-    ## Speech bubble
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(color))
-    painter.drawRoundedRect(QRectF(6, 10, 52, 34), 8, 8)
-    tail = QPolygonF([QPointF(16, 42), QPointF(14, 56), QPointF(30, 42)])
-    painter.drawPolygon(tail)
-
-
-def _draw_alerts(painter, color):
-    ## Warning triangle with a cut-out mark
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(color))
-    painter.drawPolygon(QPolygonF([QPointF(32, 6), QPointF(60, 56), QPointF(4, 56)]))
-    painter.setBrush(QColor("#0b1622"))
-    painter.drawRoundedRect(QRectF(29, 22, 6, 20), 3, 3)
-    painter.drawEllipse(QRectF(29, 45, 6, 6))
-
-
 def _draw_scheduler(painter, color):
     ## Clock face
     painter.setPen(_make_pen(color, 5))
@@ -119,22 +103,6 @@ def _draw_scheduler(painter, color):
     painter.drawEllipse(QRectF(8, 8, 48, 48))
     painter.drawLine(QPointF(32, 32), QPointF(32, 18))
     painter.drawLine(QPointF(32, 32), QPointF(43, 38))
-
-
-def _draw_bans_audit(painter, color):
-    ## Shield
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(color))
-    path = QPainterPath()
-    path.moveTo(32, 4)
-    path.lineTo(56, 12)
-    path.cubicTo(56, 38, 46, 52, 32, 60)
-    path.cubicTo(18, 52, 8, 38, 8, 12)
-    path.closeSubpath()
-    painter.drawPath(path)
-    painter.setPen(_make_pen("#0b1622", 5))
-    painter.drawLine(QPointF(22, 22), QPointF(42, 42))
-
 
 def _draw_zerogbridge(painter, color):
     ## Two nodes joined by a bridge arc
@@ -160,6 +128,39 @@ def _draw_settings(painter, color):
     painter.setBrush(Qt.BrushStyle.NoBrush)
     painter.drawEllipse(QRectF(16, 16, 32, 32))
 
+def _draw_alerts(painter, color):
+    ## Warning triangle with a cut-out mark
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    painter.drawPolygon(QPolygonF([QPointF(32, 6), QPointF(60, 56), QPointF(4, 56)]))
+    painter.setBrush(QColor("#0b1622"))
+    painter.drawRoundedRect(QRectF(29, 22, 6, 20), 3, 3)
+    painter.drawEllipse(QRectF(29, 45, 6, 6))
+
+def _draw_bans_audit(painter, color):
+    ## Shield
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    path = QPainterPath()
+    path.moveTo(32, 4)
+    path.lineTo(56, 12)
+    path.cubicTo(56, 38, 46, 52, 32, 60)
+    path.cubicTo(18, 52, 8, 38, 8, 12)
+    path.closeSubpath()
+    painter.drawPath(path)
+    painter.setPen(_make_pen("#0b1622", 5))
+    painter.drawLine(QPointF(22, 22), QPointF(42, 42))
+
+def _draw_users(painter, color):
+    ## Two people: a smaller one behind on the right, a bigger one in front on the left.
+    ## drawPie with 0 and 180 * 16 draws the top half of an oval (Qt counts angles in 1/16ths of a degree).
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    painter.drawEllipse(QRectF(36, 10, 16, 16))
+    painter.drawPie(QRectF(28, 30, 32, 30), 0, 180 * 16)
+    painter.drawEllipse(QRectF(14, 8, 20, 20))
+    painter.drawPie(QRectF(4, 30, 40, 36), 0, 180 * 16)
+
 # endregion
 
 
@@ -168,16 +169,17 @@ def _draw_settings(painter, color):
 ## Page key -> drawing function
 ICON_DRAWERS = {
     "dashboard": _draw_dashboard,
+    "chat": _draw_chat,
     "players": _draw_players,
     "factions": _draw_factions,
     "structures": _draw_structures,
     "playfields": _draw_playfields,
-    "chat": _draw_chat,
-    "alerts": _draw_alerts,
     "scheduler": _draw_scheduler,
-    "bans_audit": _draw_bans_audit,
     "zerogbridge": _draw_zerogbridge,
     "settings": _draw_settings,
+    "alerts": _draw_alerts,
+    "bans_audit": _draw_bans_audit,
+    "users": _draw_users,
 }
 
 # endregion

@@ -106,16 +106,17 @@ except ImportError as e:
 ## Nav pages in the mockup order: (page key, button text)
 NAV_PAGES = [
     ("dashboard", "DASHBOARD"),
+    ("chat", "CHAT"),
     ("players", "PLAYERS"),
     ("factions", "FACTIONS"),
     ("structures", "STRUCTURES"),
     ("playfields", "PLAYFIELDS"),
-    ("chat", "CHAT"),
-    ("alerts", "ALERTS & ANTI-CHEAT"),
     ("scheduler", "SCHEDULER"),
-    ("bans_audit", "BANS & AUDIT"),
     ("zerogbridge", "ZEROGBRIDGE"),
     ("settings", "SETTINGS"),
+    ("alerts", "ALERTS & ANTI-CHEAT"),
+    ("bans_audit", "BANS & AUDIT"),
+    ("users", "USERS"),
 ]
 
 ## Font used by every label (Inter on Zorin, DejaVu Sans as a fallback)

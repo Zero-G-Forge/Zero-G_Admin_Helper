@@ -12,7 +12,7 @@ import secrets
 import time
 
 ## user_store.py sits in the same folder, so it can be imported by name.
-from user_store import check_user, ensure_users_table
+from user_store import check_user, ensure_users_table, add_user, list_users, delete_user, set_user_role
 
 ## session_store keeps the "Keep me logged in" sessions
 ## (ZAH-DB, or memory when testing).
@@ -53,6 +53,10 @@ active_sessions = {}
 ## Empty or too short means it's switched off, so the route stays owners-only (fails closed).
 DEV_LOG_KEY = os.environ.get("ZAH_DEV_KEY", "")
 DEV_KEY_MIN_LEN = 32
+
+## The name used when the developer key manages users. It starts with a space, and real usernames
+## are always stripped, so no real user can ever match it.
+DEVELOPER_MANAGER = " developer"
 
 # endregion
 
@@ -101,6 +105,26 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
             return False
         return secrets.compare_digest(str(sent_key or ""), DEV_LOG_KEY)
 
+    ## Who is asking to manage users: an owner's username, DEVELOPER_MANAGER for the developer key,
+    ## or None if they aren't allowed (fails closed).
+    def _user_manager(self, login_data):
+        if self._dev_key_ok(login_data.get("dev_key")):
+            return DEVELOPER_MANAGER
+        token = str(login_data.get("token") or "")
+        if self._token_role(token) != "owner":
+            return None
+        session = active_sessions.get(token)
+        if session is not None:
+            return session["username"]
+        session_info = check_session(token)
+        return session_info["username"] if session_info else None
+
+    ## Ends a user's normal 8-hour logins, which live only in memory, so a removed or changed
+    ## user has to sign in again. Their saved sessions are handled by the database.
+    def _end_memory_sessions(self, username):
+        for old_token in [token for token, session in active_sessions.items() if session["username"] == username]:
+            active_sessions.pop(old_token, None)
+
     ## do_GET runs for every GET request; self.path is the address part, like "/health".
     def do_GET(self):
         try:
@@ -115,7 +139,7 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
     ## do_POST runs for POST requests. ZAH sends {"username": ..., "password": ...} to /login.
     def do_POST(self):
         try:
-            if self.path not in ("/login", "/session", "/logout", "/failed_logins"):
+            if self.path not in ("/login", "/session", "/logout", "/failed_logins", "/users", "/users/save", "/users/delete"):
                 self._send_json(404, {"status": "error", "message": "not found"})
                 return
 
@@ -159,6 +183,60 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
                     self._send_json(403, {"status": "error", "message": "not allowed"})
                     return
                 self._send_json(200, {"status": "ok", "entries": list_failed_logins(login_data.get("limit", 50))})
+                return
+
+            ## /users, /users/save and /users/delete: owners, or the developer key, manage the login users.
+            ## 403 = not allowed. A bad token and a non-owner get the same reply, so nobody can test tokens.
+            if self.path.startswith("/users"):
+                manager_name = self._user_manager(login_data)
+                if manager_name is None:
+                    self._send_json(403, {"status": "error", "message": "not allowed"})
+                    return
+                target_name = str(login_data.get("username", "")).strip().lower()
+
+                ## /users: the list of names, roles and dates. Never any password data.
+                if self.path == "/users":
+                    user_list = list_users()
+                    if user_list is None:
+                        self._send_json(500, {"status": "error", "message": "server error"})
+                        return
+                    self._send_json(200, {"status": "ok", "users": user_list})
+                    return
+
+                ## An owner can't remove or demote their own account, so nobody can lock themselves out.
+                if target_name == manager_name and (self.path == "/users/delete" or login_data.get("role") != "owner"):
+                    self._send_json(400, {"status": "error", "message": "you can't remove or demote your own account"})
+                    return
+
+                ## /users/delete: 404 if there was no such user.
+                if self.path == "/users/delete":
+                    if not delete_user(target_name):
+                        self._send_json(404, {"status": "error", "message": "no such user"})
+                        return
+                    self._end_memory_sessions(target_name)
+                    print(f"[SUCCESS] LoginService: {manager_name.strip()} removed {target_name}")
+                    self._send_json(200, {"status": "ok"})
+                    return
+
+                ## /users/save: with a password it adds the user or resets their password.
+                ## Without one it changes only the role. The password is never printed.
+                new_password = str(login_data.get("password") or "")
+                server_name = str(login_data.get("server_name") or "")
+                server_address = str(login_data.get("server_address") or "")
+
+                ## The name as ZAH sent it, capitals kept. user_store lowers it for sign-in and keeps this for showing.
+                typed_name = str(login_data.get("username", "")).strip()
+
+                if new_password:
+                    saved = add_user(typed_name, new_password, login_data.get("role"), server_name, server_address)
+                else:
+                    saved = set_user_role(typed_name, login_data.get("role"), server_name, server_address)
+                if not saved:
+                    self._send_json(400, {"status": "error", "message": "could not save, check the name, role and 8+ character password"})
+                    return
+                self._end_memory_sessions(target_name)
+                print(f"[SUCCESS] LoginService: {manager_name.strip()} saved {target_name}")
+                self._send_json(200, {"status": "ok"})
                 return
 
             username = str(login_data.get("username", "")).strip()

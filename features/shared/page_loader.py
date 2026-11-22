@@ -22,16 +22,17 @@ from features.shared.error_card import ErrorCard
 ## Which module holds each page. The key matches NAV_PAGES in main_cockpit.py.
 PAGE_MODULES = {
     "dashboard": "features.dashboard.dashboard_page",
+    "chat": "features.chat.chat_page",
     "players": "features.players.players_page",
     "factions": "features.factions.factions_page",
     "structures": "features.structures.structures_page",
     "playfields": "features.playfields.playfields_page",
-    "chat": "features.chat.chat_page",
-    "alerts": "features.alerts.alerts_page",
     "scheduler": "features.scheduler.scheduler_page",
-    "bans_audit": "features.bans_audit.bans_audit_page",
     "zerogbridge": "features.zerogbridge.zerogbridge_page",
     "settings": "features.settings.settings_page",
+    "alerts": "features.alerts.alerts_page",
+    "bans_audit": "features.bans_audit.bans_audit_page",
+    "users": "features.users.users_page",
 }
 
 # endregion
