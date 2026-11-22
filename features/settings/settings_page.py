@@ -103,6 +103,16 @@ class SettingsPage(QWidget):
         self.btn_download_files.clicked.connect(self._on_download_clicked)
         layout.addWidget(self.btn_download_files)
 
+        ## CANCEL stops a running download at the next safe point (between two requests). Hidden otherwise.
+        self.btn_cancel_download = QPushButton("CANCEL DOWNLOAD")
+        self.btn_cancel_download.setObjectName("DashActionButton")
+        self.btn_cancel_download.setFixedHeight(30)
+        self.btn_cancel_download.setFixedWidth(360)
+        self.btn_cancel_download.setToolTip("Stops the download. Files already finished stay; half-finished ones are thrown away.")
+        self.btn_cancel_download.setVisible(False)
+        self.btn_cancel_download.clicked.connect(self._on_cancel_download_clicked)
+        layout.addWidget(self.btn_cancel_download)
+
         ## Progress while downloading. Hidden until a download starts.
         self.bar_download_progress = QProgressBar()
         self.bar_download_progress.setObjectName("SettingsProgressBar")
@@ -126,7 +136,7 @@ class SettingsPage(QWidget):
         self.chk_live_mode.setObjectName("SettingsCheckBox")
         self.chk_live_mode.setChecked(False)
         self.chk_live_mode.setEnabled(False)
-        self.chk_live_mode.setToolTip("Coming in a later step.")
+        self.chk_live_mode.setToolTip("Connect to the server first.")
         self.chk_live_mode.toggled.connect(self._on_live_mode_toggled)
         layout.addWidget(self.chk_live_mode)
 
@@ -256,6 +266,8 @@ class SettingsPage(QWidget):
             ## finished fires after run() ends, success or not: the cleanup point.
             self.download_worker.finished.connect(self._on_download_thread_ended)
             self.download_worker.start()
+            self.btn_cancel_download.setEnabled(True)
+            self.btn_cancel_download.setVisible(True)
         except Exception as e:
             print(f"[ERROR] SettingsPage: Could not start the download: {e}")
             self._on_download_failed("Could not start the download.")
@@ -295,9 +307,21 @@ class SettingsPage(QWidget):
         self.lbl_download_status.setText(f"Download failed: {message}")
         self.lbl_download_status.setVisible(True)
 
+    ## Asks the running download to stop. The worker ends with "Download stopped." through failed.
+    def _on_cancel_download_clicked(self):
+        try:
+            worker = self.download_worker
+            if worker is not None and hasattr(worker, "request_stop"):
+                worker.request_stop()
+                self.btn_cancel_download.setEnabled(False)
+                self.lbl_download_status.setText("Stopping after the current file")
+        except Exception as e:
+            print(f"[ERROR] SettingsPage: Could not cancel the download: {e}")
+
     ## Always runs last: puts the button and bar back so another download can start.
     def _on_download_thread_ended(self):
         self.download_worker = None
+        self.btn_cancel_download.setVisible(False)
         self.bar_download_progress.setVisible(False)
         self.btn_download_files.setText("DOWNLOAD SERVER FILES (READ-ONLY)")
         self._refresh_download_state()

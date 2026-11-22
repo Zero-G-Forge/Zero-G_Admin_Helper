@@ -136,12 +136,12 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `playfields` | PLAYFIELDS | `features.playfields.playfields_page` | `PlayfieldsPage` | Live summary and loaded-playfield cards; UNLOAD, RESTART PLAYFIELD, and WIPE on ticked cards (owner, Safety Flow); no star map (no coordinates) |
 | `scheduler` | SCHEDULER | `features.scheduler.scheduler_page` | `SchedulerPage` | Layout only |
 | `zerogbridge` | ZEROGBRIDGE | `features.zerogbridge.zerogbridge_page` | `ZeroGBridgePage` | Live connect and disconnect; portal button for admin and above |
-| `settings` | SETTINGS | `features.settings.settings_page` | `SettingsPage` | Auto-connect is live; the read-only server files download is live (needs a bridge with `files:`); LIVE MODE is layout only |
+| `settings` | SETTINGS | `features.settings.settings_page` | `SettingsPage` | Auto-connect is live; the read-only server files download is live, with CANCEL DOWNLOAD; LIVE MODE follows the role gate (see **Server uploads and LIVE MODE**) |
 | `alerts` | ALERTS & ANTI-CHEAT | `features.alerts.alerts_page` | `AlertsPage` | Live queue from cheat flags and chat watch-word hits; ACK on this PC; PREVIEW BAN through the Safety Flow |
 | `bans_audit` | BANS & AUDIT | `features.bans_audit.bans_audit_page` | `BansAuditPage` | Failed-login table is live (owner, or developer with key) |
 | `users` | USERS | `features.users.users_page` | `UsersPage` | Live add, edit, and remove through the login service; Live file editing checkbox is layout only |
-| `ecf_editor` | ECF EDITOR | `features.ecf_editor.ecf_editor_page` | `EcfEditorPage` | Lists and opens every `.ecf` from the downloaded server files (`load_server_files`); empty state when nothing is downloaded |
-| `pda_editor` | PDA EDITOR | `features.pda_editor.pda_editor_page` | `PdaEditorPage` | Lists and opens the downloaded PDA `.yaml` / `.csv` files, chapters with English names; empty state when nothing is downloaded |
+| `ecf_editor` | ECF EDITOR | `features.ecf_editor.ecf_editor_page` | `EcfEditorPage` | Lists and opens every `.ecf` from the downloaded server files (`load_server_files`); DOWNLOAD FOLDER runs the read-only download and refills the list; empty state when nothing is downloaded |
+| `pda_editor` | PDA EDITOR | `features.pda_editor.pda_editor_page` | `PdaEditorPage` | Lists and opens the downloaded PDA `.yaml` / `.csv` files, chapters with English names; DOWNLOAD FOLDER as in the ECF Editor; empty state when nothing is downloaded |
 | `backups` | BACKUPS | `features.backups.backups_page` | `BackupsPage` | Layout; PREVIEW and RESTORE locked with the reason (no bridge backup command; a restore needs the server stopped) |
 | `bp_editor` | BP EDITOR | `features.bp_editor.bp_editor_page` | `LibraryPage` (blueprints tab) | Layout; blueprint data is not loaded yet |
 | `items` | ITEMS | `features.items.items_page` | `LibraryPage` (items tab) | Reads items from the downloaded server files on opening (`load_server_files`), with item pictures; GIVE ITEM to an online player (Safety Flow); ADD TO TEMPLATE on this PC; empty state when nothing is downloaded |
@@ -1051,6 +1051,8 @@ Page wiring:
 | Items (Library) | GIVE ITEM (was ADD TO PENDING EDITS) | `api:Request_Player_AddItem {"id":N,"item":{"id":X,"count":Q}}` | yes |
 | Items (Library) | ADD TO TEMPLATE | none: adds the item and quantity to STARTER / EXPLORER / BUILDER in `data/loadout_templates.json` | no |
 | BP Editor (Library) | BLUEPRINTS tab | none: no blueprint data source yet | empty state |
+| ECF / PDA Editor | DOWNLOAD FOLDER FROM SERVER (READ-ONLY) | the `files:` download (`ServerFileDownloadWorker`), then `load_server_files` | no |
+| Settings | CANCEL DOWNLOAD | none on the server: `request_stop` on the download thread | no |
 
 ## Planned / Not Yet Wired
 
@@ -1062,10 +1064,11 @@ Done: the read-only `files:` bridge commands (core 1.6.1) and the working Settin
 
 Still to do:
 
-- Ray deploys the 1.6.1 core to the server (steps are in ENGINE_CONCEPTS_AND_EXPLANATIONS.md). Until then the button shows the fail-closed message.
+- Done: the live server runs core 1.6.2 (it has `files:`), so the old "Ray deploys the 1.6.1 core" step is finished.
 - Check the real scenario's folder layout with `files:info` (`topFolders`) and adjust the `AllowedFolders` table in `ServerFiles.cs` if the real folders differ. The save game folders in particular are guesses until seen on the live server.
-- Items, ECF Editor, and PDA Editor must read from `data/server_files/<scenario>/`, **never** from local base-game Content files.
-- A Cancel button for a running download (the worker already has `request_stop`).
+- Done (Nov 22, 2026): Items, ECF Editor, and PDA Editor read from `data/server_files/<scenario>/`, **never** from local base-game Content files.
+- Done (Nov 22, 2026): CANCEL DOWNLOAD on the Settings page calls the worker's `request_stop`; the worker stops between two requests and reports `Download stopped.` Half-finished `.part` files are removed.
+- Done (Nov 22, 2026): the editors' DOWNLOAD FOLDER button runs the same read-only download. Only one download runs at a time across ZAH (`settings_page.RUNNING_DOWNLOADS`).
 
 ### Item images
 
@@ -1102,7 +1105,7 @@ Still to wire, all against **downloaded server files** (or LIVE MODE once approv
 - **SAVE** to the local copy, with a backup of the previous file
 - **UPLOAD TO SERVER** through ZeroGBridge, only with explicit approval (done Nov 22, 2026, see **Server uploads and LIVE MODE**)
 
-Until then, the toolbar buttons stay disabled with `Coming in a later step.` The ECF and PDA pages can already open a local folder for layout and editor testing. That path is not the long-term data source.
+(Nov 22, 2026: every toolbar button is wired; none says `Coming in a later step.` any more.) The ECF and PDA pages can already open a local folder for layout and editor testing. That path is not the long-term data source.
 
 Done (Nov 22, 2026): both editors fill their file dropdown from the downloaded server files on opening (`load_server_files`). Each row is shown as `<file name>  (scenario)` or `(save)`, carries its whole entry (`root`, server `path`, local `full` path), and has the server path as its tooltip. The PDA list only takes `.yaml` and `.csv` under `SharedData/Content/Extras/PDA` or `Content/Extras/PDA`. With nothing downloaded the dropdown is disabled and the editor says `No server files yet. Use Settings > DOWNLOAD SERVER FILES.` `load_local_folder` stays for tests.
 

@@ -9,6 +9,8 @@
 ## UPLOAD TO SERVER (and SAVE while LIVE MODE is on) sends the edited text with files:put after three
 ## confirmations (upload_flow.py). Only users the role gate allows get the button; the bridge backs up the
 ## server's old file first, and refuses when the server copy changed since it was downloaded.
+## DOWNLOAD FOLDER FROM SERVER (READ-ONLY) runs the same read-only download as Settings (Nov 22, 2026),
+## then refills the file list. Only one download runs at a time across ZAH.
 ## ==========================================
 
 # region Imports
@@ -17,6 +19,9 @@ import os
 
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import QMessageBox
+
+## The same read-only download thread the Settings page uses.
+from features.server_files.download_worker import ServerFileDownloadWorker
 
 from features.server_files import edit_store, upload_flow
 from features.server_files.write_worker import ServerWriteWorker, fetch_file, put_file, start_write_worker
@@ -66,6 +71,11 @@ class EditorActions:
             self.upload_worker = None
             self.btn_upload.clicked.connect(self._on_upload_clicked)
             self.code_editor.textChanged.connect(self._refresh_edit_buttons)
+
+            ## DOWNLOAD FOLDER: the read-only download, then the file list is read again.
+            self.download_worker = None
+            self.create_download_worker = ServerFileDownloadWorker
+            self.btn_download.clicked.connect(self._on_download_folder_clicked)
             self._refresh_edit_buttons()
         except Exception as e:
             print(f"[ERROR] EditorActions: Could not connect the edit buttons: {e}")
@@ -81,8 +91,80 @@ class EditorActions:
             self.btn_save.setToolTip("Save the edited copy on this PC. The last saved copy is backed up first." if can_save
                                      else "Open a downloaded server file first.")
             self._refresh_upload_button(can_save)
+            self._refresh_download_button()
         except Exception as e:
             print(f"[ERROR] EditorActions: Could not refresh the edit buttons: {e}")
+
+    # endregion
+
+    # region Download Folder
+
+    def _download_busy(self):
+        try:
+            from features.settings.settings_page import RUNNING_DOWNLOADS
+            return any(worker.isRunning() for worker in RUNNING_DOWNLOADS) or getattr(self, "download_worker", None) is not None
+        except Exception:
+            return getattr(self, "download_worker", None) is not None
+
+    def _refresh_download_button(self):
+        """On only while the bridge is connected and no download is running anywhere in ZAH."""
+        try:
+            btn = getattr(self, "btn_download", None)
+            if btn is None:
+                return
+            connected = getattr(self.window(), "bridge_connected", None) is True
+            busy = self._download_busy()
+            btn.setEnabled(connected and not busy)
+            btn.setToolTip("A download is already running." if busy else
+                           ("Copies the server's editable files to this PC. Nothing on the server is changed." if connected
+                            else "Connect to the server first."))
+        except Exception as e:
+            print(f"[ERROR] EditorActions: Could not refresh DOWNLOAD FOLDER: {e}")
+
+    def _on_download_folder_clicked(self):
+        try:
+            if self._download_busy():
+                return
+            from features.settings.settings_page import RUNNING_DOWNLOADS
+            self.btn_download.setEnabled(False)
+            self.btn_download_text = self.btn_download.text()
+            self.btn_download.setText("DOWNLOADING")
+            self.download_worker = self.create_download_worker()
+            RUNNING_DOWNLOADS.append(self.download_worker)
+            self.download_worker.finished.connect(lambda worker=self.download_worker: RUNNING_DOWNLOADS.remove(worker) if worker in RUNNING_DOWNLOADS else None)
+            self.download_worker.progress.connect(self._on_download_folder_progress)
+            self.download_worker.finished_ok.connect(self._on_download_folder_finished)
+            self.download_worker.failed.connect(lambda message: print(f"[ERROR] EditorActions: Download failed: {message}"))
+            self.download_worker.finished.connect(self._on_download_folder_ended)
+            self.download_worker.start()
+        except Exception as e:
+            print(f"[ERROR] EditorActions: Could not start the download: {e}")
+            self._on_download_folder_ended()
+
+    def _on_download_folder_progress(self, done, total, text):
+        if total > 0:
+            self.btn_download.setText(f"DOWNLOADING  {done} / {total}")
+
+    def _on_download_folder_finished(self, summary):
+        try:
+            folder = summary.get("folder", "")
+            if folder:
+                from features.settings.app_settings import save_app_setting
+                from features.server_files.file_store import now_iso
+                save_app_setting("server_files_local_folder", folder)
+                if not summary.get("failed"):
+                    save_app_setting("server_files_last_pulled", now_iso())
+            print(f"[SUCCESS] EditorActions: Download done: {summary.get('downloaded', 0)} new or changed, "
+                  f"{summary.get('skipped', 0)} up to date, {len(summary.get('failed', []))} not sent")
+            self.load_server_files()
+        except Exception as e:
+            print(f"[ERROR] EditorActions: Could not use the download: {e}")
+
+    def _on_download_folder_ended(self):
+        self.download_worker = None
+        if getattr(self, "btn_download_text", None):
+            self.btn_download.setText(self.btn_download_text)
+        self._refresh_download_button()
 
     def _after_file_opened(self):
         """Called by the page right after it loaded the downloaded copy. Shows the edited copy instead when

@@ -282,6 +282,7 @@ class MultiServerPage(QWidget):
             self.btn_broadcast_send.clicked.connect(self._on_broadcast_all)
             self.txt_broadcast.returnPressed.connect(self._on_broadcast_all)
             self.txt_broadcast.textChanged.connect(lambda text: self._refresh_buttons())
+            self._refresh_buttons()
         except Exception as e:
             print(f"[ERROR] MultiServerPage: Could not wire live data: {e}")
 

@@ -537,6 +537,10 @@ The first drawing had a queue of pending edits that would be sent later. ZAH has
 
 ADD TO TEMPLATE only writes to a small file on the admin's PC. Nothing reaches the server until a template button on the Players page is used, and that goes through the Safety Flow too.
 
+## Stopping a Download Politely
+
+CANCEL DOWNLOAD does not pull the plug in the middle of a file. It raises a flag, and the download thread looks at that flag between two requests. Files that already arrived stay, the half-finished `.part` file is thrown away, and LAST PULLED is not changed, because the copy is not complete.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free

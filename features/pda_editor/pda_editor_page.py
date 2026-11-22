@@ -106,7 +106,7 @@ class PdaEditorPage(EditorActions, QWidget):
         self.cmb_file.setPlaceholderText("No files downloaded")
         self.cmb_file.setMinimumWidth(200)
         self.cmb_file.setEnabled(False)
-        self.cmb_file.setToolTip(LATER_TIP)
+        self.cmb_file.setToolTip("Use DOWNLOAD FOLDER or Settings > DOWNLOAD SERVER FILES first.")
         toolbar_layout.addWidget(self.cmb_file)
 
         ## Picking a file in the dropdown opens it in the editor.
@@ -266,7 +266,7 @@ class PdaEditorPage(EditorActions, QWidget):
         self.cmb_file.setCurrentIndex(-1)
         self.cmb_file.blockSignals(False)
         self.cmb_file.setEnabled(bool(file_names))
-        self.cmb_file.setToolTip("Pick a file to edit." if file_names else LATER_TIP)
+        self.cmb_file.setToolTip("Pick a file to edit." if file_names else "No files in that folder.")
         return file_names
 
     def _on_file_picked(self, index):

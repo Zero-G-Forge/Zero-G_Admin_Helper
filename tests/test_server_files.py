@@ -356,3 +356,64 @@ def test_partial_download_does_not_update_last_pulled(qapp):
         FakeWorker.outcome = monkey
 
 # endregion
+
+
+# region Download Cancel and Editor DOWNLOAD FOLDER
+
+class SlowWorker(QThread):
+    ## Runs until request_stop, then reports "Download stopped." like the real worker.
+    progress = pyqtSignal(int, int, str)
+    finished_ok = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.stop_asked = False
+
+    def request_stop(self):
+        self.stop_asked = True
+
+    def run(self):
+        end = time.monotonic() + 5
+        while not self.stop_asked and time.monotonic() < end:
+            time.sleep(0.01)
+        self.failed.emit("Download stopped.")
+
+
+def test_cancel_stops_a_running_download(qapp):
+    cockpit, page = build_page(qapp)
+    page.create_download_worker = SlowWorker
+    cockpit.bridge_connected = True
+    cockpit.bridge_status_changed.emit("Test", True)
+    assert page.chk_live_mode.toolTip() != "Coming in a later step."
+    page.btn_download_files.click()
+    assert page.btn_cancel_download.isVisible() and page.btn_cancel_download.isEnabled()
+    page.btn_cancel_download.click()
+    assert wait_until(qapp, lambda: page.download_worker is None)
+    assert "Download stopped." in page.lbl_download_status.text()
+    assert page.btn_cancel_download.isHidden() and page.btn_download_files.isEnabled()
+    cockpit.close()
+
+
+def test_editor_download_folder_runs_the_read_only_download(qapp, tmp_path):
+    from features.ecf_editor.ecf_editor_page import EcfEditorPage
+    FakeWorker.fail_message = None
+    cockpit = FakeCockpit()
+    page = EcfEditorPage()
+    cockpit.setCentralWidget(page)
+    cockpit.show()
+    qapp.processEvents()
+    assert page.btn_download.isEnabled() is False and "Connect" in page.btn_download.toolTip()
+    cockpit.bridge_connected = True
+    page._refresh_edit_buttons()
+    assert page.btn_download.isEnabled() is True
+    page.create_download_worker = FakeWorker
+    reloaded = []
+    page.load_server_files = lambda folder=None: reloaded.append(folder)
+    page.btn_download.click()
+    assert wait_until(qapp, lambda: page.download_worker is None)
+    assert reloaded == [None] and page.btn_download.text() == "DOWNLOAD FOLDER FROM SERVER (READ-ONLY)"
+    assert app_settings.load_app_settings()["server_files_local_folder"] == "/tmp/zah_fake_folder"
+    cockpit.close()
+
+# endregion
