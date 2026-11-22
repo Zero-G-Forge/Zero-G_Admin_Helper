@@ -356,3 +356,35 @@ def test_chat_store_handles_bridge_reload(monkeypatch):
     assert chat_store.LAST_SEQ["value"] == 0
 
 # endregion
+
+
+# region Factions Page
+
+def test_factions_page_reads_lists_and_alliances(monkeypatch, tmp_path):
+    from features.factions import factions_page
+    factions = {"type": "API_RESULT", "status": "ok", "data": {"factions": [
+        {"origin": 1, "factionId": 100, "name": "Some Old Farts", "abbrev": "SOF"},
+        {"origin": 1, "factionId": 101, "name": "RSL-BRS", "abbrev": "RSL"},
+        {"origin": 1, "factionId": 1, "name": "Human", "abbrev": "Hum"}]}}
+    players = {"type": "PLAYER_CACHE", "player_list": [
+        {"entityId": "5", "name": "Alice", "factionId": 100, "role": "Owner", "status": "Online"},
+        {"entityId": "6", "name": "Bob", "factionId": 100, "role": "Member", "status": "Offline"}]}
+    alliances = {"type": "API_RESULT", "status": "ok", "data": {"alliances": [(100 << 16) | 101]}}
+    bridge = install(monkeypatch, tmp_path, {"api:Request_Get_Factions": factions, "plys": players,
+                                             "api:Request_AlliancesAll": alliances})
+    qapp = get_qapp()
+    page = factions_page.create_page()
+    cockpit = host(page, role="moderator")
+    settle(qapp)
+    assert page.lst_factions.count() == 3
+    item = next(page.lst_factions.item(i) for i in range(3) if "Some Old Farts" in page.lst_factions.item(i).text())
+    assert "2 members" in item.text()
+    item.setSelected(True)
+    assert page.tbl_members.rowCount() == 2 and page.tbl_members.item(0, 0).text() == "Alice"
+    assert "Human" in page.lbl_faction_origin.text()
+    assert page.relations_rows_layout.count() == 1
+    assert all(not button.isEnabled() for button in page.action_buttons)
+    assert not any(not cmd.startswith(("api:Request_Get_Factions", "plys", "api:Request_AlliancesAll")) for cmd in bridge.sent)
+    cockpit.close()
+
+# endregion

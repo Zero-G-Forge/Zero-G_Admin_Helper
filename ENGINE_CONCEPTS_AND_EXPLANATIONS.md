@@ -453,6 +453,16 @@ It is kept in memory only, so nothing is written to the server's disk. Chat from
 
 Watch words are a private list on the admin's PC. A match only shows up in RECENT HITS; nothing is sent until WARN goes through the Safety Flow.
 
+## Factions Are Read-Only
+
+### What ZAH can see
+
+The faction list, each faction's members (from the player list), and which factions are allied. All three are reads, so the page needs no Safety Flow.
+
+### Why SET RELATION and RENAME stay off
+
+Changing relations is something the game only lets a player do from their own console, and neither the mod API nor the server console can rename a faction. The bridge could only pretend, so the buttons stay off and say why.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free

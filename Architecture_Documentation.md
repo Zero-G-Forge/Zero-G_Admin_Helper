@@ -131,7 +131,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `dashboard` | DASHBOARD | `features.dashboard.dashboard_page` | `DashboardPage` | Live players, uptime, cheat-flag alerts, bridge events; ANNOUNCE through the Safety Flow; SAVE and BACKUP not possible while the server runs |
 | `chat` | CHAT | `features.chat.chat_page` | `ChatPage` | Live chat from `chat:recent` (core 1.6.3); SEND and WARN through the Safety Flow; watch words; MUTE and DISCORD not possible |
 | `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Live list, detail and inventory (read-only); MESSAGE, WARP, KICK, BAN, SAVE & APPLY and loadouts through the Safety Flow; GOD MODE not possible from the server |
-| `factions` | FACTIONS | `features.factions.factions_page` | `FactionsPage` | Layout; SET RELATION and RENAME disabled |
+| `factions` | FACTIONS | `features.factions.factions_page` | `FactionsPage` | Read-only: factions, members, and alliances from the bridge; SET RELATION and RENAME not possible |
 | `structures` | STRUCTURES | `features.structures.structures_page` | `StructuresPage` | Layout; TELEPORT, SET FACTION, and DESTROY disabled |
 | `playfields` | PLAYFIELDS | `features.playfields.playfields_page` | `PlayfieldsPage` | Layout; UNLOAD, RESTART PLAYFIELD, and WIPE disabled |
 | `scheduler` | SCHEDULER | `features.scheduler.scheduler_page` | `SchedulerPage` | Layout only |
@@ -983,6 +983,12 @@ Page wiring:
 | Chat | WARN | `msg:<entityId>\|<warning>` to the player of the picked hit | yes |
 | Chat | MUTE | none: the server console has no mute command | stays disabled |
 | Chat | DISCORD tab | none: ZAH has no Discord bot or webhook | stays disabled |
+| Factions | FACTION LIST, ORIGIN | `api:Request_Get_Factions {"id":1}` (`factionId`, `name`, `abbrev`, `origin`) | no |
+| Factions | MEMBERS | `plys` (`factionId`, `role`, `status`) | no |
+| Factions | RELATIONS | `api:Request_AlliancesAll` (each pair packed as `(first << 16) \| second`) | no |
+| Factions | FOUNDED | none: the game does not report it | shows `--` |
+| Factions | SET RELATION | none: `alliances` is a player-console command; no mod API request | stays disabled |
+| Factions | RENAME | none: no console command or mod API request | stays disabled |
 
 ## Planned / Not Yet Wired
 
