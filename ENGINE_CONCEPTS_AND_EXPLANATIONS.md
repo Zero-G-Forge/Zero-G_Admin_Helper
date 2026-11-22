@@ -427,6 +427,10 @@ After the send, one line goes into the audit log, like a ship's logbook: who did
 
 Lists, stats and inventories only look, so they load in the background without asking. Their buttons still check the role before anything that changes the server.
 
+### Why SAVE and BACKUP stay off on the Dashboard
+
+The game saves by itself. The only command that forces a save is `saveandexit`, which also shuts the server down, and copying a save folder while the game writes to it can catch half-written files. Both need a stopped server, which is a restart, so the buttons stay off.
+
 ### Why GOD MODE stays off
 
 The game's `godmode` command toggles the player who types it in their own console. The server console has no player to toggle, so there is no way to send it from ZAH.

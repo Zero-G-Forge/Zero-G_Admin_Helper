@@ -5,16 +5,22 @@
 ## then RECENT EVENTS and QUICK ACTIONS.
 ## First version: only real data is shown. Anything without a data source yet shows "--" or "Nothing yet".
 ## QUICK ACTIONS stay greyed out; SAVE and BACKUP are real server actions and get their own step later.
+## Wired (Nov 22, 2026): PLAYERS and ONLINE PLAYERS from plys, UPTIME from api:Request_Dedi_Stats, ACTIVE ALERTS
+## and NEEDS ATTENTION from the plys cheat flags (all read-only, every 15 s while open). ANNOUNCE sends
+## broadcast:<text> through the Safety Flow. SAVE and BACKUP stay off (see SAVE_TIP and BACKUP_TIP).
 ## ==========================================
 
 # region Imports
 
 from datetime import datetime
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton,
-                             QTableWidget, QHeaderView, QAbstractItemView)
+                             QTableWidget, QHeaderView, QAbstractItemView, QTableWidgetItem, QInputDialog)
+
+## Read-only bridge reads and the Safety Flow for ANNOUNCE.
+from features.shared import server_actions
 
 # endregion
 
@@ -29,6 +35,26 @@ RECENT_EVENT_LIMIT = 6
 
 ## The three QUICK ACTIONS buttons, in mockup order.
 QUICK_ACTIONS = ["ANNOUNCE", "SAVE", "BACKUP"]
+
+## Why SAVE and BACKUP stay off.
+SAVE_TIP = "Not possible from the bridge: the game has no save-only command (it autosaves; saveandexit stops the server)."
+BACKUP_TIP = "Not possible while the server runs: a safe backup needs the server stopped (that is a restart)."
+
+## Seconds between read-only refreshes while the page is open.
+REFRESH_SEC = 15
+
+
+## True when plys marks a player as cheating (cheat on, or flagged as a cheater).
+def is_flagged(player):
+    return str(player.get("cheat", "Off")).lower() not in ("off", "", "--") or str(player.get("cheater", "No")).lower() == "yes"
+
+
+## "3d 04h 12m" style text from seconds.
+def format_uptime(seconds):
+    seconds = int(max(0, seconds))
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    return f"{days}d {hours:02d}h {rest // 60:02d}m" if days else f"{hours:02d}h {rest // 60:02d}m"
 
 # endregion
 
@@ -77,6 +103,7 @@ class DashboardPage(QWidget):
         ## The last bridge state written to RECENT EVENTS, so the same news isn't added twice.
         self.last_bridge_state = None
         self.setup_widgets()
+        self._wire_live_data()
 
     def setup_widgets(self):
 
@@ -203,6 +230,7 @@ class DashboardPage(QWidget):
         super().showEvent(event)
         self.setup_listening()
         self.refresh_status()
+        self.refresh_live()
 
     ## Connects to the cockpit's signal once, so the page updates live while it is open.
     ## Qt drops the link by itself when this page is closed and deleted.
@@ -237,6 +265,82 @@ class DashboardPage(QWidget):
     ## Runs every time the cockpit sends bridge_status_changed.
     def _on_bridge_status_changed(self, server_name, is_connected):
         self.refresh_status()
+        self.refresh_live()
+
+    def _wire_live_data(self):
+        """ANNOUNCE, the two off buttons, and the read-only refresh timer."""
+        try:
+            self.quick_action_buttons[0].clicked.connect(self._on_announce_clicked)
+            self.quick_action_buttons[1].setToolTip(SAVE_TIP)
+            self.quick_action_buttons[2].setToolTip(BACKUP_TIP)
+            self.refresh_timer = QTimer(self)
+            self.refresh_timer.setInterval(REFRESH_SEC * 1000)
+            self.refresh_timer.timeout.connect(self.refresh_live)
+        except Exception as e:
+            print(f"[ERROR] DashboardPage: Could not wire live data: {e}")
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        try:
+            self.refresh_timer.stop()
+        except Exception:
+            pass
+
+    def refresh_live(self):
+        """Reads plys and dedistats (both read-only) and sets ANNOUNCE for the signed-in role."""
+        try:
+            if not self.refresh_timer.isActive():
+                self.refresh_timer.start()
+            reason = server_actions.block_reason(self, "announce")
+            self.quick_action_buttons[0].setEnabled(reason == "")
+            self.quick_action_buttons[0].setToolTip(reason or "HUD message to every player (Safety Flow).")
+            if not server_actions.bridge_is_connected(self):
+                return
+            server_actions.read_bridge("plys", "PLAYER_CACHE", self._on_players_read, lambda message: None)
+            server_actions.read_bridge("api:Request_Dedi_Stats", ("API_RESULT", "ERROR"), self._on_stats_read, lambda message: None)
+        except Exception as e:
+            print(f"[ERROR] DashboardPage: Live refresh failed: {e}")
+
+    def _on_players_read(self, reply):
+        try:
+            rows = [row for row in (reply or {}).get("player_list") or [] if isinstance(row, dict)]
+            online = [row for row in rows if str(row.get("status")) == "Online"]
+            self.lbl_players_value.setText(f"{len(online)} / {len(rows)}")
+            self.tbl_players.setRowCount(len(online))
+            for row_number, player in enumerate(online):
+                for column, key in enumerate(("name", "faction", "playfield", "ping")):
+                    self.tbl_players.setItem(row_number, column, QTableWidgetItem(str(player.get(key, "--"))))
+            self.lbl_players_empty.setVisible(not online)
+            self.lbl_players_empty.setText("Nobody is online." if not online else "")
+            flagged = [row for row in rows if is_flagged(row)]
+            self.lbl_alerts_value.setText(str(len(flagged)))
+            self.lbl_attention_empty.setText("\n".join(f"CHEAT FLAG: {row.get('name', '?')} ({row.get('playfield', '--')})"
+                                                       for row in flagged[:6]) or "Nothing needs attention.")
+            update_badge = getattr(self.window(), "update_alert_badge", None)
+            if callable(update_badge):
+                update_badge(len(flagged))
+        except Exception as e:
+            print(f"[ERROR] DashboardPage: Could not show players: {e}")
+
+    def _on_stats_read(self, reply):
+        try:
+            stats = reply.get("data") if isinstance(reply, dict) and reply.get("status") == "ok" else None
+            if isinstance(stats, dict) and stats.get("uptime") is not None:
+                self.lbl_uptime_value.setText(format_uptime(float(stats["uptime"])))
+        except Exception as e:
+            print(f"[ERROR] DashboardPage: Could not show uptime: {e}")
+
+    def _on_announce_clicked(self):
+        try:
+            text, accepted = QInputDialog.getText(self, "Announce", "HUD message to every player:")
+            text = text.strip()
+            if not accepted or not text:
+                return
+            server_actions.run_server_action(
+                self, "announce", "Announce to every player", f"broadcast:{text}",
+                lambda ok, reply: self.add_event(f"ANNOUNCE {'SENT' if ok else 'FAILED'}: {text[:40]}"))
+        except Exception as e:
+            print(f"[ERROR] DashboardPage: Announce failed: {e}")
 
     ## Adds one line to the top of RECENT EVENTS, e.g. "03:10:22 - BRIDGE CONNECTED".
     def add_event(self, event_text):

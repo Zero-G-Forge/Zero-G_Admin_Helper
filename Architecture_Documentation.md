@@ -128,7 +128,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 
 | Key | Nav label | Module | Widget | Current state |
 | --- | --- | --- | --- | --- |
-| `dashboard` | DASHBOARD | `features.dashboard.dashboard_page` | `DashboardPage` | Layout plus live bridge status, event list, and disabled quick actions |
+| `dashboard` | DASHBOARD | `features.dashboard.dashboard_page` | `DashboardPage` | Live players, uptime, cheat-flag alerts, bridge events; ANNOUNCE through the Safety Flow; SAVE and BACKUP not possible while the server runs |
 | `chat` | CHAT | `features.chat.chat_page` | `ChatPage` | Layout; SEND, WARN, and MUTE disabled |
 | `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Live list, detail and inventory (read-only); MESSAGE, WARP, KICK, BAN, SAVE & APPLY and loadouts through the Safety Flow; GOD MODE not possible from the server |
 | `factions` | FACTIONS | `features.factions.factions_page` | `FactionsPage` | Layout; SET RELATION and RENAME disabled |
@@ -946,6 +946,12 @@ Page wiring:
 | Players | RESET | none (puts the read counts back) | no |
 | Players | STARTER / EXPLORER / BUILDER | one `api:Request_Player_AddItem` per template item | yes |
 | Players | GOD MODE | none: the game's `godmode` only works in a player's own console | stays disabled |
+| Dashboard | PLAYERS, ONLINE PLAYERS | `plys` (every 15 s while open) | no |
+| Dashboard | UPTIME | `api:Request_Dedi_Stats` (`data.uptime`, seconds) | no |
+| Dashboard | ACTIVE ALERTS, NEEDS ATTENTION, SETTINGS badge | `plys` fields `cheat` and `cheater` | no |
+| Dashboard | ANNOUNCE | `broadcast:<text>` (HUD message to everyone) | yes |
+| Dashboard | SAVE | none: Empyrion has no save-only command; `saveandexit` stops the server | stays disabled |
+| Dashboard | BACKUP | none: a consistent backup needs the server stopped | stays disabled |
 
 ## Planned / Not Yet Wired
 

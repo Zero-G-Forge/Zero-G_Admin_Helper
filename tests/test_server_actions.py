@@ -245,3 +245,30 @@ def test_offline_bridge_reads_nothing(qapp, monkeypatch, tmp_path):
     assert bridge.sent == [] and not page.action_buttons["KICK"].isEnabled()
 
 # endregion
+
+
+# region Dashboard
+
+def test_dashboard_live_and_announce(qapp, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QInputDialog
+    from features.dashboard.dashboard_page import DashboardPage, SAVE_TIP, format_uptime
+    players = {"type": "PLAYER_CACHE", "player_list": [
+        {"name": "Amy", "status": "Online", "faction": "BBB", "playfield": "Omicron", "ping": 40, "cheat": "Off", "cheater": "No"},
+        {"name": "Bob", "status": "Online", "faction": "--", "playfield": "Akua", "ping": 9, "cheat": "On", "cheater": "No"},
+        {"name": "Cid", "status": "Offline", "cheat": "Off", "cheater": "No"}]}
+    bridge = install(monkeypatch, tmp_path, {"plys": players,
+                                             "api:Request_Dedi_Stats": {"type": "API_RESULT", "status": "ok", "data": {"uptime": 90061}}})
+    page = DashboardPage()
+    host(page, "moderator")
+    settle(qapp)
+    assert page.lbl_players_value.text() == "2 / 3" and page.tbl_players.rowCount() == 2
+    assert page.lbl_alerts_value.text() == "1" and "Bob" in page.lbl_attention_empty.text()
+    assert page.lbl_uptime_value.text() == format_uptime(90061) == "1d 01h 01m"
+    assert not page.quick_action_buttons[1].isEnabled() and page.quick_action_buttons[1].toolTip() == SAVE_TIP
+    assert page.quick_action_buttons[0].isEnabled()
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("Restart in 15 minutes", True)))
+    page._on_announce_clicked()
+    settle(qapp)
+    assert "broadcast:Restart in 15 minutes" in bridge.sent
+
+# endregion
