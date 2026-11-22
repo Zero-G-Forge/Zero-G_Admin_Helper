@@ -26,6 +26,9 @@ from features.dashboard.dashboard_page import make_card, spread_letters
 ## The downloaded server files on this PC (never the local base game).
 from features.server_files.local_files import NO_FILES_TEXT, current_scenario_folder, list_files
 
+## VALIDATE, the real Changes Preview and SAVE (backup first), shared by both editors.
+from features.shared.editor_actions import EditorActions
+
 ## The same code editor as the ECF Editor (line numbers, current line, brace matching), with YAML colours.
 from features.ecf_editor.ecf_code_editor import EcfCodeEditor
 from features.pda_editor.pda_yaml_highlighter import PdaYamlHighlighter
@@ -58,7 +61,8 @@ STYLE_TAG_PATTERN = re.compile(r"\[/?[a-z]\]|\[[0-9a-fA-F]{6}\]|\[-\]")
 
 # region PdaEditorPage Class
 
-class PdaEditorPage(QWidget):
+## EditorActions comes first so its methods are found before QWidget's.
+class PdaEditorPage(EditorActions, QWidget):
 
     # region Setup
 
@@ -75,6 +79,9 @@ class PdaEditorPage(QWidget):
 
         ## Fill the file dropdown from the downloaded server files (or say how to download them).
         self.load_server_files()
+
+        ## VALIDATE and SAVE follow the open file (EditorActions).
+        self._setup_edit_buttons()
 
     def setup_widgets(self):
 
@@ -290,6 +297,9 @@ class PdaEditorPage(QWidget):
         else:
             self.code_editor.load_text(file_text)
         self.original_text = file_text
+
+        ## Shows the saved edit instead, if there is one (EditorActions); chapters follow the shown text.
+        file_text = self._after_file_opened()
         self._fill_chapters(file_text)
 
     # endregion
@@ -364,6 +374,9 @@ class PdaEditorPage(QWidget):
 
     def _show_changes_preview(self):
         """Opens the Changes Preview window (or brings it to the front if it's already open)."""
+
+        ## Fill it with the real diff (downloaded copy against the editor) every time it opens.
+        self._refresh_changes()
         self.changes_dialog.show()
         self.changes_dialog.raise_()
         self.changes_dialog.activateWindow()

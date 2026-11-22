@@ -329,6 +329,20 @@ The bridge reports the scenario name, and the download names the local folder af
 
 The Library may hold over a thousand items. Asking the disk "is there a picture for this one?" a thousand times is slow, so ZAH lists the Images folder once and builds a table from lower-case item name to picture file. Each item then just looks itself up. The picture is cut to the hex shape with a **clip path**, which works like a stencil: paint only lands inside the shape.
 
+## Validating, Comparing, and Saving Edits
+
+### The downloaded copy stays untouched
+
+A local save goes to a separate edited copy, so ZAH can always compare your work with what was downloaded.
+
+### Backups come before replacement
+
+Each save first copies the previous version into `_backups` with a date and time in the name. Nothing is deleted.
+
+### A diff is a list of changes
+
+Changes Preview marks removed lines with `-` and added lines with `+`, so you only read what changed.
+
 ## Writing Files Back Through the Bridge
 
 ### The mail slot now has a return tray

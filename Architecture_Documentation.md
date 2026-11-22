@@ -165,6 +165,9 @@ Supporting modules (not nav pages):
 | `features/server_files/download_worker.py` | `ServerFileDownloadWorker` thread: list, compare, download, verify |
 | `features/server_files/file_store.py` | Local folder layout, safe local paths, manifest, time text |
 | `features/server_files/local_files.py` | Finds the downloaded scenario folder, files in it (save copy wins), and item pictures |
+| `features/server_files/edit_store.py` | Edited copies, backups, line endings, and upload base hashes |
+| `features/shared/edit_tools.py` | Validation and diffs |
+| `features/shared/editor_actions.py` | Shared VALIDATE, CHANGES PREVIEW, and SAVE actions |
 
 ## Roles
 
@@ -276,6 +279,12 @@ The Library and both editors read only `data/server_files/<scenario>/`, the fold
 - **Which scenario:** `local_files.current_scenario_folder()` uses `server_files_local_folder` from `app_settings` when it is a folder directly inside `data/server_files` with a manifest. Otherwise it takes the newest such folder. No folder means the empty state. The scenario name is whatever `files:info` reported, so nothing is hard-coded.
 - **Which copy:** a path that exists in both `save/` and `scenario/` is read from `save/`, because the running game uses the save's copy. `ItemsConfig.ecf` and `Localization.csv` are looked up separately, so one can come from the save and the other from the scenario.
 - **Empty state:** every page shows `No server files yet. Use Settings > DOWNLOAD SERVER FILES.`
+
+### Editor validation and local saves
+
+The ECF and PDA editors use `features/shared/editor_actions.py`. VALIDATE checks the current text and reports line numbers. ECF validation catches unclosed blocks, unexpected closing braces, unclosed quotes, and lines outside blocks. YAML validation catches tab indents and parse errors. CSV validation checks parsing and extra columns.
+
+CHANGES PREVIEW is a unified diff from the downloaded copy to the editor text. SAVE writes only `data/server_files/<scenario>/_edits/<root>/<path>`. Before overwriting an edit, it creates a timestamped backup under `_backups/`. The first save backs up the downloaded copy. Writes use a `.part` file and `os.replace`. The downloaded copy is kept for diffing. Line endings follow the downloaded file. `_edits/_bases.json` stores the hash of the downloaded copy an edit started from, for the later upload check.
 
 ## Settings
 

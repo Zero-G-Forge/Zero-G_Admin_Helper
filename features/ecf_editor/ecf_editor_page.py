@@ -27,6 +27,9 @@ from features.dashboard.dashboard_page import make_card, spread_letters
 ## The downloaded server files on this PC (never the local base game).
 from features.server_files.local_files import NO_FILES_TEXT, current_scenario_folder, list_files
 
+## VALIDATE, the real Changes Preview and SAVE (backup first), shared by both editors.
+from features.shared.editor_actions import EditorActions
+
 ## The code-style editor (line numbers, colours, brace matching) for the CODE view.
 from features.ecf_editor.ecf_code_editor import EcfCodeEditor
 
@@ -49,7 +52,8 @@ VIEW_TABS = [("table", "TABLE", "ITEMS"), ("code", "CODE", "CODE")]
 
 # region EcfEditorPage Class
 
-class EcfEditorPage(QWidget):
+## EditorActions comes first so its methods are found before QWidget's.
+class EcfEditorPage(EditorActions, QWidget):
 
     # region Setup
 
@@ -66,6 +70,9 @@ class EcfEditorPage(QWidget):
 
         ## Fill the file dropdown from the downloaded server files (or say how to download them).
         self.load_server_files()
+
+        ## VALIDATE and SAVE follow the open file (EditorActions).
+        self._setup_edit_buttons()
 
     def setup_widgets(self):
 
@@ -330,6 +337,9 @@ class EcfEditorPage(QWidget):
             return
         self.original_text = file_text
         self.code_editor.load_text(file_text)
+
+        ## Shows the saved edit instead, if there is one (EditorActions).
+        self._after_file_opened()
         self._on_view_clicked("code")
 
     # endregion
@@ -338,6 +348,9 @@ class EcfEditorPage(QWidget):
 
     def _show_changes_preview(self):
         """Opens the Changes Preview window (or brings it to the front if it's already open)."""
+
+        ## Fill it with the real diff (downloaded copy against the editor) every time it opens.
+        self._refresh_changes()
         self.changes_dialog.show()
         self.changes_dialog.raise_()
         self.changes_dialog.activateWindow()
