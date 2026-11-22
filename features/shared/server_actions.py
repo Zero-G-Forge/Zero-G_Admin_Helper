@@ -121,6 +121,27 @@ def _live_send(command, want_types, profile=None):
 SEND_FUNCTION = _live_send
 
 
+## One Eleon request line, e.g. api:Request_InGameMessage_AllPlayers {"msg": "Hi"}.
+## json.dumps keeps quotes and backslashes in the text safe.
+## Messages use these real requests, not the old msg: / msgfaction: / broadcast: / destroystruct: shorthands,
+## which only write a log line on the server and send nothing.
+def api_command(request_name, params):
+    return f"api:{request_name} {json.dumps(params)}"
+
+
+## HUD message lines for one player, one faction, or everyone.
+def message_player_command(entity_id, text):
+    return api_command("Request_InGameMessage_SinglePlayer", {"id": int(entity_id), "msg": text})
+
+
+def message_faction_command(faction_id, text):
+    return api_command("Request_InGameMessage_Faction", {"id": int(faction_id), "msg": text})
+
+
+def message_all_command(text):
+    return api_command("Request_InGameMessage_AllPlayers", {"msg": text})
+
+
 ## True when a reply says the command worked.
 def reply_ok(reply):
     if not isinstance(reply, dict) or reply.get("type") == "ERROR":

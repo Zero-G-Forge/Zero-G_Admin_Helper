@@ -555,6 +555,12 @@ These are lessons already paid for in git history. Each one is written as "what 
 
 **Why the fix works:** `save` and `backup` return `not_available` with a clear message. `restart:<minutes>` warns players, then sends `saveandexit` with a value from 0 to 15. Starting the host again remains a panel job outside the bridge. The `cmds` catalog documents this so ZAH does not guess.
 
+### Some old shorthand commands only pretended
+
+**What broke:** `msg:`, `msgfaction:`, `broadcast:`, `destroystruct:`, `touchstruct:` and the credit commands in the core dispatcher only write a log line and answer "Sent" or "Success". Nothing reaches the game. The first wiring of MESSAGE, ANNOUNCE, chat SEND and WARN used them, so ZAH would have reported success for messages nobody saw.
+
+**Why the fix works:** ZAH now sends the real Eleon requests (`api:Request_InGameMessage_SinglePlayer`, `_Faction`, `_AllPlayers`, `api:Request_Entity_Destroy`). Those wait for the game's own `Event_Ok`, so "ok" means the game really took it. The stubs are marked as stubs in the command table and are not used.
+
 ### Faction rows were easy to mis-count
 
 **What broke:** earlier bridge versions could sort faction rows in a way that mixed NPC or dropped rows with player factions.

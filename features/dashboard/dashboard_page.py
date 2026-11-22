@@ -7,7 +7,7 @@
 ## QUICK ACTIONS stay greyed out; SAVE and BACKUP are real server actions and get their own step later.
 ## Wired (Nov 22, 2026): PLAYERS and ONLINE PLAYERS from plys, UPTIME from api:Request_Dedi_Stats, ACTIVE ALERTS
 ## and NEEDS ATTENTION from the plys cheat flags (all read-only, every 15 s while open). ANNOUNCE sends
-## broadcast:<text> through the Safety Flow. SAVE and BACKUP stay off (see SAVE_TIP and BACKUP_TIP).
+## api:Request_InGameMessage_AllPlayers through the Safety Flow. SAVE and BACKUP stay off (see SAVE_TIP and BACKUP_TIP).
 ## ==========================================
 
 # region Imports
@@ -337,7 +337,7 @@ class DashboardPage(QWidget):
             if not accepted or not text:
                 return
             server_actions.run_server_action(
-                self, "announce", "Announce to every player", f"broadcast:{text}",
+                self, "announce", "Announce to every player", server_actions.message_all_command(text),
                 lambda ok, reply: self.add_event(f"ANNOUNCE {'SENT' if ok else 'FAILED'}: {text[:40]}"))
         except Exception as e:
             print(f"[ERROR] DashboardPage: Announce failed: {e}")

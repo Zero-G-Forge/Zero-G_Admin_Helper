@@ -7,7 +7,7 @@
 ## Every action button stays greyed out; each one changes something on the server and gets its own step with Ray's OK.
 ## Wired (Nov 22, 2026): the list comes from plys, the detail from api:Request_Player_Info, the inventory from
 ## api:Request_Player_GetInventory (all read-only, refreshed every 15 s while the page is open).
-## MESSAGE (msg:), WARP (api:Request_Entity_Teleport / Request_Entity_ChangePlayfield), KICK (con:kick),
+## MESSAGE (api:Request_InGameMessage_SinglePlayer), WARP (api:Request_Entity_Teleport / Request_Entity_ChangePlayfield), KICK (con:kick),
 ## BAN (con:ban), SAVE & APPLY (api:Request_Player_SetInventory) and the loadouts (api:Request_Player_AddItem)
 ## go through the ZAH Safety Flow in features/shared/server_actions.py. GOD MODE stays off (see GOD_MODE_TIP).
 ## ==========================================
@@ -503,7 +503,7 @@ class PlayersPage(QWidget):
             if not accepted or not text:
                 return
             server_actions.run_server_action(self, "player_message", "Send a private message",
-                                             f"msg:{self._entity_id()}|{text}", self._after_action("Message"))
+                                             server_actions.message_player_command(self._entity_id(), text), self._after_action("Message"))
         except Exception as e:
             print(f"[ERROR] PlayersPage: Message failed: {e}")
 

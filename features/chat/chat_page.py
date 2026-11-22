@@ -6,7 +6,7 @@
 ## Layout only for now: there is no chat data source yet, so the lists show "nothing yet".
 ## SEND, WARN and MUTE stay greyed out; each one talks to the server and gets its own step with Ray's OK.
 ## Wired (Nov 22, 2026): messages from the bridge's read-only chat:recent (core 1.6.3), polled every 5 s while open,
-## with names from plys. SEND (con:say / msgfaction: / msg:) and WARN (msg:) go through the Safety Flow.
+## with names from plys. SEND (con:say / api:Request_InGameMessage_Faction / _SinglePlayer) and WARN go through the Safety Flow.
 ## WATCH WORDS are saved on this PC (chat_store.py). DISCORD and MUTE stay off (see DISCORD_TIP and MUTE_TIP).
 ## ==========================================
 
@@ -368,9 +368,9 @@ class ChatPage(QWidget):
         if picked is None:
             return None
         if self.active_tab == "faction" and int(picked.get("senderFactionId") or 0) > 0:
-            return f"msgfaction:{int(picked['senderFactionId'])}|{text}"
+            return server_actions.message_faction_command(picked['senderFactionId'], text)
         if self.active_tab == "private" and int(picked.get("senderId") or 0) > 0:
-            return f"msg:{int(picked['senderId'])}|{text}"
+            return server_actions.message_player_command(picked['senderId'], text)
         return None
 
     def _refresh_buttons(self):
@@ -413,7 +413,7 @@ class ChatPage(QWidget):
             text = text.strip().replace("|", "/")
             if not accepted or not text:
                 return
-            server_actions.run_server_action(self, "chat_warn", "Warn a player", f"msg:{int(hit['senderId'])}|{text}",
+            server_actions.run_server_action(self, "chat_warn", "Warn a player", server_actions.message_player_command(hit['senderId'], text),
                                              lambda ok, reply: print(f"[INFO] ChatPage: Warn ok={ok}"))
         except Exception as e:
             print(f"[ERROR] ChatPage: Warn failed: {e}")

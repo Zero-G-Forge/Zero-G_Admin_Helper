@@ -407,13 +407,13 @@ Handled in `ZeroGBridge/Network/CommandDispatcher.cs` and `ApiCommands.cs` after
 | `restart:<minutes>` | `restart` | Warns with `say`, then `saveandexit` with minutes `0` to `15` | yes |
 | `restart:cancel` | | Cancels a scheduled `saveandexit` | yes |
 | `gents` | `structures`, `getentities`, plus a playfield filter suffix | Structure and entity list | no |
-| `touchstruct:` | `touch:` | Touch a structure | yes |
-| `destroystruct:` | `destroyentity:`, `wipe:` | Destroy an entity | yes |
-| `broadcast:` | `say:`, `alert:` | Message to all players | yes (visible) |
-| `msg:` | `msgplayer:` | Message to one player | yes (visible) |
-| `msgfaction:` | `factionmsg:` | Message to a faction | yes (visible) |
-| `getcredits:` | `credits:` | Read a player's credits | no |
-| `addcredits:` | `setcredits:` | Change a player's credits | yes |
+| `touchstruct:` | `touch:` | Log line only: replies `Success` but sends nothing to the game | no (stub) |
+| `destroystruct:` | `destroyentity:`, `wipe:` | Log line only: replies `Success` but destroys nothing | no (stub) |
+| `broadcast:` | `say:`, `alert:` | Log line only: replies `Sent` but shows nothing in game | no (stub) |
+| `msg:` | `msgplayer:` | Log line only: replies `Sent` but shows nothing in game | no (stub) |
+| `msgfaction:` | `factionmsg:` | Log line only: replies `Sent` but shows nothing in game | no (stub) |
+| `getcredits:` | `credits:` | Stub: always replies `credits: 0` | no (stub) |
+| `addcredits:` | `setcredits:` | Log line only: replies `Success` but changes nothing | no (stub) |
 | `getinv:` | `getinventory:` | Read a player's inventory | no |
 | `getplayfields` | `pfs`, `playfields`, plus `:all` | Playfield list | no |
 | `pfstats:` | `playfieldstats:` | Playfield stats | no |
@@ -428,6 +428,8 @@ Handled in `ZeroGBridge/Network/CommandDispatcher.cs` and `ApiCommands.cs` after
 | `coreupload:status` | | 1.6.2: what core files wait in `Updates/` (size, sha256) | no |
 | `coreupload:put:<json>` | | 1.6.2: place a new `ZeroGBridge.Core.dll` / `.pdb` in `Updates/`, in chunks | yes (loads only on `hot:reload`) |
 | `chat:recent` | `chat:recent:{"since":N,"max":M}` | 1.6.3: read-only chat history kept in memory (see **Chat history** below) | no |
+
+The stub rows are left from early bridge stages. ZAH never uses them: it sends the real Eleon requests instead (`api:Request_InGameMessage_SinglePlayer`, `_Faction`, `_AllPlayers`, `api:Request_Entity_Destroy`, `api:Request_Structure_Touch`), through `server_actions.api_command`.
 
 `save` and `backup` return `status: "not_available"`. The catalog states that backups are a ZAH job after the server has stopped, not a bridge command.
 
@@ -594,7 +596,7 @@ Core 1.6.3, `ZeroGBridge/Network/ChatLog.cs`. Core-only (hot reload, no restart)
 - Reply: `{"type":"CHAT_LOG","ok":true,"count":C,"last_seq":S,"kept":500,"messages":[{"seq","time","channel","senderType","senderId","senderName","senderFactionId","recipientId","recipientFactionId","text"}]}`. `time` is UTC; `channel` is `Global`, `Faction`, `Alliance`, `SinglePlayer`, or `Server`.
 - Any other `chat:` word returns `ERROR` `unknown_command`; bad JSON returns `bad_json`.
 - `seq` restarts at 1 after a reload. ZAH notices a `last_seq` below its own and starts over.
-- Sending chat does not use this command. It uses the existing `con:say`, `msg:` and `msgfaction:`.
+- Sending chat does not use this command. It uses the existing `con:say`, `api:Request_InGameMessage_Faction` and `api:Request_InGameMessage_SinglePlayer`.
 - Harness only: `harness:chat|<channel>|<senderId>|<text>` adds a line in the test harness serve mode.
 
 ## Class and Method Signatures
@@ -961,7 +963,7 @@ Page wiring:
 | Players | PLAYER LIST | `plys` (every 15 s while open) | no |
 | Players | PLAYER DETAIL bars | `api:Request_Player_Info {"id":N}` | no |
 | Players | INVENTORY | `api:Request_Player_GetInventory {"id":N}` | no |
-| Players | MESSAGE | `msg:<entityId>\|<text>` | yes |
+| Players | MESSAGE | `api:Request_InGameMessage_SinglePlayer {"id":N,"msg":"..."}` | yes |
 | Players | WARP | `api:Request_Entity_Teleport` (same playfield) or `api:Request_Entity_ChangePlayfield` | yes |
 | Players | KICK | `con:kick <entityId> '<reason>'` | yes |
 | Players | BAN | `con:ban <entityId> <1h\|1d\|7d\|30d\|1y>` | yes |
@@ -972,15 +974,15 @@ Page wiring:
 | Dashboard | PLAYERS, ONLINE PLAYERS | `plys` (every 15 s while open) | no |
 | Dashboard | UPTIME | `api:Request_Dedi_Stats` (`data.uptime`, seconds) | no |
 | Dashboard | ACTIVE ALERTS, NEEDS ATTENTION, SETTINGS badge | `plys` fields `cheat` and `cheater` | no |
-| Dashboard | ANNOUNCE | `broadcast:<text>` (HUD message to everyone) | yes |
+| Dashboard | ANNOUNCE | `api:Request_InGameMessage_AllPlayers {"msg":"..."}` (HUD message to everyone) | yes |
 | Dashboard | SAVE | none: Empyrion has no save-only command; `saveandexit` stops the server | stays disabled |
 | Dashboard | BACKUP | none: a consistent backup needs the server stopped | stays disabled |
 | Chat | GLOBAL / FACTION / PRIVATE lists | `chat:recent:{"since":N}` (every 5 s while open), names from `plys` | no |
 | Chat | SEND on GLOBAL | `con:say '<text>'` | yes |
-| Chat | SEND on FACTION | `msgfaction:<factionId>\|<text>` (faction of the picked message) | yes |
-| Chat | SEND on PRIVATE | `msg:<entityId>\|<text>` (sender of the picked message) | yes |
+| Chat | SEND on FACTION | `api:Request_InGameMessage_Faction {"id":factionId,"msg":"..."}` (faction of the picked message) | yes |
+| Chat | SEND on PRIVATE | `api:Request_InGameMessage_SinglePlayer` (sender of the picked message) | yes |
 | Chat | WATCH WORDS, RECENT HITS | none (saved on this PC, matched against the history) | no |
-| Chat | WARN | `msg:<entityId>\|<warning>` to the player of the picked hit | yes |
+| Chat | WARN | `api:Request_InGameMessage_SinglePlayer` to the player of the picked hit | yes |
 | Chat | MUTE | none: the server console has no mute command | stays disabled |
 | Chat | DISCORD tab | none: ZAH has no Discord bot or webhook | stays disabled |
 | Factions | FACTION LIST, ORIGIN | `api:Request_Get_Factions {"id":1}` (`factionId`, `name`, `abbrev`, `origin`) | no |

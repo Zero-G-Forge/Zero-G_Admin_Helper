@@ -194,7 +194,7 @@ def test_cancelled_safety_flow_sends_nothing(qapp, monkeypatch, tmp_path):
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("hello", True)))
     page._on_message_clicked()
     settle(qapp)
-    assert not any(command.startswith("msg:") for command in bridge.sent)
+    assert not any("InGameMessage" in command for command in bridge.sent)
 
 
 def test_inventory_edit_and_apply(qapp, monkeypatch, tmp_path):
@@ -269,7 +269,7 @@ def test_dashboard_live_and_announce(qapp, monkeypatch, tmp_path):
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("Restart in 15 minutes", True)))
     page._on_announce_clicked()
     settle(qapp)
-    assert "broadcast:Restart in 15 minutes" in bridge.sent
+    assert 'api:Request_InGameMessage_AllPlayers {"msg": "Restart in 15 minutes"}' in bridge.sent
 
 # endregion
 
@@ -295,8 +295,7 @@ def test_chat_page_reads_sends_and_warns(monkeypatch, tmp_path):
     players = {"type": "PLAYER_CACHE", "player_list": [{"entityId": "1001", "name": "Alice"}, {"entityId": "1002", "name": "Bob"}]}
     bridge = install(monkeypatch, tmp_path, {"chat:recent": _chat_reply(), "plys": players,
                                              "con:say": {"type": "CONSOLE_RESULT", "status": "ok"},
-                                             "msg": {"type": "RESPONSE", "status": "Sent"},
-                                             "msgfaction": {"type": "RESPONSE", "status": "Sent"}})
+                                             "api:Request_InGameMessage": {"type": "API_RESULT", "status": "ok"}})
     qapp = get_qapp()
     page = chat_page.create_page()
     cockpit = host(page, role="moderator")
@@ -319,7 +318,7 @@ def test_chat_page_reads_sends_and_warns(monkeypatch, tmp_path):
     assert page.btn_send.isEnabled()
     page._on_send_clicked()
     settle(qapp)
-    assert "msgfaction:101|calm down" in bridge.sent
+    assert 'api:Request_InGameMessage_Faction {"id": 101, "msg": "calm down"}' in bridge.sent
 
     ## Private SEND answers the sender.
     page._on_tab_clicked("private")
@@ -327,7 +326,7 @@ def test_chat_page_reads_sends_and_warns(monkeypatch, tmp_path):
     page.txt_reply.setText("on my way")
     page._on_send_clicked()
     settle(qapp)
-    assert "msg:1003|on my way" in bridge.sent
+    assert 'api:Request_InGameMessage_SinglePlayer {"id": 1003, "msg": "on my way"}' in bridge.sent
 
     ## A watch word makes a hit; WARN sends a private message to that player.
     page.txt_watch_word.setText("cheat")
@@ -337,7 +336,7 @@ def test_chat_page_reads_sends_and_warns(monkeypatch, tmp_path):
     monkeypatch.setattr(chat_page.QInputDialog, "getText", staticmethod(lambda *a, **k: ("stop that", True)))
     page._on_warn_clicked()
     settle(qapp)
-    assert "msg:1002|stop that" in bridge.sent
+    assert 'api:Request_InGameMessage_SinglePlayer {"id": 1002, "msg": "stop that"}' in bridge.sent
     assert not page.btn_mute.isEnabled() and not page.tab_buttons["discord"].isEnabled()
 
     ## Switching the word off clears the hit.
