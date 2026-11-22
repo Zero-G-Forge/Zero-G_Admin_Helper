@@ -9,6 +9,7 @@
 
 # region Imports
 
+import csv
 import os
 import re
 
@@ -37,6 +38,12 @@ PDA_FILE_TYPES = (".yaml", ".csv")
 
 ## Finds chapter lines like '  - ChapterTitle: pda_uW0W4W4' and keeps the title.
 CHAPTER_PATTERN = re.compile(r"^\s*-\s*ChapterTitle:\s*(.+?)\s*$")
+
+## The text file next to PDA.yaml: one row per text id (KEY) with a column per language.
+PDA_TEXT_FILE = "PDA.csv"
+
+## Game colour and style tags inside PDA text, e.g. [c][ff0000][b]READ FIRST[/b][-][/c] -> READ FIRST
+STYLE_TAG_PATTERN = re.compile(r"\[/?[a-z]\]|\[[0-9a-fA-F]{6}\]|\[-\]")
 
 # endregion
 
@@ -226,10 +233,17 @@ class PdaEditorPage(QWidget):
     def _fill_chapters(self, file_text):
         """Lists every '- ChapterTitle:' line. Each list row remembers its line number for jumping."""
         self.lst_chapters.clear()
+
+        ## English names from PDA.csv, so the list says "SEND US YOUR FEEDBACK!" instead of pda_m88uV8C.
+        chapter_names = self._read_pda_names()
         for line_number, line_text in enumerate(file_text.splitlines()):
             chapter_match = CHAPTER_PATTERN.match(line_text)
             if chapter_match:
-                chapter_item = QListWidgetItem(chapter_match.group(1))
+                chapter_id = chapter_match.group(1)
+
+                ## No name found: fall back to the id. Hovering a row always shows its id.
+                chapter_item = QListWidgetItem(chapter_names.get(chapter_id) or chapter_id)
+                chapter_item.setToolTip(chapter_id)
 
                 ## UserRole is a hidden slot on the row, used here to store the line number.
                 chapter_item.setData(Qt.ItemDataRole.UserRole, line_number)
@@ -242,7 +256,29 @@ class PdaEditorPage(QWidget):
         search_text = search_text.strip().lower()
         for row in range(self.lst_chapters.count()):
             chapter_item = self.lst_chapters.item(row)
-            chapter_item.setHidden(bool(search_text) and search_text not in chapter_item.text().lower())
+
+            ## Search finds a chapter by its name or by its pda_ id.
+            searchable_text = (chapter_item.text() + " " + chapter_item.toolTip()).lower()
+            chapter_item.setHidden(bool(search_text) and search_text not in searchable_text)
+
+    def _read_pda_names(self):
+        """Reads PDA.csv from the local folder into {text id: English name}. Empty if it's missing."""
+        chapter_names = {}
+        if self.local_folder is None:
+            return chapter_names
+        try:
+
+            ## newline="" lets the csv module handle line breaks inside quoted text.
+            with open(os.path.join(self.local_folder, PDA_TEXT_FILE), encoding="utf-8", errors="replace", newline="") as text_file:
+                for row in csv.DictReader(text_file):
+                    english_text = STYLE_TAG_PATTERN.sub("", row.get("English") or "").strip()
+                    if row.get("KEY") and english_text:
+                        chapter_names[row["KEY"]] = english_text
+
+        ## No PDA.csv (or unreadable): the list just shows the ids.
+        except (OSError, csv.Error):
+            pass
+        return chapter_names
 
     def _on_chapter_clicked(self, chapter_item):
         """Moves the editor's cursor to the chapter's line and scrolls it near the top."""
