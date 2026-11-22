@@ -904,3 +904,24 @@ QProgressBar#BackupDiskBar::chunk {
 }
 
 /* endregion */
+
+/* region: Library Page */
+
+/* Big picture box for the picked item or blueprint: dark with a cyan edge */
+#LibraryPictureBox {
+    background-color: rgba(5, 14, 24, 200);
+    border: 1px solid rgba(51, 214, 255, 120);
+    border-radius: 10px;
+}
+
+/* GIVE ITEM quantity box, same look as the file picker */
+QSpinBox#LibraryQuantityBox {
+    background-color: rgba(5, 14, 24, 180);
+    border: 1px solid rgba(40, 170, 215, 90);
+    border-radius: 6px;
+    color: #dcebf5;
+    font-size: 14px;
+    padding: 6px 8px;
+}
+
+/* endregion */
