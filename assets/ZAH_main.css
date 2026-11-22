@@ -850,3 +850,57 @@ QPlainTextEdit#EcfChangesBox {
 }
 
 /* endregion */
+
+/* region: Backups Page */
+
+/* FULL SERVER scope tab: red, since it rolls back the whole server */
+QPushButton#BackupFullScopeButton {
+    background-color: rgba(42, 10, 16, 200);
+    border: 1px solid rgba(255, 51, 85, 120);
+    border-radius: 4px;
+    color: #ff6b81;
+    font-size: 13px;
+    padding: 2px 10px;
+}
+
+QPushButton#BackupFullScopeButton:hover {
+    color: #ffffff;
+}
+
+QPushButton#BackupFullScopeButton:checked {
+    background-color: rgba(120, 18, 36, 200);
+    border: 1px solid #ff3355;
+    color: #ffffff;
+}
+
+/* "SNAPSHOT VS CURRENT" heading inside the compare box */
+#BackupCompareTitle {
+    color: #dcebf5;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* "Type CONFIRM - 15s send delay" under the restore buttons */
+#BackupHintLabel {
+    color: #8fa6b8;
+    font-size: 12px;
+}
+
+/* Thin line between the schedule and the disk usage */
+#BackupDivider {
+    background-color: rgba(40, 170, 215, 50);
+}
+
+/* Disk usage bar: thin dark track with a cyan fill */
+QProgressBar#BackupDiskBar {
+    background-color: rgba(5, 14, 24, 200);
+    border: none;
+    border-radius: 3px;
+}
+
+QProgressBar#BackupDiskBar::chunk {
+    background-color: #2fa8e0;
+    border-radius: 3px;
+}
+
+/* endregion */
