@@ -12,7 +12,7 @@ import json
 
 from features.paths import data_path
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QCoreApplication
 from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
                              QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
                              QDialog, QMessageBox, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox)
@@ -389,7 +389,11 @@ class UsersPage(QWidget):
             return
         self.lbl_users_status.setText(busy_text)
         self._set_buttons_enabled(False)
-        self.task_thread = UserTaskRunner(task_function, self)
+
+        ## The thread belongs to the app, not this page. Clicking to another page deletes the page,
+        ## and a QThread deleted while still running crashes ZAH ("QThread: Destroyed while thread is still running").
+        ## The app lives until ZAH closes, so the thread can finish safely and deleteLater frees it.
+        self.task_thread = UserTaskRunner(task_function, QCoreApplication.instance())
         self.task_thread.task_done.connect(done_slot)
 
         ## finished is QThread's own signal; deleteLater frees the thread once it has fully stopped.

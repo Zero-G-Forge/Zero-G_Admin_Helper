@@ -9,7 +9,7 @@
 
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QCoreApplication
 from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 
 ## Guarded import: if online_login is missing, the section just says the log can't be loaded.
@@ -206,7 +206,11 @@ class BansAuditPage(QWidget):
             ## The helper thread does the waiting, so the window keeps working. REFRESH is greyed until the answer comes back.
             self.lbl_failed_status.setText("Loading...")
             self.btn_failed_refresh.setEnabled(False)
-            self.fetch_thread = FailedLoginFetcher(session_token, FAILED_LOGIN_LIMIT, self, dev_key=dev_key)
+
+            ## The thread belongs to the app, not this page. Clicking to another page deletes the page,
+            ## and a QThread deleted while still running crashes ZAH ("QThread: Destroyed while thread is still running").
+            ## The app lives until ZAH closes, so the thread can finish safely and deleteLater frees it.
+            self.fetch_thread = FailedLoginFetcher(session_token, FAILED_LOGIN_LIMIT, QCoreApplication.instance(), dev_key=dev_key)
             self.fetch_thread.fetch_done.connect(self._on_fetch_done)
 
             ## finished is QThread's own signal; deleteLater frees the thread once it has fully stopped.
