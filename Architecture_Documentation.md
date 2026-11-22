@@ -144,7 +144,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `pda_editor` | PDA EDITOR | `features.pda_editor.pda_editor_page` | `PdaEditorPage` | Lists and opens the downloaded PDA `.yaml` / `.csv` files, chapters with English names; empty state when nothing is downloaded |
 | `backups` | BACKUPS | `features.backups.backups_page` | `BackupsPage` | Layout; PREVIEW and RESTORE locked with the reason (no bridge backup command; a restore needs the server stopped) |
 | `bp_editor` | BP EDITOR | `features.bp_editor.bp_editor_page` | `LibraryPage` (blueprints tab) | Layout; blueprint data is not loaded yet |
-| `items` | ITEMS | `features.items.items_page` | `LibraryPage` (items tab) | Reads items from the downloaded server files on opening (`load_server_files`), with item pictures; empty state when nothing is downloaded |
+| `items` | ITEMS | `features.items.items_page` | `LibraryPage` (items tab) | Reads items from the downloaded server files on opening (`load_server_files`), with item pictures; GIVE ITEM to an online player (Safety Flow); ADD TO TEMPLATE on this PC; empty state when nothing is downloaded |
 | `servers` | SERVERS | `features.multi_server.multi_server_page` | `MultiServerPage` | Live cards for every saved server (read-only poll), cross-server alerts, BROADCAST and BROADCAST TO ALL SERVERS (Safety Flow), OPEN DASHBOARD; shown when two or more saved servers answer |
 
 Supporting modules (not nav pages):
@@ -1047,6 +1047,10 @@ Page wiring:
 | Servers | OPEN DASHBOARD | none on the server: changes `active_index` on this PC and reconnects | no |
 | Servers | BROADCAST (one server) | `api:Request_InGameMessage_AllPlayers` to that server | yes |
 | Servers | BROADCAST TO ALL SERVERS | `api:Request_InGameMessage_AllPlayers` to every answering server | yes |
+| Items (Library) | PLAYER list | `plys` (online players with an entity id), read when the page shows | no |
+| Items (Library) | GIVE ITEM (was ADD TO PENDING EDITS) | `api:Request_Player_AddItem {"id":N,"item":{"id":X,"count":Q}}` | yes |
+| Items (Library) | ADD TO TEMPLATE | none: adds the item and quantity to STARTER / EXPLORER / BUILDER in `data/loadout_templates.json` | no |
+| BP Editor (Library) | BLUEPRINTS tab | none: no blueprint data source yet | empty state |
 
 ## Planned / Not Yet Wired
 

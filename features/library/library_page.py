@@ -9,13 +9,19 @@
 ## local base game. Pictures come from the downloaded SharedData/Content/Images/<ItemName>.jpg or .png.)
 ## BLUEPRINTS has no data yet, so it shows "nothing yet".
 ## GIVE ITEM changes a live player, so its button stays off until Ray OKs that step.
+## Wired (Nov 22, 2026): GIVE ITEM sends api:Request_Player_AddItem through the Safety Flow (admin and up), to
+## an online player from plys. ADD TO TEMPLATE saves the picked item and quantity on this PC (loadouts.py).
+## The old ADD TO PENDING EDITS button is now labelled GIVE ITEM (there is no separate pending-edit queue).
 ## ==========================================
 
 # region Imports
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,
-                             QPushButton, QButtonGroup, QLineEdit, QSpinBox, QComboBox)
+                             QPushButton, QButtonGroup, QLineEdit, QSpinBox, QComboBox, QInputDialog)
+
+## Read-only bridge reads, the Safety Flow, and loadout templates saved on this PC.
+from features.shared import server_actions, loadouts
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
@@ -82,6 +88,7 @@ class LibraryPage(QWidget):
         ## Fill ITEMS from the downloaded server files (or show how to download them) before the first tab shows.
         self.load_server_files()
         self._on_tab_clicked(self.active_tab)
+        self._wire_give_and_templates()
 
     def setup_widgets(self):
 
@@ -214,7 +221,7 @@ class LibraryPage(QWidget):
         give_inputs.addWidget(self.spn_quantity, stretch=1)
         give_inputs.addWidget(self.cmb_player, stretch=3)
         give_layout.addLayout(give_inputs)
-        self.btn_add_pending = QPushButton("ADD TO PENDING EDITS")
+        self.btn_add_pending = QPushButton("GIVE ITEM")
         self.btn_add_pending.setObjectName("DashActionButton")
         self.btn_add_pending.setFixedHeight(38)
         self.btn_add_pending.setEnabled(False)
@@ -370,6 +377,7 @@ class LibraryPage(QWidget):
         ## If the stats window is already open, switch it to the new item.
         if self.stats_dialog is not None and self.stats_dialog.isVisible():
             self._show_item_stats()
+        self._refresh_give_buttons()
 
     def _show_item_stats(self):
         """Opens the full stats window for the picked item (one window at a time)."""
@@ -380,6 +388,96 @@ class LibraryPage(QWidget):
             self.stats_dialog.deleteLater()
         self.stats_dialog = ItemStatsDialog(self.picked_item, self.picked_item.get("own_keys"), self)
         self.stats_dialog.show()
+
+    # endregion
+
+    # region Give Item and Templates
+
+    def _wire_give_and_templates(self):
+        try:
+            self.btn_add_pending.clicked.connect(self._on_give_clicked)
+            self.btn_add_template.clicked.connect(self._on_add_template_clicked)
+            self.cmb_player.currentIndexChanged.connect(lambda index: self._refresh_give_buttons())
+            self._show_templates()
+            self._refresh_give_buttons()
+        except Exception as e:
+            print(f"[ERROR] LibraryPage: Could not wire GIVE ITEM and templates: {e}")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        try:
+            self._show_templates()
+            self._refresh_give_buttons()
+            if server_actions.bridge_is_connected(self):
+                server_actions.read_bridge("plys", "PLAYER_CACHE", self._on_players_read,
+                                           lambda message: print(f"[ERROR] LibraryPage: plys failed: {message}"))
+        except Exception as e:
+            print(f"[ERROR] LibraryPage: Could not read players on show: {e}")
+
+    def _on_players_read(self, reply):
+        try:
+            picked = self.cmb_player.currentData()
+            self.cmb_player.blockSignals(True)
+            self.cmb_player.clear()
+            for player in (reply or {}).get("player_list") or []:
+                if isinstance(player, dict) and player.get("status") == "Online" and str(player.get("entityId", "")).isdigit():
+                    entity_id = int(player["entityId"])
+                    self.cmb_player.addItem(str(player.get("name", "?")), entity_id)
+                    if entity_id == picked:
+                        self.cmb_player.setCurrentIndex(self.cmb_player.count() - 1)
+
+            ## With placeholder text Qt picks nothing by itself, so the first player is picked.
+            if self.cmb_player.currentIndex() < 0 and self.cmb_player.count() > 0:
+                self.cmb_player.setCurrentIndex(0)
+            self.cmb_player.blockSignals(False)
+            self.cmb_player.setEnabled(self.cmb_player.count() > 0)
+            self._refresh_give_buttons()
+        except Exception as e:
+            print(f"[ERROR] LibraryPage: Could not read players: {e}")
+
+    def _refresh_give_buttons(self):
+        try:
+            item_ok = self.active_tab == "items" and self.picked_item is not None and str(self.picked_item.get("id", "")).isdigit()
+            reason = server_actions.block_reason(self, "give_item") or ("" if item_ok else "Pick an item first.")
+            if not reason and self.cmb_player.currentData() is None:
+                reason = "Pick an online player first."
+            self.btn_add_pending.setEnabled(reason == "")
+            self.btn_add_pending.setToolTip(reason or "Adds this item to that player (Safety Flow).")
+            self.btn_add_template.setEnabled(item_ok)
+            self.btn_add_template.setToolTip("Adds this item and quantity to a template on this PC." if item_ok else "Pick an item first.")
+        except Exception as e:
+            print(f"[ERROR] LibraryPage: Could not refresh GIVE ITEM buttons: {e}")
+
+    def _on_give_clicked(self):
+        try:
+            if self.picked_item is None or self.cmb_player.currentData() is None or not self.btn_add_pending.isEnabled():
+                return
+            item = self.picked_item
+            entity_id = int(self.cmb_player.currentData())
+            command = server_actions.api_command("Request_Player_AddItem", {"id": entity_id,
+                "item": {"id": int(item["id"]), "count": self.spn_quantity.value()}})
+            server_actions.run_server_action(self, "give_item", "Give an item", command,
+                                             lambda ok, reply: print(f"[{'SUCCESS' if ok else 'ERROR'}] LibraryPage: Give: {server_actions.reply_text(reply)}"),
+                                             explanation=f"Gives {self.spn_quantity.value()} x {item['display_name']} to {self.cmb_player.currentText()}.")
+        except Exception as e:
+            print(f"[ERROR] LibraryPage: Give failed: {e}")
+
+    def _show_templates(self):
+        templates = loadouts.load_templates()
+        self.lbl_templates_empty.setText("\n".join(f"{name}   {len(templates[name])} item(s)" for name in loadouts.TEMPLATE_NAMES))
+
+    def _on_add_template_clicked(self):
+        try:
+            if self.picked_item is None or not self.btn_add_template.isEnabled():
+                return
+            name, accepted = QInputDialog.getItem(self, "Add to template", "Template:", loadouts.TEMPLATE_NAMES, 0, False)
+            if not accepted or name not in loadouts.TEMPLATE_NAMES:
+                return
+            loadouts.add_to_template(name, int(self.picked_item["id"]), self.picked_item["display_name"], self.spn_quantity.value())
+            self._show_templates()
+            print(f"[SUCCESS] LibraryPage: Added {self.picked_item['display_name']} to {name}")
+        except Exception as e:
+            print(f"[ERROR] LibraryPage: Add to template failed: {e}")
 
     # endregion
 

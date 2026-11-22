@@ -673,3 +673,31 @@ def test_set_active_index_keeps_the_rest(monkeypatch, tmp_path):
     assert not server_settings.set_active_index(5)
 
 # endregion
+
+
+# region Library Leftovers
+
+def test_library_give_and_add_to_template(monkeypatch, tmp_path):
+    from features.library import library_page
+    from features.shared import loadouts
+    monkeypatch.setattr(loadouts, "TEMPLATES_FILE", str(tmp_path / "templates.json"))
+    monkeypatch.setattr(library_page.LibraryPage, "load_server_files", lambda self: None)
+    players = {"type": "PLAYER_CACHE", "player_list": [{"entityId": "55", "name": "Amy", "status": "Online"}]}
+    bridge = install(monkeypatch, tmp_path, {"plys": players, "api:Request_Player_AddItem": {"type": "API_RESULT", "status": "ok"}})
+    qapp = get_qapp()
+    page = library_page.LibraryPage()
+    cockpit = host(page, role="admin")
+    settle(qapp)
+    item = {"id": "12", "display_name": "Medkit", "filter_group": "MEDICAL", "stack_size": "10", "category": "Medical"}
+    page._on_tile_picked(item)
+    page.spn_quantity.setValue(5)
+    assert page.btn_add_pending.isEnabled() and page.btn_add_template.isEnabled()
+    page._on_give_clicked()
+    settle(qapp)
+    assert 'api:Request_Player_AddItem {"id": 55, "item": {"id": 12, "count": 5}}' in bridge.sent
+    monkeypatch.setattr(library_page.QInputDialog, "getItem", staticmethod(lambda *a, **k: ("STARTER", True)))
+    page._on_add_template_clicked()
+    assert loadouts.load_templates()["STARTER"] == [{"id": 12, "name": "Medkit", "count": 5}]
+    cockpit.close()
+
+# endregion

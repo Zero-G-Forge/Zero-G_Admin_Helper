@@ -527,6 +527,16 @@ The connection only notices it is dead when it tries to send something. A small 
 
 Each saved server is asked the same three read-only questions on its own short connection. Nothing is kept open, so a slow or dead server cannot block the main one. A message to all servers passes the Safety Flow once, then goes to each server in turn, and each one gets its own line in the audit log.
 
+## Giving Items and Building Templates
+
+### Why "pending edits" became GIVE ITEM
+
+The first drawing had a queue of pending edits that would be sent later. ZAH has no such queue: every server change already gets its own preview and CONFIRM in the Safety Flow, so a second waiting room would only add a step. The button now gives the item straight through the Safety Flow.
+
+### Templates live on the PC
+
+ADD TO TEMPLATE only writes to a small file on the admin's PC. Nothing reaches the server until a template button on the Players page is used, and that goes through the Safety Flow too.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free
