@@ -784,3 +784,69 @@ QPushButton#StructFilterButton:checked {
 }
 
 /* endregion */
+
+/* region: ECF Editor Page */
+
+/* Toolbar buttons: smaller text than the dashboard's big buttons, with room on each side */
+#EcfEditorPage QPushButton {
+    font-size: 13px;
+    padding: 0px 16px;
+}
+
+/* File picker in the toolbar: dark box with a cyan edge */
+QComboBox#EcfFileCombo {
+    background-color: rgba(5, 14, 24, 180);
+    border: 1px solid rgba(40, 170, 215, 90);
+    border-radius: 6px;
+    color: #dcebf5;
+    font-size: 14px;
+    padding: 6px 10px;
+}
+
+/* Trader search box, same look as the chat reply box */
+QLineEdit#EcfSearchBox {
+    background-color: rgba(5, 14, 24, 180);
+    border: 1px solid rgba(40, 170, 215, 60);
+    border-radius: 6px;
+    color: #dcebf5;
+    font-size: 14px;
+    padding: 6px 10px;
+}
+
+/* Trader list: see-through, roomy rows, picked row in soft cyan */
+QListWidget#EcfTraderList {
+    background: transparent;
+    border: none;
+    color: #dcebf5;
+    font-size: 15px;
+}
+
+QListWidget#EcfTraderList::item {
+    padding: 9px 8px;
+    border-radius: 4px;
+}
+
+QListWidget#EcfTraderList::item:selected {
+    background-color: rgba(18, 90, 125, 170);
+    border: 1px solid #33d6ff;
+    color: #ffffff;
+}
+
+/* Changes preview: monospace, like the alerts command preview */
+QPlainTextEdit#EcfChangesBox {
+    background-color: rgba(5, 14, 24, 180);
+    border: 1px solid rgba(40, 170, 215, 60);
+    border-radius: 6px;
+    color: #dcebf5;
+    font-family: "DejaVu Sans Mono", monospace;
+    font-size: 13px;
+    padding: 6px;
+}
+
+/* Backup line along the bottom */
+#EcfBackupLabel {
+    color: #c7d6e0;
+    font-size: 14px;
+}
+
+/* endregion */
