@@ -19,11 +19,12 @@ from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushBut
 
 ## Guarded import: if online_login is missing, the page just says the users can't be loaded.
 try:
-    from features.login.online_login import fetch_users, save_user, remove_user, load_dev_key
+    from features.login.online_login import fetch_users, save_user, remove_user, load_dev_key, set_live_files
 except Exception as e:
     print(f"[ERROR] UsersPage: Could not load online_login: {e}")
     fetch_users = None
     save_user = None
+    set_live_files = None
     remove_user = None
     load_dev_key = None
 
@@ -119,9 +120,12 @@ class UserTaskRunner(QThread):
 # region User Dialog
 
 ## The small ADD USER / EDIT USER window. It only collects the values; the page sends them.
+## Live file editing is wired (Nov 22, 2026): the owner/developer checkbox sends /users/live_files when changed,
+## after the user is saved. The service fails closed when the column is missing; Ray deploys that service.
 class UserEditDialog(QDialog):
 
-    def __init__(self, username="", role="moderator", parent=None, server_name="", server_address="", role_choices=None):
+    def __init__(self, username="", role="moderator", parent=None, server_name="", server_address="", role_choices=None,
+                 live_file_editing=False, can_set_live_files=False):
         super().__init__(parent)
 
         ## A name means editing an existing user; a blank name means adding a new one.
@@ -170,9 +174,10 @@ class UserEditDialog(QDialog):
         ## Lets an admin or moderator use LIVE MODE in Settings. Developers and owners always have it, so the box
         ## hides when Owner is picked. Disabled until ZAH-DB has a column to save it in (a database change Ray applies).
         self.chk_live_files = QCheckBox("Live file editing")
-        self.chk_live_files.setChecked(False)
-        self.chk_live_files.setEnabled(False)
-        self.chk_live_files.setToolTip("Coming in a later step.")
+        self.chk_live_files.setChecked(bool(live_file_editing))
+        self.chk_live_files.setEnabled(bool(can_set_live_files))
+        self.chk_live_files.setToolTip("Lets this user turn on LIVE MODE in Settings. Needs the login service update and the ZAH-DB column."
+                                        if can_set_live_files else "Only an owner or the developer can change this permission.")
         form.addRow("PERMISSIONS", self.chk_live_files)
         self.cmb_role.currentIndexChanged.connect(self._update_live_files_row)
         self._update_live_files_row()
@@ -506,10 +511,11 @@ class UsersPage(QWidget):
         if self._admin_blocked(picked_user):
             return
         self._open_user_dialog(shown_name(picked_user), str(picked_user.get("role", "")),
-                               str(picked_user.get("server_name", "")), str(picked_user.get("server_address", "")))
+                               str(picked_user.get("server_name", "")), str(picked_user.get("server_address", "")),
+                               picked_user.get("live_file_editing") is True)
 
     ## Shows the dialog, then sends the save on the helper thread. Cancel changes nothing.
-    def _open_user_dialog(self, username, role, server_name="", server_address=""):
+    def _open_user_dialog(self, username, role, server_name="", server_address="", live_file_editing=False):
         try:
             access = self._get_access()
             save_function = save_user
@@ -531,7 +537,8 @@ class UsersPage(QWidget):
                                for user in self.row_users if user), None)
             if not is_developer and own_server is not None:
                 server_name, server_address = own_server
-            user_dialog = UserEditDialog(username, role, self, server_name, server_address, role_choices)
+            user_dialog = UserEditDialog(username, role, self, server_name, server_address, role_choices,
+                                         live_file_editing, can_give_any_role)
             if not is_developer:
                 user_dialog.cmb_server.setEnabled(False)
 
@@ -541,9 +548,21 @@ class UsersPage(QWidget):
             new_name, new_role, new_password = user_dialog.get_values()
             new_server_name, new_server_address = user_dialog.get_server()
             session_token, dev_key = access
-            self._run_task(lambda: save_function(session_token, new_name, new_role, new_password, dev_key=dev_key,
-                                                 server_name=new_server_name, server_address=new_server_address),
-                           self._on_change_done, "Saving...")
+            wanted_live = user_dialog.chk_live_files.isChecked() if can_give_any_role else bool(live_file_editing)
+
+            ## Save the user first (a new user must exist before a permission can be given). The permission only
+            ## needs a second request when changed. A missing column refuses that step, never grants it by accident.
+            def save_with_permission():
+                result, detail = save_function(session_token, new_name, new_role, new_password, dev_key=dev_key,
+                                                server_name=new_server_name, server_address=new_server_address)
+                if result == "ok" and wanted_live != bool(live_file_editing):
+                    if set_live_files is None:
+                        return "denied", "user saved, but the permission helper is missing"
+                    live_result, live_detail = set_live_files(session_token, new_name, wanted_live, dev_key=dev_key)
+                    if live_result != "ok":
+                        return "denied", f"user saved, but Live file editing was not changed: {live_detail or 'service unreachable'}"
+                return result, detail
+            self._run_task(save_with_permission, self._on_change_done, "Saving...")
         except Exception as e:
             print(f"[ERROR] UsersPage: Could not save user: {e}")
             self.task_thread = None

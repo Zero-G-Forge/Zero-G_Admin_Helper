@@ -139,7 +139,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `settings` | SETTINGS | `features.settings.settings_page` | `SettingsPage` | Auto-connect is live; the read-only server files download is live, with CANCEL DOWNLOAD; LIVE MODE follows the role gate (see **Server uploads and LIVE MODE**) |
 | `alerts` | ALERTS & ANTI-CHEAT | `features.alerts.alerts_page` | `AlertsPage` | Live queue from cheat flags and chat watch-word hits; ACK on this PC; PREVIEW BAN through the Safety Flow |
 | `bans_audit` | BANS & AUDIT | `features.bans_audit.bans_audit_page` | `BansAuditPage` | Failed-login table is live (owner, or developer with key) |
-| `users` | USERS | `features.users.users_page` | `UsersPage` | Live add, edit, and remove through the login service; Live file editing checkbox is layout only |
+| `users` | USERS | `features.users.users_page` | `UsersPage` | Live add, edit, and remove through the login service; Live file editing checkbox for owners and the developer (`/users/live_files`, needs the updated service and the column) |
 | `ecf_editor` | ECF EDITOR | `features.ecf_editor.ecf_editor_page` | `EcfEditorPage` | Lists and opens every `.ecf` from the downloaded server files (`load_server_files`); DOWNLOAD FOLDER runs the read-only download and refills the list; empty state when nothing is downloaded |
 | `pda_editor` | PDA EDITOR | `features.pda_editor.pda_editor_page` | `PdaEditorPage` | Lists and opens the downloaded PDA `.yaml` / `.csv` files, chapters with English names; DOWNLOAD FOLDER as in the ECF Editor; empty state when nothing is downloaded |
 | `backups` | BACKUPS | `features.backups.backups_page` | `BackupsPage` | Layout; PREVIEW and RESTORE locked with the reason (no bridge backup command; a restore needs the server stopped) |
@@ -225,6 +225,7 @@ Passwords are stored as **scrypt** hashes plus salt. Password text, tokens, and 
 | POST | `/users` | owner token, or developer key | List of users (no password data) |
 | POST | `/users/save` | owner token, or developer key | Add a user or change role / password |
 | POST | `/users/delete` | owner token, or developer key | Remove a user |
+| POST | `/users/live_files` | owner token (own server's users), or developer key; admins 403 | Turn Live file editing on or off: `{"username", "enabled": true/false}`. 404 unknown user, 400 when `enabled` is not true/false, 409 when the column is missing (nothing changed) |
 
 Rate limiting (`login_service/rate_limiter.py`) uses a 15-minute window: five failures per username, twenty per source address. A lockout returns HTTP 429. ZAH shows `Too many tries, wait 15 minutes`. The login window also stops after five local failed attempts.
 
@@ -246,6 +247,8 @@ The `users` table:
 | `display_name` | Name with original capitals, for display only |
 
 There is **no Live file editing column yet**. The Users dialog shows the checkbox in the layout, disabled, until that column is added and approved.
+
+(Nov 22, 2026: the checkbox is wired for owners and the developer. It sends `/users/live_files` after the user is saved, only when the box changed. `user_store.set_live_file_editing` looks the column up in `information_schema.columns` first and saves nothing when it is missing, so the route answers 409 and ZAH shows "Not changed". `/users` adds each user's `live_file_editing` flag for owners and the developer. Admins see the box greyed out. Ray deploys the updated login service and adds the column with the SQL below.)
 
 The login service already reads it, fail closed: `user_store.get_live_file_editing(username)` returns True only when the `live_file_editing` column exists and is TRUE for that user. A missing column, no database, or any error gives False. `/login` and `/session` send it back as `live_file_editing`. The column itself is added by Ray (ZAH never changes the database):
 
@@ -794,6 +797,7 @@ def fetch_failed_logins(session_token, limit=50, dev_key=None)
 def fetch_users(session_token, dev_key=None)
 def save_user(session_token, username, role, password="", dev_key=None, server_name="", server_address="")
 def remove_user(session_token, username, dev_key=None)
+def set_live_files(session_token, username, enabled, dev_key=None)   # /users/live_files
 
 class UsersPage(QWidget)
 class UserEditDialog(QDialog)
@@ -853,6 +857,8 @@ def check_user(username, password_text)
 def list_users()
 def delete_user(username)
 def set_user_role(username, role, server_name="", server_address="")
+def get_live_file_editing(username)            # False unless the column exists and is TRUE
+def set_live_file_editing(username, enabled)   # True saved, False no user, None not possible (no DB / no column)
 def create_session(username, remember)
 def check_session(session_token)
 def delete_session(session_token)
@@ -1053,6 +1059,7 @@ Page wiring:
 | BP Editor (Library) | BLUEPRINTS tab | none: no blueprint data source yet | empty state |
 | ECF / PDA Editor | DOWNLOAD FOLDER FROM SERVER (READ-ONLY) | the `files:` download (`ServerFileDownloadWorker`), then `load_server_files` | no |
 | Settings | CANCEL DOWNLOAD | none on the server: `request_stop` on the download thread | no |
+| Users | Live file editing checkbox | none on the game server: login service `/users/live_files` (owner or developer key) | no (login service only) |
 
 ## Planned / Not Yet Wired
 
@@ -1094,7 +1101,7 @@ Still to do:
 - An owner or developer may grant **Live file editing** to an individual admin or moderator on the Users page. The checkbox is already in `UserEditDialog`, hidden when the role is Owner, and disabled until a new ZAH-DB column is added (a database change that must be applied with approval).
 - Live writes are server changes. The control stays disabled until that work is approved.
 - Bridge side done (core 1.6.2): `files:put` gives the backup-first, hash-checked replace that LIVE MODE and UPLOAD will use. The ZAH side (popups, role gate, sending) is the next step.
-- Done (Nov 22, 2026): the ZAH side is wired (see **Server uploads and LIVE MODE**). Tested only against the local harness. Still open: the Users page checkbox stays disabled until the column is added and a write route exists in the login service.
+- Done (Nov 22, 2026): the ZAH side is wired (see **Server uploads and LIVE MODE**). Tested only against the local harness. The Users page checkbox and the `/users/live_files` route are done too (Nov 22, 2026). Still open on Ray's side: deploy the updated login service and add the column.
 
 ### ECF and PDA editor follow-through
 

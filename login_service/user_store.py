@@ -247,6 +247,33 @@ def get_live_file_editing(username):
         print(f"[WARNING] UserStore: Live file editing not readable, treated as not granted ({type(e).__name__})")
         return False
 
+## Turns Live file editing on or off for one user. Needs ZAH-DB and the users.live_file_editing column,
+## which the owner adds (this code never changes the table). Returns True when saved, False when there is
+## no such user, and None when it is not possible (no database, no column, or any error). Fails closed.
+def set_live_file_editing(username, enabled):
+    try:
+        if not _database_enabled():
+            return None
+        lookup_name = str(username or "").strip().lower()
+        if not lookup_name:
+            return False
+        with _open_database() as connection:
+            has_column = connection.execute(
+                "SELECT 1 FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'live_file_editing'"
+            ).fetchone()
+            if not has_column:
+                print("[WARNING] UserStore: users.live_file_editing column is missing, nothing saved")
+                return None
+            update_result = connection.execute(
+                "UPDATE users SET live_file_editing = %s WHERE username = %s", (bool(enabled), lookup_name))
+            saved = update_result.rowcount > 0
+        if saved:
+            print(f"[SUCCESS] UserStore: Live file editing {'on' if enabled else 'off'} for {lookup_name}")
+        return saved
+    except Exception as e:
+        print(f"[ERROR] UserStore: Could not save live file editing ({type(e).__name__})")
+        return None
+
 ## Lists every user (server, name, role and date only, never password data).
 ## Returns None if the list can't be read, so ZAH can tell "error" apart from "no users".
 def list_users():

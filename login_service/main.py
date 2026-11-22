@@ -13,6 +13,7 @@ import time
 
 ## user_store.py sits in the same folder, so it can be imported by name.
 from user_store import check_user, ensure_users_table, add_user, list_users, delete_user, set_user_role, get_live_file_editing
+from user_store import set_live_file_editing
 
 ## session_store keeps the "Keep me logged in" sessions
 ## (ZAH-DB, or memory when testing).
@@ -139,7 +140,8 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
     ## do_POST runs for POST requests. ZAH sends {"username": ..., "password": ...} to /login.
     def do_POST(self):
         try:
-            if self.path not in ("/login", "/session", "/logout", "/failed_logins", "/users", "/users/save", "/users/delete"):
+            if self.path not in ("/login", "/session", "/logout", "/failed_logins", "/users", "/users/save", "/users/delete",
+                                 "/users/live_files"):
                 self._send_json(404, {"status": "error", "message": "not found"})
                 return
 
@@ -220,7 +222,10 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
                                  if (user.get("server_name", ""), user.get("server_address", "")) == manager_server]
 
                 ## /users: the list of names, roles and dates. Never any password data.
+                ## Owners and the developer also see each user's Live file editing flag (False when the column is missing).
                 if self.path == "/users":
+                    if manager_role in ("owner", "developer"):
+                        user_list = [dict(user, live_file_editing=get_live_file_editing(user.get("username"))) for user in user_list]
                     self._send_json(200, {"status": "ok", "users": user_list})
                     return
 
@@ -229,6 +234,29 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
                                     and not any(user.get("username") == target_name for user in user_list))
                 if manager_server is not None and target_elsewhere:
                     self._send_json(403, {"status": "error", "message": "that user is on another server"})
+                    return
+
+                ## /users/live_files: owners (their own server's users) and the developer key only; admins get 403.
+                ## 404 for an unknown user, 409 when ZAH-DB has no live_file_editing column yet (nothing is changed).
+                if self.path == "/users/live_files":
+                    if manager_role not in ("owner", "developer"):
+                        self._send_json(403, {"status": "error", "message": "owners only"})
+                        return
+                    if not any(user.get("username") == target_name for user in user_list):
+                        self._send_json(404, {"status": "error", "message": "no such user"})
+                        return
+                    if not isinstance(login_data.get("enabled"), bool):
+                        self._send_json(400, {"status": "error", "message": "bad request"})
+                        return
+                    live_saved = set_live_file_editing(target_name, login_data["enabled"])
+                    if live_saved is None:
+                        self._send_json(409, {"status": "error", "message": "live file editing is not set up in ZAH-DB yet (column missing)"})
+                        return
+                    if not live_saved:
+                        self._send_json(404, {"status": "error", "message": "no such user"})
+                        return
+                    print(f"[SUCCESS] LoginService: {manager_name.strip()} set live file editing for {target_name}")
+                    self._send_json(200, {"status": "ok", "live_file_editing": login_data["enabled"]})
                     return
 
                 ## An admin manages moderators only: the user must be a moderator (or brand new),

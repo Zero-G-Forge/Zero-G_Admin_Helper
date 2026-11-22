@@ -541,6 +541,16 @@ ADD TO TEMPLATE only writes to a small file on the admin's PC. Nothing reaches t
 
 CANCEL DOWNLOAD does not pull the plug in the middle of a file. It raises a flag, and the download thread looks at that flag between two requests. Files that already arrived stay, the half-finished `.part` file is thrown away, and LAST PULLED is not changed, because the copy is not complete.
 
+## Giving Someone Live File Editing
+
+### Who may hand it out
+
+Only an owner (for their own server's users) or the developer key can switch Live file editing on or off. Admins see the box but cannot click it, and the login service refuses them even if they try another way.
+
+### Why a missing column says "no"
+
+The permission is stored in one extra column in the users table, which Ray adds himself. Until it exists, the service checks for it first and saves nothing, answering "not set up yet". Nobody can end up with the permission by accident, and nobody loses data.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free

@@ -242,6 +242,13 @@ def save_user(session_token, username, role, password="", dev_key=None, server_n
     save_result, reply_data = _send_user_request("/users/save", save_fields, session_token, dev_key)
     return save_result, (None if save_result == "ok" else reply_data)
 
+## Turns Live file editing on or off for a user (owners and the developer only; the service checks).
+## ("ok", None), ("denied", reason), or ("offline", None).
+def set_live_files(session_token, username, enabled, dev_key=None):
+    live_result, reply_data = _send_user_request("/users/live_files", {"username": username, "enabled": bool(enabled)},
+                                                 session_token, dev_key)
+    return live_result, (None if live_result == "ok" else reply_data)
+
 ## Removes a user.
 def remove_user(session_token, username, dev_key=None):
     remove_result, reply_data = _send_user_request("/users/delete", {"username": username}, session_token, dev_key)
