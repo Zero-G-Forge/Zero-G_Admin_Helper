@@ -272,3 +272,87 @@ def test_dashboard_live_and_announce(qapp, monkeypatch, tmp_path):
     assert "broadcast:Restart in 15 minutes" in bridge.sent
 
 # endregion
+
+
+# region Chat Page
+
+def _chat_reply(seq_start=1):
+    return {"type": "CHAT_LOG", "ok": True, "count": 3, "last_seq": seq_start + 2, "kept": 500, "messages": [
+        {"seq": seq_start, "time": "2026-11-22T18:00:00Z", "channel": "Global", "senderType": "Player",
+         "senderId": 1001, "senderName": "", "senderFactionId": 100, "recipientId": 0, "recipientFactionId": 0, "text": "hello all"},
+        {"seq": seq_start + 1, "time": "2026-11-22T18:01:00Z", "channel": "Faction", "senderType": "Player",
+         "senderId": 1002, "senderName": "", "senderFactionId": 101, "recipientId": 0, "recipientFactionId": 101, "text": "you cheater"},
+        {"seq": seq_start + 2, "time": "2026-11-22T18:02:00Z", "channel": "SinglePlayer", "senderType": "Player",
+         "senderId": 1003, "senderName": "", "senderFactionId": 0, "recipientId": 0, "recipientFactionId": 0, "text": "admin help"}]}
+
+
+def test_chat_page_reads_sends_and_warns(monkeypatch, tmp_path):
+    from features.chat import chat_store, chat_page
+    from PyQt6.QtCore import Qt
+    monkeypatch.setattr(chat_store, "WATCH_WORDS_FILE", str(tmp_path / "words.json"))
+    monkeypatch.setattr(chat_store, "CHAT_HISTORY", [])
+    monkeypatch.setattr(chat_store, "LAST_SEQ", {"value": 0})
+    players = {"type": "PLAYER_CACHE", "player_list": [{"entityId": "1001", "name": "Alice"}, {"entityId": "1002", "name": "Bob"}]}
+    bridge = install(monkeypatch, tmp_path, {"chat:recent": _chat_reply(), "plys": players,
+                                             "con:say": {"type": "CONSOLE_RESULT", "status": "ok"},
+                                             "msg": {"type": "RESPONSE", "status": "Sent"},
+                                             "msgfaction": {"type": "RESPONSE", "status": "Sent"}})
+    qapp = get_qapp()
+    page = chat_page.create_page()
+    cockpit = host(page, role="moderator")
+    settle(qapp)
+    assert len(chat_store.CHAT_HISTORY) == 3 and chat_store.LAST_SEQ["value"] == 3
+    assert page.lst_messages.count() == 1 and "Alice" in page.lst_messages.item(0).text()
+
+    ## Global SEND uses con:say through the Safety Flow, with quotes removed.
+    page.txt_reply.setText("server's restart soon")
+    assert page.btn_send.isEnabled()
+    page._on_send_clicked()
+    settle(qapp)
+    assert any(cmd == "con:say 'servers restart soon'" for cmd in bridge.sent)
+
+    ## Faction SEND needs a picked message, then goes to that faction.
+    page._on_tab_clicked("faction")
+    page.txt_reply.setText("calm down")
+    assert not page.btn_send.isEnabled()
+    page.lst_messages.item(0).setSelected(True)
+    assert page.btn_send.isEnabled()
+    page._on_send_clicked()
+    settle(qapp)
+    assert "msgfaction:101|calm down" in bridge.sent
+
+    ## Private SEND answers the sender.
+    page._on_tab_clicked("private")
+    page.lst_messages.item(0).setSelected(True)
+    page.txt_reply.setText("on my way")
+    page._on_send_clicked()
+    settle(qapp)
+    assert "msg:1003|on my way" in bridge.sent
+
+    ## A watch word makes a hit; WARN sends a private message to that player.
+    page.txt_watch_word.setText("cheat")
+    page._on_watch_add()
+    assert page.lst_hits.count() == 1
+    page.lst_hits.setCurrentRow(0)
+    monkeypatch.setattr(chat_page.QInputDialog, "getText", staticmethod(lambda *a, **k: ("stop that", True)))
+    page._on_warn_clicked()
+    settle(qapp)
+    assert "msg:1002|stop that" in bridge.sent
+    assert not page.btn_mute.isEnabled() and not page.tab_buttons["discord"].isEnabled()
+
+    ## Switching the word off clears the hit.
+    page._on_watch_toggled(0, False)
+    assert page.lst_hits.count() == 0
+    cockpit.close()
+
+
+def test_chat_store_handles_bridge_reload(monkeypatch):
+    from features.chat import chat_store
+    monkeypatch.setattr(chat_store, "CHAT_HISTORY", [])
+    monkeypatch.setattr(chat_store, "LAST_SEQ", {"value": 0})
+    chat_store.add_messages(_chat_reply(40))
+    assert chat_store.LAST_SEQ["value"] == 42
+    chat_store.add_messages({"type": "CHAT_LOG", "messages": [], "last_seq": 0})
+    assert chat_store.LAST_SEQ["value"] == 0
+
+# endregion

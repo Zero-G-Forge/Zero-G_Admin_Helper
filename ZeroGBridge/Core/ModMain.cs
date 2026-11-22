@@ -280,12 +280,30 @@ namespace ZeroGBridge
                     _modApi.Application.OnPlayfieldLoaded += OnPlayfieldLoaded;
                     _modApi.Application.OnPlayfieldUnloading += OnPlayfieldUnloading;
                     _modApi.Application.Update += OnApplicationUpdate;
+
+                    // 1.6.3: every chat line goes into the read-only chat:recent history (Network/ChatLog.cs).
+                    _modApi.Application.ChatMessageSent += OnChatMessageSent;
                     ZgbLog.Write("[ZGB] -SUCCESS- Registered API v2 OnPlayfieldLoaded, OnPlayfieldUnloading and Update delegates.");
                 }
             }
             catch (Exception ex)
             {
                 ZgbLog.Write($"[ZGB] -WARN- Could not register playfield delegates: {ex.Message}");
+            }
+        }
+
+        // 1.6.3: copies one chat line into ChatLog. Only reads the message; never answers or changes it.
+        private void OnChatMessageSent(Eleon.MessageData message)
+        {
+            try
+            {
+                ChatLog.Add(message.Channel.ToString(), message.SenderType.ToString(), message.SenderEntityId,
+                    message.SenderNameOverride, message.SenderFaction.Id, message.RecipientEntityId,
+                    message.RecipientFaction.Id, message.Text);
+            }
+            catch (Exception ex)
+            {
+                ZgbLog.Write($"[ZGB] -WARN- Chat line not stored: {ex.Message}");
             }
         }
 
@@ -298,6 +316,7 @@ namespace ZeroGBridge
                     _modApi.Application.OnPlayfieldLoaded -= OnPlayfieldLoaded;
                     _modApi.Application.OnPlayfieldUnloading -= OnPlayfieldUnloading;
                     _modApi.Application.Update -= OnApplicationUpdate;
+                    _modApi.Application.ChatMessageSent -= OnChatMessageSent;
                 }
             }
             catch { }

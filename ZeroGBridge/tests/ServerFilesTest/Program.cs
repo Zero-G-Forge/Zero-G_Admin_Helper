@@ -117,6 +117,14 @@ namespace ServerFilesTest
                                 writer.WriteLine("{\"type\":\"METRIC\",\"fps\":60}");
                                 if (!oldBridge && line.StartsWith("files:", StringComparison.OrdinalIgnoreCase)) writer.WriteLine(ServerFiles.Handle(line));
                                 else if (!oldBridge && line.StartsWith("coreupload:", StringComparison.OrdinalIgnoreCase)) writer.WriteLine(ServerFileWrites.HandleCoreUpload(line));
+                                // 1.6.3: chat history, plus a harness-only line that adds a chat message: harness:chat|<channel>|<senderId>|<text>
+                                else if (!oldBridge && line.StartsWith("chat:", StringComparison.OrdinalIgnoreCase)) writer.WriteLine(ChatLog.Handle(line));
+                                else if (line.StartsWith("harness:chat|"))
+                                {
+                                    string[] bits = line.Split(new[] { '|' }, 4);
+                                    ChatLog.Add(bits[1], "Player", int.Parse(bits[2]), "", 0, 0, 0, bits[3]);
+                                    writer.WriteLine("{\"type\":\"RESPONSE\",\"status\":\"Acknowledged\"}");
+                                }
                                 else writer.WriteLine("{\"type\":\"RESPONSE\",\"status\":\"Acknowledged\",\"command\":\"" + line.Replace("\"", "'") + "\"}");
                             }
                         }
@@ -382,6 +390,20 @@ namespace ServerFilesTest
                 // Only the temporary folder this test made is removed.
                 try { Directory.Delete(temp, true); } catch { }
             }
+
+            // 1.6.3: chat:recent keeps the newest lines, answers "since", and refuses anything else.
+            for (int n = 1; n <= ChatLog.MaxKept + 5; n++) ChatLog.Add("Global", "Player", 100 + n, "", 0, 0, 0, "line " + n);
+            var chatAll = JObject.Parse(ChatLog.Handle("chat:recent"));
+            Check("chat:recent answers CHAT_LOG", (string)chatAll["type"] == "CHAT_LOG" && (bool)chatAll["ok"]);
+            Check("chat:recent sends the default number", (int)chatAll["count"] == ChatLog.DefaultMax);
+            Check("chat:recent ends with the newest line", (string)chatAll["messages"].Last["text"] == "line " + (ChatLog.MaxKept + 5));
+            long lastSeq = (long)chatAll["last_seq"];
+            var chatSince = JObject.Parse(ChatLog.Handle("chat:recent:{\"since\":" + (lastSeq - 3) + "}"));
+            Check("chat:recent since gives only newer lines", (int)chatSince["count"] == 3);
+            var chatMax = JObject.Parse(ChatLog.Handle("chat:recent:{\"max\":10000}"));
+            Check("chat:recent keeps only the last 500", (int)chatMax["count"] == ChatLog.MaxKept);
+            Check("chat: unknown sub-command is refused", (string)JObject.Parse(ChatLog.Handle("chat:send:hi"))["type"] == "ERROR");
+            Check("chat: bad json is refused", (string)JObject.Parse(ChatLog.Handle("chat:recent:{bad"))["code"] == "bad_json");
 
             Console.WriteLine($"\nResult: {_passed} passed, {_failed} failed");
             return _failed == 0 ? 0 : 1;

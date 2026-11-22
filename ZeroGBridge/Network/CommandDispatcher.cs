@@ -76,6 +76,9 @@ namespace ZeroGBridge
                 // Same reason to skip the trace line: one upload is several large chunk lines.
                 if (ServerFileWrites.IsCoreUploadLine(lowerCmd)) return ServerFileWrites.HandleCoreUpload(cleanCmd);
 
+                // 1.6.3: read-only chat history (Network/ChatLog.cs). ZAH polls it, so it skips the trace line too.
+                if (ChatLog.IsChatLine(lowerCmd)) return ChatLog.Handle(cleanCmd);
+
                 // Live server console trace
                 ZgbLog.Write($"[ZGB] -INFO- Received command from ZAH: \"{cleanCmd}\"");
 

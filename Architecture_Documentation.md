@@ -129,7 +129,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | Key | Nav label | Module | Widget | Current state |
 | --- | --- | --- | --- | --- |
 | `dashboard` | DASHBOARD | `features.dashboard.dashboard_page` | `DashboardPage` | Live players, uptime, cheat-flag alerts, bridge events; ANNOUNCE through the Safety Flow; SAVE and BACKUP not possible while the server runs |
-| `chat` | CHAT | `features.chat.chat_page` | `ChatPage` | Layout; SEND, WARN, and MUTE disabled |
+| `chat` | CHAT | `features.chat.chat_page` | `ChatPage` | Live chat from `chat:recent` (core 1.6.3); SEND and WARN through the Safety Flow; watch words; MUTE and DISCORD not possible |
 | `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Live list, detail and inventory (read-only); MESSAGE, WARP, KICK, BAN, SAVE & APPLY and loadouts through the Safety Flow; GOD MODE not possible from the server |
 | `factions` | FACTIONS | `features.factions.factions_page` | `FactionsPage` | Layout; SET RELATION and RENAME disabled |
 | `structures` | STRUCTURES | `features.structures.structures_page` | `StructuresPage` | Layout; TELEPORT, SET FACTION, and DESTROY disabled |
@@ -172,6 +172,7 @@ Supporting modules (not nav pages):
 | `features/shared/editor_actions.py` | Shared VALIDATE, CHANGES PREVIEW, SAVE, and UPLOAD TO SERVER actions |
 | `features/server_files/upload_flow.py` | The three upload confirmations, the role gate helpers, and the online-player count |
 | `features/server_files/write_worker.py` | `files:put`, `coreupload:put`, and single-file `files:get` steps, run in `ServerWriteWorker` |
+| `features/chat/chat_store.py` | Chat history in memory (from `chat:recent`) and watch words in `data/chat_watch_words.json`; shared by Chat and Alerts |
 
 ## Roles
 
@@ -380,7 +381,7 @@ Empyrion loads `ZeroGBridge.Loader.ZeroGBridgeLoader`, which implements **API v2
 - It owns the TCP listener and authentication (`BridgeListener`, `AuthConfig`).
 - It hosts `CoreHost`, which loads the reloadable core (`ZeroGBridge.Core.dll`) in its own AppDomain.
 - Game-state work is marshalled onto the **game thread** (`GameThread`, `GameGateway`), never executed on the network thread.
-- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.2** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, and the 1.6.2 write commands `files:put` and `coreupload:`). The live server ran 1.6.1 until 1.6.2 is dropped into `Updates/` and reloaded. Core changes can be applied with `hot:reload` when that path is used.
+- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.3** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, and the 1.6.3 read-only chat history `chat:recent`). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
 
 The auth token is read from `ZeroGBridge.json` only and is never written into log lines.
 
@@ -426,6 +427,7 @@ Handled in `ZeroGBridge/Network/CommandDispatcher.cs` and `ApiCommands.cs` after
 | `files:put:<json>` | | 1.6.2: replace one existing editable file, backup first, in chunks | yes |
 | `coreupload:status` | | 1.6.2: what core files wait in `Updates/` (size, sha256) | no |
 | `coreupload:put:<json>` | | 1.6.2: place a new `ZeroGBridge.Core.dll` / `.pdb` in `Updates/`, in chunks | yes (loads only on `hot:reload`) |
+| `chat:recent` | `chat:recent:{"since":N,"max":M}` | 1.6.3: read-only chat history kept in memory (see **Chat history** below) | no |
 
 `save` and `backup` return `status: "not_available"`. The catalog states that backups are a ZAH job after the server has stopped, not a bridge command.
 
@@ -583,6 +585,17 @@ Kill switch: `"FileWritesEnabled": false` in `ZeroGBridge.json` turns both comma
 Error codes: `writes_disabled`, `not_ready` (mod folder unknown), `bad_request`, `unknown_root`, `root_unavailable`, `bad_path`, `not_allowed`, `not_found`, `too_large`, `bad_offset`, `hash_mismatch`, `changed_on_server`, `bad_core`, `write_failed`, `exception`.
 
 Checks: the same `ServerFilesTest` program also compiles `ServerFileWrites.cs` (103 checks in total): kill switch, not-ready, a chunked put with its backup, a second put keeping both backups, stale base hash, hash mismatch, new file, `.png`, `.json`, traversal, symlink, out-of-order chunk, size caps, the save root, a non-DLL and a wrong DLL refused, and the real Release core uploaded byte for byte with its version read back. The `serve` mode answers `coreupload:` too; set `ZGB_TEST_MODDIR` to a test folder for the write commands.
+
+### Chat history (`chat:recent`)
+
+Core 1.6.3, `ZeroGBridge/Network/ChatLog.cs`. Core-only (hot reload, no restart). `ModMain` hooks API v2 `Application.ChatMessageSent` and passes each `MessageData` to `ChatLog.Add`. The log is memory only: the newest 500 lines (`MaxKept`), lost on a reload. Routed in `CommandDispatcher.ProcessCommand` after `coreupload:`, before the trace line, because ZAH polls it every few seconds.
+
+- `chat:recent` returns the newest 200 (`DefaultMax`). `chat:recent:{"since":N,"max":M}` returns lines with `seq` above N, at most M.
+- Reply: `{"type":"CHAT_LOG","ok":true,"count":C,"last_seq":S,"kept":500,"messages":[{"seq","time","channel","senderType","senderId","senderName","senderFactionId","recipientId","recipientFactionId","text"}]}`. `time` is UTC; `channel` is `Global`, `Faction`, `Alliance`, `SinglePlayer`, or `Server`.
+- Any other `chat:` word returns `ERROR` `unknown_command`; bad JSON returns `bad_json`.
+- `seq` restarts at 1 after a reload. ZAH notices a `last_seq` below its own and starts over.
+- Sending chat does not use this command. It uses the existing `con:say`, `msg:` and `msgfaction:`.
+- Harness only: `harness:chat|<channel>|<senderId>|<text>` adds a line in the test harness serve mode.
 
 ## Class and Method Signatures
 
@@ -858,6 +871,16 @@ public static class ServerFileWrites                          // 1.6.2
     public static string HashFile(string path);                        // sha256, lower-case hex
 }
 
+public static class ChatLog                                     // 1.6.3
+{
+    public const string Prefix = "chat:";
+    public const int MaxKept = 500;
+    public const int DefaultMax = 200;
+    public static bool IsChatLine(string lowerCmd);
+    public static void Add(string channel, string senderType, int senderId, string senderName, int senderFactionId, int recipientId, int recipientFactionId, string text);
+    public static string Handle(string cleanCmd);                       // chat:recent[:json] -> CHAT_LOG
+}
+
 public static class ApiCommands
 {
     public const string ApiPrefix = "api:";
@@ -952,6 +975,14 @@ Page wiring:
 | Dashboard | ANNOUNCE | `broadcast:<text>` (HUD message to everyone) | yes |
 | Dashboard | SAVE | none: Empyrion has no save-only command; `saveandexit` stops the server | stays disabled |
 | Dashboard | BACKUP | none: a consistent backup needs the server stopped | stays disabled |
+| Chat | GLOBAL / FACTION / PRIVATE lists | `chat:recent:{"since":N}` (every 5 s while open), names from `plys` | no |
+| Chat | SEND on GLOBAL | `con:say '<text>'` | yes |
+| Chat | SEND on FACTION | `msgfaction:<factionId>\|<text>` (faction of the picked message) | yes |
+| Chat | SEND on PRIVATE | `msg:<entityId>\|<text>` (sender of the picked message) | yes |
+| Chat | WATCH WORDS, RECENT HITS | none (saved on this PC, matched against the history) | no |
+| Chat | WARN | `msg:<entityId>\|<warning>` to the player of the picked hit | yes |
+| Chat | MUTE | none: the server console has no mute command | stays disabled |
+| Chat | DISCORD tab | none: ZAH has no Discord bot or webhook | stays disabled |
 
 ## Planned / Not Yet Wired
 

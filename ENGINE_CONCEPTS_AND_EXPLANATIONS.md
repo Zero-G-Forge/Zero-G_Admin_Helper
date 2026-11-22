@@ -435,6 +435,24 @@ The game saves by itself. The only command that forces a save is `saveandexit`, 
 
 The game's `godmode` command toggles the player who types it in their own console. The server console has no player to toggle, so there is no way to send it from ZAH.
 
+## Chat History Through the Bridge
+
+### The game tells, it is not asked
+
+The game has no "give me the last messages" request. Instead it rings a doorbell (`ChatMessageSent`) each time someone talks. Core 1.6.3 listens to that doorbell and writes each line into a small notebook that holds the newest 500 lines. ZAH reads the notebook with `chat:recent`.
+
+### Why ZAH asks for "since"
+
+Every line gets a number (`seq`). ZAH remembers the highest number it has seen and asks only for newer lines, so each poll is small. After a bridge reload the numbers start at 1 again; ZAH sees the smaller number and starts over.
+
+### Why the notebook forgets on reload
+
+It is kept in memory only, so nothing is written to the server's disk. Chat from before the reload is gone; ZAH still has what it already read.
+
+### Watch words stay on the PC
+
+Watch words are a private list on the admin's PC. A match only shows up in RECENT HITS; nothing is sent until WARN goes through the Safety Flow.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free
