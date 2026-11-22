@@ -507,3 +507,126 @@ QPushButton#ChatMuteButton:disabled {
 }
 
 /* endregion */
+
+/* region: Players Page */
+
+/* Players page (features/players/players_page.py), matched to Concept_11-17/Players.jpg.
+   Cards, tables, inner boxes and cyan buttons reuse the Dashboard styles above.
+*/
+
+/* Big cyan player name in PLAYER DETAIL */
+#PlayerNameLabel {
+    color: #33d6ff;
+    font-size: 22px;
+    font-weight: 600;
+}
+
+/* ONLINE / OFFLINE beside the name */
+#PlayerStatusLabel {
+    color: #8aa3b5;
+    font-size: 13px;
+}
+
+/* STEAM ID, FACTION, PLAYFIELD and the stat bar labels */
+#PlayerInfoLabel {
+    color: #c7d6e0;
+    font-size: 13px;
+}
+
+/* Stat bars: thin dark track with a coloured fill */
+QProgressBar#PlayerHealthBar, QProgressBar#PlayerOxygenBar, QProgressBar#PlayerFoodBar {
+    background-color: rgba(5, 14, 24, 200);
+    border: none;
+    border-radius: 3px;
+}
+
+QProgressBar#PlayerHealthBar::chunk {
+    background-color: #ff3355;
+    border-radius: 3px;
+}
+
+QProgressBar#PlayerOxygenBar::chunk {
+    background-color: #2f8fff;
+    border-radius: 3px;
+}
+
+QProgressBar#PlayerFoodBar::chunk {
+    background-color: #33d17a;
+    border-radius: 3px;
+}
+
+/* ACTIONS buttons: cyan for everyday actions, amber for KICK, red for BAN */
+QPushButton#PlayerActionButton {
+    background-color: rgba(10, 40, 62, 200);
+    border: 1px solid #33d6ff;
+    border-radius: 6px;
+}
+
+QPushButton#PlayerKickButton {
+    background-color: rgba(60, 40, 8, 200);
+    border: 1px solid #f5a623;
+    border-radius: 6px;
+}
+
+QPushButton#PlayerBanButton {
+    background-color: rgba(60, 10, 18, 200);
+    border: 1px solid #ff3355;
+    border-radius: 6px;
+}
+
+QPushButton#PlayerActionButton:hover, QPushButton#PlayerKickButton:hover, QPushButton#PlayerBanButton:hover {
+    background-color: rgba(18, 90, 125, 150);
+}
+
+QPushButton#PlayerActionButton:disabled {
+    border: 1px solid rgba(51, 214, 255, 70);
+}
+
+QPushButton#PlayerKickButton:disabled {
+    border: 1px solid rgba(245, 166, 35, 80);
+}
+
+QPushButton#PlayerBanButton:disabled {
+    border: 1px solid rgba(255, 51, 85, 80);
+}
+
+/* Title and hint inside each ACTIONS button; dimmer when the button is greyed out */
+#PlayerActionTitle {
+    color: #eef6fb;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+#PlayerActionHint {
+    color: #8aa3b5;
+    font-size: 11px;
+}
+
+#PlayerActionTitle:disabled {
+    color: rgba(238, 246, 251, 110);
+}
+
+#PlayerActionHint:disabled {
+    color: rgba(138, 163, 181, 110);
+}
+
+/* RESET: grey outlined button, same look as MUTE on the Chat page */
+QPushButton#PlayerMuteButton {
+    background-color: rgba(30, 40, 50, 200);
+    border: 1px solid #6b7c8a;
+    border-radius: 6px;
+    color: #dcebf5;
+    font-size: 15px;
+}
+
+QPushButton#PlayerMuteButton:hover {
+    background-color: rgba(60, 75, 90, 200);
+    color: #ffffff;
+}
+
+QPushButton#PlayerMuteButton:disabled {
+    border: 1px solid rgba(107, 124, 138, 80);
+    color: rgba(220, 235, 245, 90);
+}
+
+/* endregion */
