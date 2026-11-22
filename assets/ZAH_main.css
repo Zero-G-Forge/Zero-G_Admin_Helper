@@ -651,3 +651,37 @@ QPushButton#PlayerMuteButton:disabled {
 }
 
 /* endregion */
+
+/* region: Structures Page */
+
+/* Structures page (features/structures/structures_page.py), matched to Concept_11-17/Structures.jpg.
+   Cards, tables, inner boxes and buttons reuse the Dashboard, Chat and Players styles above.
+*/
+
+/* ALL / BA / CV / SV / HV filters: small outlined boxes, cyan fill on the picked one */
+QPushButton#StructFilterButton {
+    background-color: rgba(10, 26, 42, 200);
+    border: 1px solid rgba(40, 170, 215, 90);
+    border-radius: 4px;
+    color: #c7d6e0;
+    font-size: 13px;
+    padding: 2px 10px;
+}
+
+QPushButton#StructFilterButton:hover {
+    color: #ffffff;
+}
+
+QPushButton#StructFilterButton:checked {
+    background-color: rgba(18, 90, 125, 170);
+    border: 1px solid #33d6ff;
+    color: #ffffff;
+}
+
+/* "1,284 STRUCTURES" count bar */
+#StructCountLabel {
+    color: #dcebf5;
+    font-size: 14px;
+}
+
+/* endregion */
