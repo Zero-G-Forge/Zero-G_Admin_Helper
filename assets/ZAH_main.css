@@ -999,6 +999,18 @@ QCheckBox#SettingsCheckBox {
     font-size: 13px;
 }
 
+/* Download progress bar: thin dark track with a cyan fill (same look as the backup disk bar) */
+QProgressBar#SettingsProgressBar {
+    background-color: rgba(5, 14, 24, 200);
+    border: none;
+    border-radius: 5px;
+}
+
+QProgressBar#SettingsProgressBar::chunk {
+    background-color: #2fa8e0;
+    border-radius: 5px;
+}
+
 /* endregion */
 
 /* region: Multi-Server Page */

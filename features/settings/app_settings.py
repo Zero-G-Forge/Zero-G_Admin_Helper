@@ -23,6 +23,11 @@ APP_SETTINGS_FILE = os.path.join(DATA_DIR, "app_settings.json")
 ## contacts the server unless the owner turns it on.
 DEFAULT_SETTINGS = {
     "bridge_auto_connect": False,
+
+    ## SERVER FILES (Settings page): when the last download finished (ISO text with time zone, "" = never)
+    ## and the local folder it went to ("" = none yet). Written by the download button.
+    "server_files_last_pulled": "",
+    "server_files_local_folder": "",
 }
 
 # endregion
