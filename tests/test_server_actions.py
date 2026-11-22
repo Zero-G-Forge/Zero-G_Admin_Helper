@@ -540,3 +540,18 @@ def test_alerts_page_moderator_cannot_ban(monkeypatch, tmp_path):
     cockpit.close()
 
 # endregion
+
+
+# region Backups Page
+
+def test_backups_page_stays_locked_with_reasons():
+    from features.backups import backups_page
+    qapp = get_qapp()
+    page = backups_page.create_page()
+    assert not page.btn_preview.isEnabled() and not page.btn_restore.isEnabled()
+    assert page.btn_restore.toolTip() == backups_page.RESTORE_TIP
+    assert page.lbl_snapshots_empty.text() == backups_page.NO_SNAPSHOTS_TEXT
+    page.deleteLater()
+    qapp.processEvents()
+
+# endregion

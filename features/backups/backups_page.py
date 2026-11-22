@@ -5,6 +5,9 @@
 ## BACKUP SCHEDULE and DISK USAGE on the right.
 ## Layout only for now: no snapshots are read yet, so every panel shows "nothing yet".
 ## RESTORE SELECTED changes the live server, so it stays locked until Ray OKs that step.
+## Checked (Nov 22, 2026): the bridge has no snapshot, backup or restore command (save and backup answer
+## not_available), and a consistent copy or restore of a save needs the server stopped, which is a restart.
+## So PREVIEW and RESTORE stay off with RESTORE_TIP, and the panels say why (see NO_SNAPSHOTS_TEXT).
 ## ==========================================
 
 # region Imports
@@ -26,6 +29,12 @@ RESTORE_SCOPES = ["PLAYER", "STRUCTURE", "PLAYFIELD", "FULL SERVER"]
 
 ## Tooltip for every button that isn't wired up yet.
 LATER_TIP = "Coming in a later step."
+
+## Why PREVIEW and RESTORE stay off, and what the empty panels say.
+RESTORE_TIP = ("Not possible while the server runs: the bridge has no snapshot or restore command, and restoring "
+               "a save needs the server stopped (a restart).")
+NO_SNAPSHOTS_TEXT = "No snapshots: the bridge cannot list or make server backups while the server runs."
+NO_SCHEDULE_TEXT = "No backup schedule: backups are made on the server machine, outside ZAH."
 
 # endregion
 
@@ -55,7 +64,8 @@ class BackupsPage(QWidget):
 
         ## Each snapshot will be a row with its date, size, a FULL or PARTIAL tag and VERIFIED.
         snapshots_card, snapshots_layout = make_card("SNAPSHOTS")
-        self.lbl_snapshots_empty = QLabel("No snapshots yet.")
+        self.lbl_snapshots_empty = QLabel(NO_SNAPSHOTS_TEXT)
+        self.lbl_snapshots_empty.setWordWrap(True)
         self.lbl_snapshots_empty.setObjectName("DashEmptyLabel")
         snapshots_layout.addWidget(self.lbl_snapshots_empty)
         snapshots_layout.addStretch()
@@ -127,7 +137,7 @@ class BackupsPage(QWidget):
         for restore_button in (self.btn_preview, self.btn_restore):
             restore_button.setFixedHeight(40)
             restore_button.setEnabled(False)
-            restore_button.setToolTip(LATER_TIP)
+            restore_button.setToolTip(RESTORE_TIP)
         button_row.addWidget(self.btn_preview, stretch=2)
         button_row.addWidget(self.btn_restore, stretch=3)
         restore_layout.addLayout(button_row)
@@ -151,7 +161,8 @@ class BackupsPage(QWidget):
         schedule_box_layout = QVBoxLayout(self.schedule_box)
         schedule_box_layout.setContentsMargins(12, 12, 12, 12)
         schedule_box_layout.setSpacing(10)
-        self.lbl_schedule_empty = QLabel("No backup schedule yet.")
+        self.lbl_schedule_empty = QLabel(NO_SCHEDULE_TEXT)
+        self.lbl_schedule_empty.setWordWrap(True)
         self.lbl_schedule_empty.setObjectName("DashEmptyLabel")
         schedule_box_layout.addWidget(self.lbl_schedule_empty)
 

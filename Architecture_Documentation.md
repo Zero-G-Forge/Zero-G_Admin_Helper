@@ -142,7 +142,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `users` | USERS | `features.users.users_page` | `UsersPage` | Live add, edit, and remove through the login service; Live file editing checkbox is layout only |
 | `ecf_editor` | ECF EDITOR | `features.ecf_editor.ecf_editor_page` | `EcfEditorPage` | Lists and opens every `.ecf` from the downloaded server files (`load_server_files`); empty state when nothing is downloaded |
 | `pda_editor` | PDA EDITOR | `features.pda_editor.pda_editor_page` | `PdaEditorPage` | Lists and opens the downloaded PDA `.yaml` / `.csv` files, chapters with English names; empty state when nothing is downloaded |
-| `backups` | BACKUPS | `features.backups.backups_page` | `BackupsPage` | Layout; restore is locked |
+| `backups` | BACKUPS | `features.backups.backups_page` | `BackupsPage` | Layout; PREVIEW and RESTORE locked with the reason (no bridge backup command; a restore needs the server stopped) |
 | `bp_editor` | BP EDITOR | `features.bp_editor.bp_editor_page` | `LibraryPage` (blueprints tab) | Layout; blueprint data is not loaded yet |
 | `items` | ITEMS | `features.items.items_page` | `LibraryPage` (items tab) | Reads items from the downloaded server files on opening (`load_server_files`), with item pictures; empty state when nothing is downloaded |
 | `servers` | SERVERS | `features.multi_server.multi_server_page` | `MultiServerPage` | Layout; shown only with two or more connected servers |
@@ -1006,6 +1006,8 @@ Page wiring:
 | Alerts | Details, EVIDENCE TIMELINE | the same reads (current flags only, so BEFORE and DELTA show `--`) | no |
 | Alerts | ACK | none: hides the alert on this PC while ZAH runs | no |
 | Alerts | COMMAND PREVIEW, PREVIEW BAN | `con:ban <entityId> <1h\|1d\|7d\|30d\|1y>` | yes |
+| Backups | SNAPSHOTS, BACKUP SCHEDULE, DISK USAGE | none: the bridge has no snapshot or backup listing (`backup` answers `not_available`) | panels say why |
+| Backups | PREVIEW, RESTORE SELECTED | none: restoring a save needs the server stopped, which is a restart | stays disabled |
 
 ## Planned / Not Yet Wired
 

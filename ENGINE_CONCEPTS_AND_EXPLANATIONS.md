@@ -509,6 +509,10 @@ Acknowledging an alert is a note for the admin, not a change to the game. It onl
 
 The game reports how a player looks now, not how they looked a minute ago. Showing a change would need ZAH to keep its own history, so those columns stay `--` for now.
 
+## Why Backups Stay Locked
+
+A save folder is many files that the game keeps writing while it runs. Copying it in the middle can catch some files old and some new, and putting an old copy back while the game runs would be overwritten or break the save. Both need the server stopped first, and stopping it is a restart, which ZAH does not do. So the BACKUPS page explains this instead of offering buttons that cannot work.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free
