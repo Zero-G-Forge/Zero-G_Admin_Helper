@@ -161,6 +161,65 @@ def _draw_users(painter, color):
     painter.drawEllipse(QRectF(14, 8, 20, 20))
     painter.drawPie(QRectF(4, 30, 40, 36), 0, 180 * 16)
 
+def _draw_world(painter, color):
+    ## Globe: a ring with one meridian oval and one equator line
+    painter.setPen(_make_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(8, 8, 48, 48))
+    painter.drawEllipse(QRectF(22, 8, 20, 48))
+    painter.drawLine(QPointF(8, 32), QPointF(56, 32))
+
+def _draw_library(painter, color):
+    ## Three books standing side by side
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(color))
+    painter.drawRoundedRect(QRectF(8, 12, 12, 44), 2, 2)
+    painter.drawRoundedRect(QRectF(24, 8, 12, 48), 2, 2)
+    painter.save()
+    painter.translate(44, 14)
+    painter.rotate(12)
+    painter.drawRoundedRect(QRectF(0, 0, 12, 42), 2, 2)
+    painter.restore()
+
+def _draw_ecf_editor(painter, color):
+    ## Page with text lines and a folded corner
+    painter.setPen(_make_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPolygon(QPolygonF([QPointF(12, 6), QPointF(40, 6), QPointF(52, 18), QPointF(52, 58), QPointF(12, 58)]))
+    for y in (28, 38, 48):
+        painter.drawLine(QPointF(20, y), QPointF(44, y))
+
+def _draw_backups(painter, color):
+    ## Database cylinder: top oval, sides and two bands
+    painter.setPen(_make_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawEllipse(QRectF(10, 6, 44, 14))
+    painter.drawLine(QPointF(10, 13), QPointF(10, 51))
+    painter.drawLine(QPointF(54, 13), QPointF(54, 51))
+    painter.drawArc(QRectF(10, 24, 44, 14), 180 * 16, 180 * 16)
+    painter.drawArc(QRectF(10, 44, 44, 14), 180 * 16, 180 * 16)
+
+def _draw_bp_editor(painter, color):
+    ## Blueprint: a square sheet with a grid
+    painter.setPen(_make_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(8, 8, 48, 48), 4, 4)
+    painter.setPen(_make_pen(color, 3))
+    for v in (24, 40):
+        painter.drawLine(QPointF(v, 10), QPointF(v, 54))
+        painter.drawLine(QPointF(10, v), QPointF(54, v))
+
+def _draw_items(painter, color):
+    ## Cube: top diamond and two side faces
+    painter.setPen(_make_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPolygon(QPolygonF([QPointF(32, 6), QPointF(56, 18), QPointF(32, 30), QPointF(8, 18)]))
+    painter.drawLine(QPointF(8, 18), QPointF(8, 46))
+    painter.drawLine(QPointF(56, 18), QPointF(56, 46))
+    painter.drawLine(QPointF(32, 30), QPointF(32, 58))
+    painter.drawLine(QPointF(8, 46), QPointF(32, 58))
+    painter.drawLine(QPointF(56, 46), QPointF(32, 58))
+
 # endregion
 
 
@@ -180,6 +239,12 @@ ICON_DRAWERS = {
     "alerts": _draw_alerts,
     "bans_audit": _draw_bans_audit,
     "users": _draw_users,
+    "world": _draw_world,
+    "library": _draw_library,
+    "ecf_editor": _draw_ecf_editor,
+    "backups": _draw_backups,
+    "bp_editor": _draw_bp_editor,
+    "items": _draw_items,
 }
 
 # endregion

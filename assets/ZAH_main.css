@@ -53,6 +53,26 @@ QLabel {
     border: none;
 }
 
+/* The nav column scrolls: its inside and the scroll area's viewport stay see-through too */
+#NavColumnInner, #NavColumn > QWidget {
+    background-color: transparent;
+}
+
+/* Thin cyan scroll bar, only shown when an open group needs it */
+#NavColumn QScrollBar:vertical {
+    background: transparent;
+    width: 6px;
+}
+
+#NavColumn QScrollBar::handle:vertical {
+    background: rgba(51, 214, 255, 90);
+    border-radius: 3px;
+}
+
+#NavColumn QScrollBar::add-line:vertical, #NavColumn QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+
 #ContentPanel {
     background-color: rgba(8, 20, 34, 205);
     border: 1px solid rgba(40, 170, 215, 110);
@@ -146,6 +166,42 @@ QPushButton#NavButton:checked {
     background-color: rgba(18, 90, 125, 150);
     border: 1px solid #33d6ff;
     color: #a8ecff;
+}
+
+/* Smaller buttons inside a fold-out nav group (under WORLD, LIBRARY, SETTINGS) */
+QPushButton#NavSubButton {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: #a3b6c6;
+    font-family: "Inter", "DejaVu Sans";
+    font-size: 13px;
+    font-weight: 500;
+    text-align: left;
+    padding-left: 14px;
+}
+
+QPushButton#NavSubButton:hover {
+    background-color: rgba(20, 60, 90, 110);
+    border: 1px solid rgba(51, 214, 255, 60);
+    color: #dcebf5;
+}
+
+QPushButton#NavSubButton:checked {
+    background-color: rgba(18, 90, 125, 150);
+    border: 1px solid #33d6ff;
+    color: #a8ecff;
+}
+
+QPushButton#NavSubButton[compact="true"] {
+    font-size: 11px;
+}
+
+/* The fold arrow on the right of a group title */
+#NavGroupArrow {
+    color: #8fa6b8;
+    font-size: 14px;
+    background: transparent;
 }
 
 /* ALERTS & ANTI-CHEAT: smaller text so the label fits beside its badge */

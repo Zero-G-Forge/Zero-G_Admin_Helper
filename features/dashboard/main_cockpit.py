@@ -10,7 +10,7 @@ import sys
 from features.paths import asset_path
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
-    QPushButton, QButtonGroup, QSizePolicy, QMessageBox, QApplication
+    QPushButton, QButtonGroup, QSizePolicy, QMessageBox, QApplication, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer, QTime, QSize, pyqtSignal
 from PyQt6.QtGui import QPainter, QPixmap, QFont
@@ -117,7 +117,23 @@ NAV_PAGES = [
     ("alerts", "ALERTS & ANTI-CHEAT"),
     ("bans_audit", "BANS & AUDIT"),
     ("users", "USERS"),
+    ("ecf_editor", "ECF EDITOR"),
+    ("backups", "BACKUPS"),
+    ("bp_editor", "BP EDITOR"),
+    ("items", "ITEMS"),
 ]
+
+## Fold-out nav groups: group key -> (title, page the title opens or None, child page keys).
+## A title with a page (SETTINGS) opens that page and folds its group out.
+## A title without a page (WORLD, LIBRARY) only folds its group in and out.
+NAV_GROUPS = {
+    "world": ("WORLD", None, ["structures", "playfields"]),
+    "library": ("LIBRARY", None, ["bp_editor", "items"]),
+    "settings": ("SETTINGS", "settings", ["alerts", "bans_audit", "users", "ecf_editor", "backups"]),
+}
+
+## Top-to-bottom order of the nav column. A key found in NAV_GROUPS becomes a fold-out group.
+NAV_LAYOUT = ["dashboard", "chat", "players", "factions", "world", "scheduler", "zerogbridge", "library", "settings"]
 
 ## Font used by every label (Inter on Zorin, DejaVu Sans as a fallback)
 CORE_FONT_FAMILIES = ["Inter", "DejaVu Sans"]
@@ -454,10 +470,18 @@ class MainCockpit(QMainWindow):
         """Builds the left nav column: one checkable button per page, DASHBOARD selected."""
         self.nav_column = None
         try:
-            self.nav_column = QFrame()
+            ## The nav column scrolls if an open group makes it taller than the window.
+            ## The scroll area is what goes into the window; the buttons sit on nav_inner inside it.
+            self.nav_column = QScrollArea()
             self.nav_column.setObjectName("NavColumn")
             self.nav_column.setFixedWidth(250)
-            self.left_column = QVBoxLayout(self.nav_column)
+            self.nav_column.setWidgetResizable(True)
+            self.nav_column.setFrameShape(QFrame.Shape.NoFrame)
+            self.nav_column.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.nav_inner = QFrame()
+            self.nav_inner.setObjectName("NavColumnInner")
+            self.nav_column.setWidget(self.nav_inner)
+            self.left_column = QVBoxLayout(self.nav_inner)
             self.left_column.setObjectName("LeftColumnLayout")
             self.left_column.setContentsMargins(0, 0, 0, 0)
             self.left_column.setSpacing(8)
@@ -466,12 +490,21 @@ class MainCockpit(QMainWindow):
             self.nav_button_group = QButtonGroup(self)
             self.nav_button_group.setExclusive(True)
 
-            ## One button per entry in NAV_PAGES. A button that fails to build is skipped.
-            for page_key, page_text in NAV_PAGES:
-                btn = self._make_nav_button(page_key, page_text)
+            ## Fold-out group bookkeeping: the box holding each group's buttons, each group's
+            ## title button and arrow, and which group each child page belongs to.
+            self.nav_group_boxes = {}
+            self.nav_group_arrows = {}
+            self.nav_child_group = {}
+
+            ## One button (or fold-out group) per entry in NAV_LAYOUT. A button that fails to build is skipped.
+            for item_key in NAV_LAYOUT:
+                if item_key in NAV_GROUPS:
+                    self._add_nav_group(item_key)
+                    continue
+                btn = self._make_nav_button(item_key, self._page_title(item_key))
                 if btn is None:
                     continue
-                self.nav_buttons[page_key] = btn
+                self.nav_buttons[item_key] = btn
                 self.nav_button_group.addButton(btn)
                 self.left_column.addWidget(btn)
 
@@ -484,25 +517,30 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to build nav column: {e}")
 
-    def _make_nav_button(self, page_key, page_text):
-        """Builds one nav button. ALERTS & ANTI-CHEAT also gets the red alert badge."""
+    def _make_nav_button(self, page_key, page_text, is_sub=False, opens_page=True):
+        """Builds one nav button. ALERTS & ANTI-CHEAT also gets the red alert badge.
+        is_sub makes the smaller button used inside a fold-out group.
+        opens_page=False is for group titles like WORLD that only fold in and out."""
         try:
 
             ## '&' is doubled so Qt shows it instead of making a shortcut key;
             ## the leading spaces open a gap between the icon and the text
             btn = QPushButton("   " + page_text.replace("&", "&&"))
-            btn.setObjectName("NavButton")
-            btn.setCheckable(True)
+
+            ## Sub buttons are shorter, with smaller text and icon (styled by NavSubButton in ZAH_main.css).
+            btn.setObjectName("NavSubButton" if is_sub else "NavButton")
+            btn.setCheckable(opens_page)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFixedHeight(50)
+            btn.setFixedHeight(40 if is_sub else 50)
             btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             if build_nav_icon is not None:
                 btn.setIcon(build_nav_icon(page_key))
-                btn.setIconSize(QSize(22, 22))
+                btn.setIconSize(QSize(18, 18) if is_sub else QSize(22, 22))
 
             ## The lambda passes this button's page key to _on_nav_clicked.
             ## key=page_key locks in the value for each button inside the loop.
-            btn.clicked.connect(lambda checked, key=page_key: self._on_nav_clicked(key))
+            if opens_page:
+                btn.clicked.connect(lambda checked, key=page_key: self._on_nav_clicked(key))
 
             if page_key == "alerts":
 
@@ -524,6 +562,82 @@ class MainCockpit(QMainWindow):
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to build nav button {page_text}: {e}")
             return None
+
+    def _add_nav_group(self, group_key):
+        """Adds one fold-out group: a title button with an arrow, and a box of smaller buttons under it."""
+        try:
+            group_title, title_page, child_keys = NAV_GROUPS[group_key]
+
+            ## Title button. SETTINGS opens its own page; WORLD and LIBRARY only fold.
+            if title_page is not None:
+                btn_title = self._make_nav_button(title_page, group_title)
+            else:
+                btn_title = self._make_nav_button(group_key, group_title, opens_page=False)
+            if btn_title is None:
+                return
+            if title_page is not None:
+                self.nav_buttons[title_page] = btn_title
+                self.nav_button_group.addButton(btn_title)
+
+            ## Arrow on the right of the title: ▸ folded in, ▾ folded out.
+            arrow_layout = QHBoxLayout(btn_title)
+            arrow_layout.setContentsMargins(0, 0, 14, 0)
+            arrow_layout.addStretch()
+            lbl_arrow = QLabel("▸")
+            lbl_arrow.setObjectName("NavGroupArrow")
+            lbl_arrow.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            arrow_layout.addWidget(lbl_arrow, alignment=Qt.AlignmentFlag.AlignVCenter)
+            self.nav_group_arrows[group_key] = lbl_arrow
+
+            ## A click on the title folds the group in or out.
+            btn_title.clicked.connect(lambda checked, key=group_key: self._toggle_nav_group(key))
+            self.left_column.addWidget(btn_title)
+
+            ## The box of child buttons, indented a little and hidden until the group is opened.
+            group_box = QWidget()
+            group_box.setObjectName("NavGroupBox")
+            group_box_layout = QVBoxLayout(group_box)
+            group_box_layout.setContentsMargins(18, 0, 0, 0)
+            group_box_layout.setSpacing(4)
+            for child_key in child_keys:
+                btn_child = self._make_nav_button(child_key, self._page_title(child_key), is_sub=True)
+                if btn_child is None:
+                    continue
+                self.nav_buttons[child_key] = btn_child
+                self.nav_button_group.addButton(btn_child)
+                self.nav_child_group[child_key] = group_key
+                group_box_layout.addWidget(btn_child)
+            group_box.setVisible(False)
+            self.nav_group_boxes[group_key] = group_box
+            self.left_column.addWidget(group_box)
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to build nav group {group_key}: {e}")
+
+    def _toggle_nav_group(self, group_key):
+        """Folds a nav group out if it is closed, or in if it is open."""
+        group_box = self.nav_group_boxes.get(group_key)
+        if group_box is None:
+            return
+        self._set_nav_group_open(group_key, not group_box.isVisible())
+
+    def _set_nav_group_open(self, group_key, is_open):
+        """Shows or hides a group's buttons and flips its arrow."""
+        try:
+            group_box = self.nav_group_boxes.get(group_key)
+            if group_box is None:
+                return
+
+            ## Only one group open at a time: opening one folds the others in, so the column stays short.
+            if is_open:
+                for other_key in self.nav_group_boxes:
+                    if other_key != group_key and self.nav_group_boxes[other_key].isVisible():
+                        self._set_nav_group_open(other_key, False)
+            group_box.setVisible(is_open)
+            lbl_arrow = self.nav_group_arrows.get(group_key)
+            if lbl_arrow is not None:
+                lbl_arrow.setText("▾" if is_open else "▸")
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to fold nav group {group_key}: {e}")
 
     # endregion
 
@@ -653,6 +767,17 @@ class MainCockpit(QMainWindow):
             self.active_page = page_key
             if page_key in self.nav_buttons:
                 self.nav_buttons[page_key].setChecked(True)
+
+            ## A page inside a closed group (e.g. USERS under SETTINGS) folds that group out, so its button shows.
+            child_group = getattr(self, "nav_child_group", {}).get(page_key)
+            if child_group is not None:
+                self._set_nav_group_open(child_group, True)
+
+            ## Scroll the nav so the picked button is in view. singleShot(0) waits until Qt has
+            ## laid out the newly opened group, otherwise the button's position isn't known yet.
+            picked_button = self.nav_buttons.get(page_key)
+            if picked_button is not None and isinstance(getattr(self, "nav_column", None), QScrollArea):
+                QTimer.singleShot(0, lambda: self.nav_column.ensureWidgetVisible(picked_button))
             if getattr(self, "lbl_content_header", None) is not None:
                 self.lbl_content_header.setText(self._page_title(page_key))
             print(f"[INFO] MainCockpit: Page selected: {self._page_title(page_key)}")
