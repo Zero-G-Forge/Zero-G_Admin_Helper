@@ -1,0 +1,330 @@
+# Zero-G Admin Helper — Engine Concepts and Explanations
+
+Plain-English notes for a new coder. This file explains **why** ZAH is built the way it is. Exact names and signatures live in `Architecture_Documentation.md`. Update both files when a concept, fix, or design rule changes.
+
+## Qt Widgets, Layouts, and Signals
+
+### The window is a tree of boxes
+
+A Qt program is a tree of **widgets** (on-screen pieces). A button, a label, a text box, and the main window are all widgets. A parent widget owns its children. When the parent is closed or deleted, the children go with it.
+
+**Analogy:** the main window is a house. Each page is a room. Labels and buttons are furniture in that room. Moving out of a room (switching pages) can throw the furniture away, so work that must outlive the room cannot be left sitting on the furniture.
+
+### Layouts place the furniture
+
+A **layout** decides where children sit as the window is resized:
+
+| Layout | Everyday meaning |
+| --- | --- |
+| `QVBoxLayout` | A vertical stack, top to bottom |
+| `QHBoxLayout` | A horizontal row, left to right |
+| `QGridLayout` | A table of rows and columns |
+| margins and spacing | The padding between pieces |
+
+ZAH almost never hard-codes pixel positions for a whole page. Cards and toolbars are packed into layouts so a resize still looks tidy.
+
+### Signals and slots are doorbells
+
+Qt objects talk through **signals** and **slots**:
+
+- A **signal** is a named announcement, such as `clicked` or `toggled`.
+- A **slot** is a method that runs when that announcement is heard.
+- `button.clicked.connect(self._on_connect_clicked)` wires the doorbell to the handler.
+
+**Analogy:** pressing a doorbell does not open the door by itself. It rings. A connected method is the person who hears the ring and decides what to do. The button does not need to know about the bridge, and the bridge does not need to know about the button.
+
+This matters for threads: a background thread must not paint widgets directly. It **emits a signal**. Qt delivers that signal on the window thread, where it is safe to fill a table or change a label.
+
+### Why a missing connection looks like a "broken" button
+
+If a button is clicked and nothing happens, the usual causes are:
+
+1. `connect` was never called.
+2. The button is disabled (`setEnabled(False)`), often with the tooltip `Coming in a later step.`
+3. The handler ran and failed inside a `try` / `except`, so the error is in the terminal log rather than on screen.
+
+## The Page Loader
+
+### Why each page is its own module
+
+ZAH keeps each page in `features/<name>/<name>_page.py` with a `create_page()` function. The cockpit only knows a short **page key** such as `players`. Three lookup tables turn that key into a module, a nav label, and an icon.
+
+**Analogy:** the nav column is a phone list. The key is a person's name. `PAGE_MODULES` is the phone book. The loader dials one number at a time. A wrong number must not bring down the whole switchboard.
+
+### Why a failed page shows a card instead of crashing
+
+`load_page` wraps the import and `create_page()` in `try` / `except`. On failure it returns an `ErrorCard` with a **RETRY** button. Retry reloads the module from disk, so a fix can be picked up without restarting ZAH.
+
+This is deliberate. One broken page is an error card. The header, nav, and every other page keep working.
+
+### Why ITEMS and BP EDITOR share one class
+
+Both nav buttons open `LibraryPage`, on different starting tabs. That avoids two copies of the search box, the tile grid, and the detail card. The page key still has its own loader entry, so each button can have its own icon and nav highlight.
+
+## Offscreen Testing
+
+### What "offscreen" means
+
+Qt needs a display system to build widgets. On a machine with no monitor session, or in a test script, the environment variable `QT_QPA_PLATFORM=offscreen` tells Qt to draw into memory instead of a visible window.
+
+**Analogy:** it is like taking a photograph in a closed box. The camera still takes the picture. Nobody has to see the shutter move.
+
+A typical check builds a `QApplication`, applies `ZAH_main.css` (so colours match the real program), resizes the widget, and calls `grab()` to save a screenshot.
+
+### Why this is used
+
+- It proves a page can be built without clicking through the whole boot and login path.
+- It catches layout mistakes (clipped text, overlapping cards, missing styles) before they reach a live session.
+- It does not need a running game server.
+
+Harmless warnings sometimes appear in this mode, such as a platform plugin that cannot raise a window. They do not mean the screenshot is wrong.
+
+### What offscreen tests must not do
+
+They may read local files for layout checks, but they must not be treated as the long-term data source. Item configs, PDA files, and images that the program will actually edit come from files **downloaded from the server**, not from a local base-game copy.
+
+## The ECF Format
+
+### Blocks are labeled boxes inside labeled boxes
+
+An Empyrion `.ecf` file is plain text. A block starts with `{` and a type name, and ends with `}`. Blocks may nest:
+
+```text
+{ +Item Id: 200, Name: MagnesiumOre, Ref: OreTemplate
+  Mass: 6.51, type: float, display: true, formatter: Kilogram
+  { Child 0
+    Class: Ranged
+  }
+}
+```
+
+`parse_ecf_blocks` turns that text into Python dictionaries:
+
+- `type` is the word after `{` (`Item`, `Child`, and others).
+- `header` holds the `Id`, `Name`, and `Ref` from the opening line.
+- `props` holds each body line as `{ "value": "6.51", "attrs": { "formatter": "Kilogram" } }`.
+- `children` holds nested blocks (weapon modes are a common case).
+
+**Analogy:** a recipe card (the item) can list ingredients (properties) and also include smaller cards for each cooking mode (children). A comment starting with `#` is a note in the margin and is ignored, unless the `#` sits inside quotes.
+
+### Ref is inheritance
+
+`Ref: OreTemplate` means "start from the template, then apply this block's own lines." `resolve_refs` walks that chain. The child's own keys win. The parser remembers `own_keys` so a stats window can mark inherited values as coming from the template.
+
+If a template is missing, or a chain loops back on itself, the walk stops. The item still loads with whatever was already found (fail soft for display, without crashing the page).
+
+### ShowUser hides templates
+
+`ShowUser: No` marks templates and hidden items that players never see. `load_items` skips those rows so the library shows what an admin would actually hand out, not the behind-the-scenes templates.
+
+The parser itself is **read-only**. It never writes a file.
+
+## Localization.csv and PDA.csv Name Lookups
+
+### Internal names versus English names
+
+Game files use a stable internal name such as `AdrenalineShot`. The name a player reads is stored in a CSV file, usually under a `KEY` column and an `English` column.
+
+`read_english_names(csv_path)` builds a dictionary from KEY to English text. The same helper serves both `Localization.csv` (items) and `PDA.csv` (chapter titles). If the file is missing, the lookup is empty and the internal name is shown instead.
+
+**Analogy:** the internal name is a product code on a warehouse shelf. The CSV is the printed label on the front of the box. The program always stores the product code, and it puts the label on the tile when the label exists.
+
+### Colour tags are stripped
+
+PDA and item text often includes style tags such as `[c]`, `[b]`, a six-digit colour, or `[-]`. Those tags are removed before the name is shown or searched, so a chapter list is readable and a search for the visible words still matches.
+
+## Syntax Highlighting
+
+### Colour is a map over the text, not a second copy
+
+`EcfHighlighter` and `PdaYamlHighlighter` are `QSyntaxHighlighter` subclasses. As each line is drawn, the highlighter paints ranges: braces, block types, keys, strings, numbers, keywords, and comments.
+
+**Analogy:** it is a transparent colour overlay on a printed page. The letters underneath do not change. If the overlay is wrong, the file is still the same file.
+
+The ECF code editor also draws line numbers and highlights the matching brace. That is why a missing `}` is easier to see before a later Validate step is wired.
+
+The PDA editor reuses the same code editor widget, with the YAML highlighter passed in, so both pages share line numbers and caret behaviour.
+
+## The Hex Tile Flow Grid
+
+### Tiles are buttons that paint themselves
+
+Each item is a `HexTile` (`QAbstractButton`). It paints a hex badge, initials or a short name, and a group colour (weapons, medical, and the other filters). Clicking a tile is the same idea as clicking a button: it emits a signal, and the detail card listens.
+
+`make_hex_pixmap` can also draw a standalone hex for the detail card and the stats window. Until server images are wired, that drawn hex is the picture.
+
+### Why the grid is a flow area, not a fixed table
+
+`TileFlowArea` is a scroll area that **reflows** tiles when the window is resized or filters change. Tiles that do not match the current search or filter group are hidden; the rest pack left to right and wrap.
+
+**Analogy:** it is a tray of magnets, not a spreadsheet. Widen the tray and more magnets sit on each row. A filter is a lid that covers some magnets without throwing them away.
+
+Filters are a union: more than one group can be checked at once. With none checked, every item is shown. Search matches display name, internal name, and id.
+
+## Fail-Closed Role Checks
+
+### The default answer is no
+
+A **fail-closed** check means "if anything is unclear, refuse." That is the opposite of fail-open ("if unsure, allow").
+
+Examples in ZAH:
+
+- An unknown or missing role has rank `-1`, below every real role.
+- An unknown **needed** role also returns false, so a typo in `has_role_at_least` cannot open a door.
+- The main window never opens unless login actually succeeded.
+- A missing developer key does not let the offline developer login read the failed-login log.
+- The login service checks permissions again, even if the Users page already did.
+
+**Analogy:** a locked door that stays locked when the key is missing, unreadable, or the wrong shape. It does not swing open just because the paperwork is messy.
+
+### Roles are a ladder, not four independent switches
+
+`moderator` < `admin` < `owner` < `developer`. Asking "is this user at least admin?" is a height check on that ladder. An owner passes an admin check. A moderator does not.
+
+The database will not store `developer`. That keeps the top role on the offline owner login for this computer (and on the developer key for a few service routes), instead of as a row anyone could add in the Users dialog.
+
+## Why Download-Edit-Upload Beats Live Editing
+
+### Two ways to change a server file
+
+| Mode | Everyday meaning | Risk |
+| --- | --- | --- |
+| Download, edit, upload | Make a local copy, edit it, then send it back on purpose | A typo stays on this computer until an upload is approved |
+| Live mode | The editor is pointed at the real file on the server | A typo can affect the live game as soon as it is saved |
+
+**Analogy:** download-edit-upload is taking a document to a desk, marking it up, and walking it back to the filing cabinet. Live mode is writing on the official copy while people are still using it.
+
+### Why the default is the desk copy
+
+- The operator can Validate, read a changes preview, and keep a backup before anything reaches the server.
+- The app can be used while the server is busy, and the local copy is still there if the connection drops.
+- Uploading is a clear, approved step, which matches the project rule that server changes need an explicit go-ahead.
+
+### Why live mode still exists, with brakes
+
+Some tasks need to see the file that is on the server right now. LIVE MODE is that path, but it is built to be hard to use by accident:
+
+- It always starts **off**, and that choice is never saved.
+- Only developers and owners get it by default. An owner can later grant a named admin or moderator the Live file editing permission.
+- A live save must pass three confirmations, including a check for online players and typing the file name.
+- The old file is backed up before the new one is written.
+- Until the bridge file commands and the database column exist, the switch stays disabled.
+
+## The Bridge and Disabled Server-Changing Buttons
+
+### The bridge is a narrow letterbox
+
+ZeroGBridge is a mod inside the game process. ZAH does not reach into the server's disks by itself. It sends one-line commands through a logged-in TCP connection, and it reads one-line JSON replies.
+
+**Analogy:** the game is a house. The bridge is a letterbox with a lock. ZAH can only post letters (commands) that the letterbox already knows how to sort. A new kind of letter, such as "please send these files," has to be added to the letterbox first, and that change has to be approved.
+
+Because the letterbox sits in the game, game reads and writes run on the **game thread**. The network thread only accepts the line and hands the work over. That prevents the game and the network from grabbing the same data at the same time.
+
+### Why so many buttons are disabled
+
+Many pages are laid out and styled, but the action buttons (kick, ban, upload, wipe, live save, and others) stay disabled with `Coming in a later step.`
+
+This is intentional:
+
+- A finished-looking button is easy to click by habit. A disabled button cannot send a command that was never meant to go out yet.
+- Several of those actions would change the live server. The project rule is that those changes wait for an explicit request.
+- The layout can be reviewed and adjusted without connecting the dangerous side first.
+
+Connect on the ZeroGBridge page is the safe exception: it logs in to the active server's bridge and does not send a game command by itself. Portal Reload and Rollback stay developer-only, because they swap the running bridge core.
+
+`save` and `backup` are also honest about their limits: the game has no save-only console command, and backups are not a bridge command. The catalog returns `not_available` rather than pretending those words do something.
+
+## Background Threads for Network Calls
+
+### The window thread must stay free
+
+The thread that draws the window is also the thread that handles clicks. If that thread waits on a network call, the window freezes: the clock stops, buttons do not depress, and the program looks "stuck."
+
+**Analogy:** the cashier should not leave the till to walk to the warehouse. Someone else walks to the warehouse and brings the box back. The cashier stays at the counter.
+
+ZAH uses `QThread` helpers for that walk:
+
+- `CommandPipe` keeps the bridge socket, logs in, and sends queued commands about half a second apart.
+- `FailedLoginFetcher` loads the failed-login table.
+- `UserTaskRunner` lists, saves, and deletes login users.
+- The portal uses a similar "run this call in the background" helper.
+
+Each helper emits a signal when the answer arrives. The page fills widgets in the connected slot, on the window thread.
+
+### Why the thread belongs to the app, not the page
+
+Switching nav pages **deletes** the old page widget. If a `QThread` is a child of that page, Qt deletes the thread too. Deleting a thread that is still running crashes the program with `QThread: Destroyed while thread is still running`.
+
+The fix is to parent those short network threads to the **application** (`QCoreApplication.instance()`), which lives until ZAH closes, and to call `deleteLater` when the thread emits `finished`. `CommandPipe` is parented to `MainCockpit` for the same reason: the cockpit outlives any one page.
+
+`processEvents()` is used only in small spots (for example, to let a "Checking login" label redraw before a short wait). It is not a substitute for a real background thread on longer calls.
+
+## Notable Past Fixes
+
+These are lessons already paid for in git history. Each one is written as "what broke" and "why the fix works."
+
+### Paths came from the wrong folder
+
+**What broke:** assets and `data/` were resolved from the current working directory. Launching ZAH from another folder made it miss its stylesheet, icon, and settings.
+
+**Why the fix works:** `features/paths.py` anchors every path to the folder that holds `ZAH.py`. The working directory can change; the app root does not.
+
+### A mid-load page switch crashed ZAH
+
+**What broke:** a background fetch was parented to the page. Changing pages destroyed the thread while it was still running.
+
+**Why the fix works:** fetch threads are owned by the application, then freed with `deleteLater` after `finished`. The page can go away; the thread is allowed to finish first. See commit `fa1809b`.
+
+### The signed-in role was not a real ladder
+
+**What broke:** some windows assumed a fixed label, or compared role names by hand. Offline login and portal tools needed a single rule.
+
+**Why the fix works:** `ROLE_ORDER` and `has_role_at_least` sit in one module. The offline owner login signs in as developer. The portal is admin and up. Reload and Rollback stay developer only. Unknown roles fail closed.
+
+### Users from one server must not see another server's accounts
+
+**What broke:** a shared user list could show every login. An admin needed a tighter scope.
+
+**Why the fix works:** owners and admins see only their own server's users. Admins may manage moderators only. The service enforces the same rule, so a crafted client request still fails. Roles are shown capitalized; the stored name stays lower-case.
+
+### Session tokens were easy to drop between windows
+
+**What broke:** a successful online login did not always hand the token to `MainCockpit`, so owner-only calls (failed logins, user management) had nothing to send.
+
+**Why the fix works:** the loader, the backup login path, and `set_signed_in_user` all carry the token through. Logout ends the token at the service and deletes the local session file.
+
+### "Keep me logged in" needed two different notes
+
+**What broke:** the developer login has no online token, and an online token must not be stored as if it were a password.
+
+**Why the fix works:** online remember stores a session token and checks `/session` at the next start. The developer path stores a signed remember note on this computer only, and logout clears it. Both paths fail closed if the note is missing, expired, or not valid.
+
+### Lockouts looked like ordinary wrong passwords
+
+**What broke:** a 429 from the service was easy to show as a generic failure, which invited more tries.
+
+**Why the fix works:** ZAH recognizes the lockout and shows `Too many tries, wait 15 minutes`. A dead service shows a different message and does not count as a wrong try.
+
+### Header widgets could be missing during a refresh
+
+**What broke:** a status refresh could run before header labels existed, or after a failed setup, leading to `None` errors.
+
+**Why the fix works:** those updates check that the widget exists before they write to it. A partial setup must not crash the shell.
+
+### The bridge catalog had to tell the truth about save and restart
+
+**What broke:** it is tempting to map the word `save` to a console command the game does not have, or to restart the host from a command that only stops the process.
+
+**Why the fix works:** `save` and `backup` return `not_available` with a clear message. `restart:<minutes>` warns players, then sends `saveandexit` with a value from 0 to 15. Starting the host again remains a panel job outside the bridge. The `cmds` catalog documents this so ZAH does not guess.
+
+### Faction rows were easy to mis-count
+
+**What broke:** earlier bridge versions could sort faction rows in a way that mixed NPC or dropped rows with player factions.
+
+**Why the fix works:** later cores classify a row by origin first, refresh the faction cache on the game thread, and treat the reserved faction id consistently, so the list ZAH will eventually show is the player-facing one.
+
+### Auto-connect must not surprise anyone
+
+**What broke:** a program that dials the server the moment it opens can touch a live game before the operator is ready.
+
+**Why the fix works:** `bridge_auto_connect` defaults to false and is stored only when the Settings checkbox is changed on purpose. The first start never connects by itself.
