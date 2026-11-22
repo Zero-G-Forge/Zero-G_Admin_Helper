@@ -14,10 +14,11 @@ from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushBut
 
 ## Guarded import: if online_login is missing, the section just says the log can't be loaded.
 try:
-    from features.login.online_login import fetch_failed_logins
+    from features.login.online_login import fetch_failed_logins, load_dev_key
 except Exception as e:
     print(f"[ERROR] BansAuditPage: Could not load online_login: {e}")
     fetch_failed_logins = None
+    load_dev_key = None
 
 # endregion
 
@@ -56,10 +57,13 @@ class FailedLoginFetcher(QThread):
     ## Sends back (fetch_result, entries). "object" lets it carry a list or None.
     fetch_done = pyqtSignal(str, object)
 
-    def __init__(self, session_token, limit, parent=None):
+    def __init__(self, session_token, limit, parent=None, dev_key=None):
         super().__init__(parent)
         self.session_token = session_token
         self.limit = limit
+
+        ## Only set for the offline developer login. Never printed.
+        self.dev_key = dev_key
 
     ## Never touch widgets in here: only the main thread may change the screen.
     ## Fails closed: any crash is sent back as "error", which the page shows as refused.
@@ -70,7 +74,7 @@ class FailedLoginFetcher(QThread):
             self.fetch_done.emit("error", None)
             return
         try:
-            fetch_result, entries = fetch_failed_logins(self.session_token, self.limit)
+            fetch_result, entries = fetch_failed_logins(self.session_token, self.limit, dev_key=self.dev_key)
         except Exception as e:
             print(f"[ERROR] FailedLoginFetcher: Fetch failed: {e}")
             fetch_result, entries = "error", None
@@ -179,8 +183,13 @@ class BansAuditPage(QWidget):
                 self._show_failed_message("Owners only.")
                 return
 
+            ## No token? The developer login can use the developer key instead, if this computer has one.
+            dev_key = None
+            if not session_token and user_has_role("developer") and load_dev_key is not None:
+                dev_key = load_dev_key()
+
             ## The offline developer login has no online token, and the service needs one.
-            if not session_token:
+            if not session_token and not dev_key:
                 self.btn_failed_refresh.setEnabled(False)
                 self._show_failed_message("Sign in online as an owner to see this log.")
                 return
@@ -197,7 +206,7 @@ class BansAuditPage(QWidget):
             ## The helper thread does the waiting, so the window keeps working. REFRESH is greyed until the answer comes back.
             self.lbl_failed_status.setText("Loading...")
             self.btn_failed_refresh.setEnabled(False)
-            self.fetch_thread = FailedLoginFetcher(session_token, FAILED_LOGIN_LIMIT, self)
+            self.fetch_thread = FailedLoginFetcher(session_token, FAILED_LOGIN_LIMIT, self, dev_key=dev_key)
             self.fetch_thread.fetch_done.connect(self._on_fetch_done)
 
             ## finished is QThread's own signal; deleteLater frees the thread once it has fully stopped.

@@ -49,6 +49,11 @@ MAX_BODY_BYTES = 4096
 ## They are cleared if the service restarts, so everyone signs in again (safe default).
 active_sessions = {}
 
+## Developer key for Ray's offline developer login (a ZAH-BOT Environment secret, never in code).
+## Empty or too short means it's switched off, so the route stays owners-only (fails closed).
+DEV_LOG_KEY = os.environ.get("ZAH_DEV_KEY", "")
+DEV_KEY_MIN_LEN = 32
+
 # endregion
 
 
@@ -89,6 +94,13 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
         session_info = check_session(token)
         return session_info["role"] if session_info else None
 
+    ## True only if the developer key is switched on and the sent key matches it exactly.
+    ## compare_digest takes the same time whether the key is close or not, so it can't be guessed one letter at a time.
+    def _dev_key_ok(self, sent_key):
+        if len(DEV_LOG_KEY) < DEV_KEY_MIN_LEN:
+            return False
+        return secrets.compare_digest(str(sent_key or ""), DEV_LOG_KEY)
+
     ## do_GET runs for every GET request; self.path is the address part, like "/health".
     def do_GET(self):
         try:
@@ -99,7 +111,7 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             print(f"[ERROR] LoginService: GET failed: {e}")
             self._send_json(500, {"status": "error", "message": "server error"})
-    
+
     ## do_POST runs for POST requests. ZAH sends {"username": ..., "password": ...} to /login.
     def do_POST(self):
         try:
@@ -143,7 +155,7 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
             ## /failed_logins: owners only. ZAH sends its login token, and the newest failed logins come back.
             ## 403 = not allowed. A bad token and a non-owner get the same reply, so nobody can test tokens.
             if self.path == "/failed_logins":
-                if self._token_role(login_data.get("token")) != "owner":
+                if self._token_role(login_data.get("token")) != "owner" and not self._dev_key_ok(login_data.get("dev_key")):
                     self._send_json(403, {"status": "error", "message": "not allowed"})
                     return
                 self._send_json(200, {"status": "ok", "entries": list_failed_logins(login_data.get("limit", 50))})

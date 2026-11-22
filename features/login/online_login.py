@@ -11,6 +11,9 @@ import json
 import urllib.request
 import urllib.error
 
+## data_path gives the full path to a file in ZAH's data/ folder
+from features.paths import data_path
+
 # endregion
 
 
@@ -24,6 +27,9 @@ LOGIN_SERVICE_URL = os.environ.get(
 
 ## How many seconds to wait for the service before giving up.
 LOGIN_TIMEOUT_SEC = 5
+
+## Ray's developer key file, in data/ (git-ignored and never bundled in builds).
+DEV_KEY_FILE = "dev_key.txt"
 
 # endregion
 
@@ -99,12 +105,12 @@ def check_saved_session(session_token):
         print("[WARNING] OnlineLogin: Service sent an unexpected session reply")
         return "denied", None
     except urllib.error.HTTPError as e:
-        
+
         ## 401 here means the saved login ran out or was removed; the user just signs in again.
         print(f"[INFO] OnlineLogin: Saved login no longer valid ({e.code})")
         return "denied", None
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-        
+
         ## No answer at all. The token is never logged, only the reason.
         print(f"[ERROR] OnlineLogin: Service unreachable for saved login: {e}")
         return "offline", None
@@ -130,14 +136,32 @@ def end_online_session(session_token):
         print(f"[WARNING] OnlineLogin: Could not end the saved login on the service: {e}")
         return False
 
+## Reads the developer key, or returns None if there's no key file (every install except Ray's).
+## The key itself is never printed.
+def load_dev_key():
+    try:
+        with open(data_path(DEV_KEY_FILE), "r", encoding="utf-8") as file_handle:
+            dev_key = file_handle.read().strip()
+        return dev_key or None
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        print(f"[ERROR] OnlineLogin: Could not read the developer key file: {e}")
+        return None
+
 ## Asks the service for the newest failed logins (owners only).
 ## Returns the same kind of tuple as the others:
 ##   ("ok", [ {"failed_at", "username", "source", "reason"}, more entries ])  list received
 ##   ("denied", None)                                                        not an owner, or the token ran out
 ##   ("offline", None)                                                       service could not be reached
 
-def fetch_failed_logins(session_token, limit=50):
-    fetch_body = json.dumps({"token": session_token, "limit": limit}).encode("utf-8")
+def fetch_failed_logins(session_token, limit=50, dev_key=None):
+
+    ## The developer login has no token, so it sends its key instead. The service accepts either.
+    fetch_fields = {"token": session_token, "limit": limit}
+    if dev_key:
+        fetch_fields["dev_key"] = dev_key
+    fetch_body = json.dumps(fetch_fields).encode("utf-8")
     fetch_request = urllib.request.Request(
         LOGIN_SERVICE_URL.rstrip("/") + "/failed_logins",
         data=fetch_body,
@@ -156,12 +180,12 @@ def fetch_failed_logins(session_token, limit=50):
         print("[WARNING] OnlineLogin: Service sent an unexpected failed login reply")
         return "denied", None
     except urllib.error.HTTPError as e:
-        
+
         ## 403 means this login is not an owner, or its token ran out. The token is never logged.
         print(f"[WARNING] OnlineLogin: Service refused the failed login list ({e.code})")
         return "denied", None
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
-        
+
         ## No answer at all (no internet, service down).
         print(f"[ERROR] OnlineLogin: Service unreachable for failed login list: {e}")
         return "offline", None
