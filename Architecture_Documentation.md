@@ -25,6 +25,7 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 - Commands that would change the server (kick, ban, upload, live save, restart, and similar) stay **disabled** in the user interface, with the tooltip `Coming in a later step.`, until they are wired and approved.
 - Secrets (auth token, passwords, database URL, developer key, session tokens) are never printed, logged, or committed. Local secrets live under `data/`, which is git-ignored.
 - New bridge commands need explicit approval before they are written. The read-only `files:` commands (`files:info`, `files:list`, `files:get`) were approved and added in core 1.6.1. They can read, never write.
+- Core 1.6.2 adds the first two **write** commands, approved by Ray on Nov 22, 2026 ("make the changes on your own as long as the server itself doesn't need to be restarted"): `files:put` (replace one existing editable file, backup first) and `coreupload:put` (place a new core in `Updates/`). Both are core-only, so they install with a hot reload and never need a restart. See **Server write commands** below.
 - The server files download is **read-only** on both sides: the bridge only opens files with read access, and ZAH never deletes anything on this PC.
 
 ## Folder Layout
@@ -333,7 +334,7 @@ Empyrion loads `ZeroGBridge.Loader.ZeroGBridgeLoader`, which implements **API v2
 - It owns the TCP listener and authentication (`BridgeListener`, `AuthConfig`).
 - It hosts `CoreHost`, which loads the reloadable core (`ZeroGBridge.Core.dll`) in its own AppDomain.
 - Game-state work is marshalled onto the **game thread** (`GameThread`, `GameGateway`), never executed on the network thread.
-- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.1** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands). Core changes can be applied with `hot:reload` when that path is used.
+- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.2** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, and the 1.6.2 write commands `files:put` and `coreupload:`). The live server ran 1.6.1 until 1.6.2 is dropped into `Updates/` and reloaded. Core changes can be applied with `hot:reload` when that path is used.
 
 The auth token is read from `ZeroGBridge.json` only and is never written into log lines.
 
@@ -376,6 +377,9 @@ Handled in `ZeroGBridge/Network/CommandDispatcher.cs` and `ApiCommands.cs` after
 | `files:info` | | Read-only: which roots exist, scenario and save names, limits | no |
 | `files:list:<json>` | | Read-only: paths, sizes and times of the editable files in a root | no |
 | `files:get:<json>` | | Read-only: file bytes as base64, in chunks | no |
+| `files:put:<json>` | | 1.6.2: replace one existing editable file, backup first, in chunks | yes |
+| `coreupload:status` | | 1.6.2: what core files wait in `Updates/` (size, sha256) | no |
+| `coreupload:put:<json>` | | 1.6.2: place a new `ZeroGBridge.Core.dll` / `.pdb` in `Updates/`, in chunks | yes (loads only on `hot:reload`) |
 
 `save` and `backup` return `status: "not_available"`. The catalog states that backups are a ZAH job after the server has stopped, not a bridge command.
 
@@ -491,6 +495,48 @@ Safety checks, in order (`NormalizeRelativePath`, `ResolveUnderRoot`):
 8. The auth token is never read in this code. The dispatcher still refuses any command line that contains the token, and removes it from any reply.
 
 Checks: `ZeroGBridge/tests/ServerFilesTest` (run `dotnet run` in that folder) compiles the real `ServerFiles.cs` and runs 65 checks: listing, paging, chunk reassembly byte for byte, the batch budget, every refused path shape, symlinks, and reading while another handle has the file open for writing.
+
+### Server write commands (`files:put`, `coreupload:`)
+
+Core 1.6.2, `ZeroGBridge/Network/ServerFileWrites.cs`. Core-only (hot reload, no restart). `files:put` is routed from `ServerFiles.Handle`; `coreupload:` is routed in `CommandDispatcher.ProcessCommand` right after `files:`, before the trace line, because an upload is several large lines. The loader owns every `hot:` line, so a `hot:upload` name would need a loader change and a restart; the core uses its own `coreupload:` prefix instead.
+
+```text
+files:put:{"root":"scenario","path":"Content/Configuration/ItemsConfig.ecf","offset":0,"total":525000,"sha256":"<new file>","base_sha256":"<downloaded copy>","data":"<base64>","req_id":"w1"}
+coreupload:status
+coreupload:put:{"file":"pdb","offset":0,"total":49660,"sha256":"<file>","data":"<base64>","req_id":"c1"}
+coreupload:put:{"file":"dll","offset":0,"total":290304,"sha256":"<file>","data":"<base64>","req_id":"c2"}
+```
+
+How a chunked upload works:
+
+1. `offset` 0 starts (or restarts) the upload. Each next chunk must start where the last one ended; otherwise the reply is `bad_offset` with `expected_offset`.
+2. A chunk holds at most **128 KB** of raw bytes. A file is at most **16 MB** (`files:put`) or **8 MB** (`coreupload:`).
+3. Chunks go into the bridge's own `Uploads/` folder (next to `ZeroGBridge.json`), never into a game folder.
+4. When `total` bytes have arrived, the staged file must match `sha256`, or nothing is replaced (`hash_mismatch`).
+5. The old file is copied to `Backups/files/<root>/<path>.<yyyyMMdd-HHmmss>.bak` (or `Backups/core/`) **before** anything is replaced. The bridge never deletes a backup.
+6. The new file is copied next to the target as `<name>.zgbput.tmp` and swapped in with `File.Replace` in one step, so the game never sees a half-written file.
+
+Reply while chunks are arriving: `{"type":"FILES","cmd":"put","ok":true,"done":false,"received":N,"total":T,"next_offset":N}`. Final reply: `done:true`, `size`, `sha256`, `backup` (path relative to the mod folder). `coreupload` also returns `assemblyVersion` and `pendingDrop`.
+
+Extra rules for `files:put`:
+
+- Same path checks as `files:get` (roots, whitelisted folders, no `..`, no symlinks, must stay under the root).
+- Only `.ecf .yaml .yml .csv`. No pictures, and never `.json`, `.dll`, `.key`, `.db` or the token file.
+- Only an **existing** file can be replaced; new files are refused (`not_found`).
+- `base_sha256` must equal the hash of the file on the server now (checked at the first chunk and again just before the swap). If someone changed it since the download, the reply is `changed_on_server` with `current_sha256`, and nothing is written.
+
+Extra rules for `coreupload:`:
+
+- Only two fixed names can be written: `Updates/ZeroGBridge.Core.dll` and `Updates/ZeroGBridge.Core.pdb`.
+- The DLL must start with `MZ` and read as a .NET assembly named `ZeroGBridge.Core` (read with `AssemblyName.GetAssemblyName`, never loaded), or the reply is `bad_core`.
+- Send the `.pdb` first, then the `.dll`. The loader takes the pdb next to the dll when it imports it.
+- Nothing loads until `hot:reload` (unless `AutoReloadOnDrop` is turned on in `ZeroGBridge.json`; it is off). The loader still runs its own start-up check and keeps the old core if the new one fails.
+
+Kill switch: `"FileWritesEnabled": false` in `ZeroGBridge.json` turns both commands off at once (`writes_disabled`). It is read on every call, so it works without a restart. Missing means on. `files:info` now also returns `writeProtocol` (1) and `canWrite`.
+
+Error codes: `writes_disabled`, `not_ready` (mod folder unknown), `bad_request`, `unknown_root`, `root_unavailable`, `bad_path`, `not_allowed`, `not_found`, `too_large`, `bad_offset`, `hash_mismatch`, `changed_on_server`, `bad_core`, `write_failed`, `exception`.
+
+Checks: the same `ServerFilesTest` program also compiles `ServerFileWrites.cs` (103 checks in total): kill switch, not-ready, a chunked put with its backup, a second put keeping both backups, stale base hash, hash mismatch, new file, `.png`, `.json`, traversal, symlink, out-of-order chunk, size caps, the save root, a non-DLL and a wrong DLL refused, and the real Release core uploaded byte for byte with its version read back. The `serve` mode answers `coreupload:` too; set `ZGB_TEST_MODDIR` to a test folder for the write commands.
 
 ## Class and Method Signatures
 
@@ -716,6 +762,22 @@ public static class ServerFiles
     public static void RefreshRoots(IModApi api);             // game thread, throttled
     public static string NormalizeRelativePath(string rootName, string requested, out string error);
     public static string ResolveUnderRoot(string rootFull, string normalizedRelative, out string error);
+    internal static string RootFolderForWrite(string rootName);   // 1.6.2, used by ServerFileWrites
+}
+
+public static class ServerFileWrites                          // 1.6.2
+{
+    public const string CoreUploadPrefix = "coreupload:";
+    public const int WriteProtocolVersion = 1;
+    public const int MaxChunkBytes = 128 * 1024;
+    public const long MaxCoreBytes = 8L * 1024 * 1024;
+    public const string CoreFileName = "ZeroGBridge.Core.dll";
+    public static string ModDirectory;                        // set by CoreEntry.Start
+    public static bool WritesEnabled { get; }                 // ZeroGBridge.json FileWritesEnabled, default true
+    public static bool IsCoreUploadLine(string lower);
+    public static string HandlePut(JObject request, string reqId);     // files:put
+    public static string HandleCoreUpload(string line);                // coreupload:status, coreupload:put
+    public static string HashFile(string path);                        // sha256, lower-case hex
 }
 
 public static class ApiCommands
@@ -805,6 +867,7 @@ Still to do:
 - **Developers and owners** always have the toggle (once it is wired).
 - An owner or developer may grant **Live file editing** to an individual admin or moderator on the Users page. The checkbox is already in `UserEditDialog`, hidden when the role is Owner, and disabled until a new ZAH-DB column is added (a database change that must be applied with approval).
 - Live writes are server changes. The control stays disabled until that work is approved.
+- Bridge side done (core 1.6.2): `files:put` gives the backup-first, hash-checked replace that LIVE MODE and UPLOAD will use. The ZAH side (popups, role gate, sending) is the next step.
 
 ### ECF and PDA editor follow-through
 

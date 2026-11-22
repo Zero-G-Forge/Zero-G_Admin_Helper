@@ -248,6 +248,8 @@ Connect on the ZeroGBridge page is the safe exception: it logs in to the active 
 
 The window has glass in it. The bridge opens every file for **reading only** and in a mode that lets the game keep using the file at the same time. There is no command that writes, renames, or deletes. Putting changed files back on the server is a different, later step that needs its own approval.
 
+(Update, core 1.6.2: that later step now exists as a separate command, `files:put`. The read commands above still only read. See **Writing Files Back Through the Bridge** below.)
+
 ### Why the names on the slip are checked so hard
 
 A slip that says `../../somewhere/else` is an attempt to wander out of the shelf. So the bridge checks the slip in layers, like a security desk:
@@ -308,6 +310,43 @@ ZeroGBridge is two DLLs: a small loader that never changes, and a **core** that 
 - The same program can act as a stand-in bridge. ZAH's Python tests download from it, change a file, and download again to prove only the changed file comes down.
 - A second stand-in plays an "old bridge" to prove the fail-closed message.
 - The Settings page is created off-screen to check the button states: off with no connection, on when connected, off while downloading.
+
+## Writing Files Back Through the Bridge
+
+### The mail slot now has a return tray
+
+Core 1.6.2 adds two commands that write: `files:put` puts one edited file back, and `coreupload:put` puts a new bridge core into the `Updates/` folder. Both live in the core, so installing them is a hot reload, never a restart.
+
+### Why the old file is copied before anything else happens
+
+Think of replacing a page in a binder. First the old page goes into a labelled folder (`Backups/`, stamped with the date and time). Only then does the new page go in. If the new page turns out wrong, the old one is still there. The bridge never empties that folder.
+
+### Why the file arrives in pieces into a waiting room first
+
+A big file cannot fit in one message, so it is sent in pieces of up to 128 KB. The pieces collect in the bridge's own `Uploads/` waiting room, not next to the game's files. Only when every piece has arrived, and the fingerprint matches, is the file moved into place.
+
+### Fingerprints: sha256
+
+A sha256 is a 64-character fingerprint of a file's exact bytes. Change one letter and the fingerprint changes completely. ZAH sends two fingerprints:
+
+- **sha256** of the new file. If what arrived has a different fingerprint, a piece was lost or damaged, and nothing is replaced.
+- **base_sha256** of the copy ZAH downloaded. If the file on the server no longer has that fingerprint, someone else changed it in the meantime. Writing over it would silently throw their change away, so the bridge refuses and says "download it again first".
+
+### Why the swap is one step
+
+The new file is first written right next to the old one under a temporary name, then swapped in with a single operating-system call (`File.Replace`). The game either sees the whole old file or the whole new file, never half of each.
+
+### Why it is called coreupload and not hot:upload
+
+The loader, the small part that never changes without a restart, answers every line that starts with `hot:` itself. A new `hot:` word would mean changing the loader, and that means restarting the server. So the upload lives in the core under its own word, `coreupload:`, and writes into the same `Updates/` folder that `hot:reload` already reads from. The reload step is unchanged: the loader still checks the new core and keeps the old one if the check fails.
+
+### The very first time still needs hands
+
+A command can only be used once the core that contains it is running. So core 1.6.2 itself has to be dropped into `Updates/` by hand one last time. After that reload, later cores can travel through `coreupload:`.
+
+### The off switch
+
+`"FileWritesEnabled": false` in `ZeroGBridge.json` turns both write commands off. The bridge reads the setting on every call, so flipping it takes effect at once.
 
 ## Background Threads for Network Calls
 

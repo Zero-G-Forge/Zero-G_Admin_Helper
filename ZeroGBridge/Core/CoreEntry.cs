@@ -51,6 +51,9 @@ namespace ZeroGBridge
             throw new InvalidOperationException("test build: Start throws on purpose");
 #else
             _host = host;
+
+            // 1.6.2: files:put and coreupload: keep their staging, backups and Updates/ under the mod folder.
+            ServerFileWrites.ModDirectory = host.ModDirectory;
             Action<string> log = host.Log;
             ZgbLog.Sink = log;
             var gw = host.Gateway;

@@ -235,6 +235,27 @@ Safety, in order:
 6. The AuthToken is never read here; the `auth:` handshake already happened, and the dispatcher still refuses
    any line that contains the token.
 
+### `files:put` and `coreupload:` - write commands (1.6.2)
+
+**Core-only update** (hot-swappable on the 1.5.0 loader; no restart). Code: `Network/ServerFileWrites.cs`;
+self-checks in `tests/ServerFilesTest` (`dotnet run`).
+
+```text
+files:put:{"root":"scenario","path":"Content/Configuration/Items.ecf","offset":0,"total":1234,"sha256":"<new>","base_sha256":"<downloaded>","data":"<base64>"}
+coreupload:status
+coreupload:put:{"file":"pdb|dll","offset":0,"total":290304,"sha256":"<file>","data":"<base64>"}
+```
+
+- Chunks of at most 128 KB raw, starting at `offset` 0, each one following the last (`bad_offset` otherwise).
+- Staged in `<mod>/Uploads/`, checked against `sha256`, the old file copied to `<mod>/Backups/` first,
+  then swapped in with `File.Replace`. Backups are never deleted by the bridge.
+- `files:put`: same path checks as `files:get`, existing files only, `.ecf .yaml .yml .csv` only, 16 MB cap,
+  refused with `changed_on_server` when the server copy no longer matches `base_sha256`.
+- `coreupload:put`: only `Updates/ZeroGBridge.Core.dll` and `.pdb`, 8 MB cap, the DLL must be a .NET assembly
+  named `ZeroGBridge.Core`. Send the pdb first. It loads only on `hot:reload`. The name is not `hot:upload`
+  because the loader answers every `hot:` line, and a loader change needs a restart.
+- `"FileWritesEnabled": false` in `ZeroGBridge.json` turns both off (read on every call).
+
 ### Older commands
 
 `plys`, `gents[:<playfield>]`, `getplayfields[:all]`, `alert:{...}`, `add_player:`, and the `hot:` commands are unchanged.

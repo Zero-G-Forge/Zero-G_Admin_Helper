@@ -72,6 +72,10 @@ namespace ZeroGBridge
                 // (ServerFiles logs its own short summary lines instead).
                 if (ServerFiles.IsFilesLine(lowerCmd)) return ServerFiles.Handle(cleanCmd);
 
+                // 1.6.2: a new core sent through the bridge into Updates/ (Network/ServerFileWrites.cs).
+                // Same reason to skip the trace line: one upload is several large chunk lines.
+                if (ServerFileWrites.IsCoreUploadLine(lowerCmd)) return ServerFileWrites.HandleCoreUpload(cleanCmd);
+
                 // Live server console trace
                 ZgbLog.Write($"[ZGB] -INFO- Received command from ZAH: \"{cleanCmd}\"");
 

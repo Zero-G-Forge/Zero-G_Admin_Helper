@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Self-checks for Network/ServerFiles.cs. Runs on Linux or Windows with: dotnet run
+  <!-- Self-checks for Network/ServerFiles.cs and (1.6.2) Network/ServerFileWrites.cs. Runs on Linux or Windows with: dotnet run
        The real ServerFiles.cs is compiled here, next to small stand-ins for the game's interfaces (Stubs.cs),
        so no game files are needed. It builds temporary folders and deletes only those at the end. -->
   <PropertyGroup>
@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <Compile Include="../../Network/ServerFiles.cs" />
+    <Compile Include="../../Network/ServerFileWrites.cs" />
   </ItemGroup>
 
   <ItemGroup>

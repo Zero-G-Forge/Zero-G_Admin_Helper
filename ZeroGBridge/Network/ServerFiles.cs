@@ -7,6 +7,8 @@
 //   files:get:{"root":"scenario","items":[{"path":"<relative path>","offset":0}]}  -> base64 data, in chunks
 // Nothing here writes, renames or deletes anything. A file is only ever opened with
 // FileAccess.Read and FileShare.ReadWrite, so the running game is never blocked.
+// 1.6.2: files:put is routed from here to Network/ServerFileWrites.cs, which does the writing
+// (backup first, same path checks). This file itself still only reads.
 // Safety: two whitelisted roots, whitelisted sub-folders and file types, no ".." or absolute
 // paths, the resolved full path must stay under the root, no symlinks or junctions, size caps.
 // The bridge AuthToken is never read or printed here (the auth handshake already happened).
@@ -346,7 +348,10 @@ namespace ZeroGBridge
                     case "info": return HandleInfo(reqId);
                     case "list": return HandleList(request, reqId);
                     case "get": return HandleGet(request, reqId);
-                    default: return Fail(sub, reqId, "unknown_command", "Use files:info, files:list or files:get.");
+
+                    // 1.6.2: the one write command (Network/ServerFileWrites.cs).
+                    case "put": return ServerFileWrites.HandlePut(request, reqId);
+                    default: return Fail(sub, reqId, "unknown_command", "Use files:info, files:list, files:get or files:put.");
                 }
             }
             catch (Exception ex)
@@ -371,6 +376,9 @@ namespace ZeroGBridge
             if (token.Type == JTokenType.Integer || token.Type == JTokenType.Float) return Convert.ToString(((JValue)token).Value, CultureInfo.InvariantCulture);
             return null;
         }
+
+        // The same root folder for ServerFileWrites (files:put), which lives in its own file.
+        internal static string RootFolderForWrite(string rootName) => RootFolderFor(rootName);
 
         // Current root folder for a root name, or null when the game has not reported it.
         private static string RootFolderFor(string rootName)
@@ -415,11 +423,16 @@ namespace ZeroGBridge
                 ok = true,
                 protocol = ProtocolVersion,
                 readOnly = true,
+
+                // 1.6.2: files:put exists (writeProtocol) and whether ZeroGBridge.json allows it right now.
+                // readOnly stays true because list and get never write; ZAH checks canWrite before an upload.
+                writeProtocol = ServerFileWrites.WriteProtocolVersion,
+                canWrite = ServerFileWrites.WritesEnabled && !string.IsNullOrEmpty(ServerFileWrites.ModDirectory),
                 source,
                 scenario,
                 saveName = save,
                 roots,
-                limits = new { maxFileBytes = MaxFileBytes, replyBudgetBytes = ReplyBudgetBytes, maxItemsPerGet = MaxItemsPerGet, maxListPage = MaxListPage },
+                limits = new { maxFileBytes = MaxFileBytes, replyBudgetBytes = ReplyBudgetBytes, maxItemsPerGet = MaxItemsPerGet, maxListPage = MaxListPage, maxPutChunkBytes = ServerFileWrites.MaxChunkBytes },
                 extensions = AllowedExtensions
             });
         }

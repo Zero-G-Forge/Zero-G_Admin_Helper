@@ -24,4 +24,11 @@ namespace ZeroGBridge
     {
         public static void Write(string message) { }
     }
+
+    // Stand-in for the loader's AuthConfig: only the FileWritesEnabled switch is used by ServerFileWrites.cs.
+    public static class AuthConfig
+    {
+        public static bool WritesOff;
+        public static bool GetBool(string key, bool fallback) => key == "FileWritesEnabled" ? !WritesOff : fallback;
+    }
 }
