@@ -23,6 +23,7 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 - The main window never opens until a login succeeds (fail closed).
 - **Bridge auto-connect** is off by default and is stored in `data/app_settings.json`.
 - Commands that would change the server (kick, ban, upload, live save, restart, and similar) stay **disabled** in the user interface, with the tooltip `Coming in a later step.`, until they are wired and approved.
+- (Nov 22, 2026: every such button is now either wired through the ZAH Safety Flow, with preview, typed CONFIRM, a 15 s countdown, an audit line and a role check, or disabled with the real reason it cannot work. See **Live Pages and the Safety Flow**.)
 - Secrets (auth token, passwords, database URL, developer key, session tokens) are never printed, logged, or committed. Local secrets live under `data/`, which is git-ignored.
 - New bridge commands need explicit approval before they are written. The read-only `files:` commands (`files:info`, `files:list`, `files:get`) were approved and added in core 1.6.1. They can read, never write.
 - Core 1.6.2 adds the first two **write** commands, approved by Ray on Nov 22, 2026 ("make the changes on your own as long as the server itself doesn't need to be restarted"): `files:put` (replace one existing editable file, backup first) and `coreupload:put` (place a new core in `Updates/`). Both are core-only, so they install with a hot reload and never need a restart. See **Server write commands** below.
@@ -599,6 +600,7 @@ Core 1.6.3, `ZeroGBridge/Network/ChatLog.cs`. Core-only (hot reload, no restart)
 - `chat:recent` returns the newest 200 (`DefaultMax`). `chat:recent:{"since":N,"max":M}` returns lines with `seq` above N, at most M.
 - Reply: `{"type":"CHAT_LOG","ok":true,"count":C,"last_seq":S,"kept":500,"messages":[{"seq","time","channel","senderType","senderId","senderName","senderFactionId","recipientId","recipientFactionId","text"}]}`. `time` is UTC; `channel` is `Global`, `Faction`, `Alliance`, `SinglePlayer`, or `Server`.
 - Any other `chat:` word returns `ERROR` `unknown_command`; bad JSON returns `bad_json`.
+- Deployed (Nov 22, 2026, 12:11 CST) to Zero-G Forge Reborn with `coreupload:put` (pdb, then dll) and `hot:reload`, after a read-only `plys` check showed 0 of 53 players online. `hot:status` reports core `1.6.3` (`1.6.1122.1311_22d8705d`), loader still `1.5.0`, no restart. `chat:recent` answers `CHAT_LOG`. Ascension-Reborn still runs core 1.5.1 and has no `chat:recent`.
 - `seq` restarts at 1 after a reload. ZAH notices a `last_seq` below its own and starts over.
 - Sending chat does not use this command. It uses the existing `con:say`, `api:Request_InGameMessage_Faction` and `api:Request_InGameMessage_SinglePlayer`.
 - Harness only: `harness:chat|<channel>|<senderId>|<text>` adds a line in the test harness serve mode.
@@ -1099,18 +1101,19 @@ Still to do:
 - The bridge backs up the old file before writing the new one.
 - **Developers and owners** always have the toggle (once it is wired).
 - An owner or developer may grant **Live file editing** to an individual admin or moderator on the Users page. The checkbox is already in `UserEditDialog`, hidden when the role is Owner, and disabled until a new ZAH-DB column is added (a database change that must be applied with approval).
-- Live writes are server changes. The control stays disabled until that work is approved.
+- Live writes are server changes. The control stays disabled until that work is approved. (Approved and wired Nov 22, 2026.)
 - Bridge side done (core 1.6.2): `files:put` gives the backup-first, hash-checked replace that LIVE MODE and UPLOAD will use. The ZAH side (popups, role gate, sending) is the next step.
 - Done (Nov 22, 2026): the ZAH side is wired (see **Server uploads and LIVE MODE**). Tested only against the local harness. The Users page checkbox and the `/users/live_files` route are done too (Nov 22, 2026). Still open on Ray's side: deploy the updated login service and add the column.
 
 ### ECF and PDA editor follow-through
 
-Still to wire, all against **downloaded server files** (or LIVE MODE once approved):
+All wired (Nov 22, 2026), against **downloaded server files** (or LIVE MODE):
 
-- **VALIDATE**
-- A real diff in **Changes Preview**
-- **SAVE** to the local copy, with a backup of the previous file
+- **VALIDATE** (done, `edit_tools.validate_text`)
+- A real diff in **Changes Preview** (done, `edit_tools.make_diff`)
+- **SAVE** to the local copy, with a backup of the previous file (done, `edit_store`)
 - **UPLOAD TO SERVER** through ZeroGBridge, only with explicit approval (done Nov 22, 2026, see **Server uploads and LIVE MODE**)
+- **DOWNLOAD FOLDER** (done Nov 22, 2026, the read-only download)
 
 (Nov 22, 2026: every toolbar button is wired; none says `Coming in a later step.` any more.) The ECF and PDA pages can already open a local folder for layout and editor testing. That path is not the long-term data source.
 

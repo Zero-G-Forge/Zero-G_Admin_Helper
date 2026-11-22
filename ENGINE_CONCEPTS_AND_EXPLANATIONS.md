@@ -234,6 +234,8 @@ Connect on the ZeroGBridge page is the safe exception: it logs in to the active 
 
 `save` and `backup` are also honest about their limits: the game has no save-only console command, and backups are not a bridge command. The catalog returns `not_available` rather than pretending those words do something.
 
+(Update, Nov 22, 2026: the buttons are now wired. Each server change goes through the Safety Flow (see **The Safety Flow** below). The few that stay off, such as GOD MODE, MUTE, SET RELATION, RENAME, SET FACTION, SAVE, BACKUP and RESTORE, now say the real reason in their tooltip instead of `Coming in a later step.`)
+
 ## Downloading Server Files Through the Bridge
 
 ### What the download does, in one picture
