@@ -303,7 +303,7 @@ def ask_safety_flow(parent, title, command_preview, explanation=""):
 # region Server Action
 
 def run_server_action(widget, action_key, title, command, on_done=None, explanation="", want_types=WRITE_REPLY_TYPES,
-                      profile=None, preview=None):
+                      profile=None, preview=None, gap_sec=0.5):
     """Role check, Safety Flow, send in the background, audit line, then on_done(ok, reply_or_message).
     Returns False when it stopped before sending (no role, no bridge, cancelled)."""
     try:
@@ -332,7 +332,7 @@ def run_server_action(widget, action_key, title, command, on_done=None, explanat
             if on_done:
                 on_done(False, message)
 
-        ## A list of commands is sent one after another; the first refusal stops the rest.
+        ## A list of commands is sent one after another, gap_sec apart; the first refusal stops the rest.
         if isinstance(command, (list, tuple)):
             commands = list(command)
 
@@ -341,7 +341,7 @@ def run_server_action(widget, action_key, title, command, on_done=None, explanat
                 last_reply = None
                 for number, one_command in enumerate(commands):
                     if number:
-                        time.sleep(0.5)
+                        time.sleep(gap_sec)
                     last_reply = SEND_FUNCTION(one_command, want_types, profile)
                     if not reply_ok(last_reply):
                         return last_reply

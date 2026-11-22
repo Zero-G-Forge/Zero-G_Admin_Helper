@@ -477,6 +477,24 @@ The bridge gives the structure's centre point. Landing exactly there could put t
 
 The mod API can rename or destroy a structure, but it has no request to hand one to another faction. The button stays off and says why.
 
+## Playfields
+
+### Loaded versus known
+
+The server knows every playfield in the scenario (well over a thousand here), but only a few run at a time. ZAH counts all of them and makes cards only for the loaded ones, because only those can be stopped or restarted.
+
+### Why RESTART waits 20 seconds
+
+Stopping a playfield shuts down its own small server process. Loading it again before that process has gone could fail or be ignored, so ZAH waits 20 seconds between the two steps.
+
+### Why WIPE does not happen at once
+
+The game's `wipe` only marks what to clear. The clearing happens the next time the whole server starts. ZAH never restarts the server, so the wipe waits for Ray's next planned restart.
+
+### Why the old pfstats shorthand is not used
+
+Like `msg:`, the plain `pfstats:` shorthand only answers with an empty box. ZAH asks the real Eleon request `Request_Playfield_Stats` instead.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free

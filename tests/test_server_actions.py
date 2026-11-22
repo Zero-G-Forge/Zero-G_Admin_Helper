@@ -438,3 +438,56 @@ def test_structures_page_moderator_cannot_destroy(monkeypatch, tmp_path):
     cockpit.close()
 
 # endregion
+
+
+# region Playfields Page
+
+def test_playfields_page_cards_and_owner_actions(monkeypatch, tmp_path):
+    from features.playfields import playfields_page
+    monkeypatch.setattr(playfields_page, "RESTART_GAP_SEC", 0.0)
+    playfields = {"type": "PLAYFIELD_LIST", "playfields": [
+        {"name": "Akua", "playfieldType": "Planet", "loaded": True},
+        {"name": "Akua", "loaded": True, "source": "server"},
+        {"name": "Zero-G [Sun Right]", "playfieldType": "Space", "loaded": True},
+        {"name": "Omicron", "loaded": False}]}
+    players = {"type": "PLAYER_CACHE", "player_list": [{"name": "A", "status": "Online", "playfield": "Akua"}]}
+    stats = {"type": "API_RESULT", "status": "ok", "data": {"structs": 7}}
+    bridge = install(monkeypatch, tmp_path, {"getplayfields": playfields, "plys": players, "api:Request_Playfield_Stats": stats,
+                                             "con:": {"type": "CONSOLE_RESULT", "status": "ok"},
+                                             "loadpf:": {"type": "API_RESULT", "status": "ok"}})
+    qapp = get_qapp()
+    page = playfields_page.create_page()
+    cockpit = host(page, role="owner")
+    settle(qapp)
+    assert list(page.card_checks) == ["Akua", "Zero-G [Sun Right]"]
+    assert "3 known playfields" in page.lbl_map_empty.text() and "2 loaded" in page.lbl_map_empty.text()
+    assert not page.bulk_buttons["UNLOAD"].isEnabled()
+    page.card_checks["Zero-G [Sun Right]"].setChecked(True)
+    assert page.bulk_buttons["UNLOAD"].isEnabled() and "1 SELECTED" in page.lbl_bulk_title.text()
+    page._on_unload_clicked()
+    settle(qapp)
+    assert 'con:stoppf "Zero-G [Sun Right]"' in bridge.sent
+    page.card_checks["Akua"].setChecked(True)
+    page._on_restart_clicked()
+    settle(qapp)
+    assert "con:stoppf Akua" in bridge.sent and "loadpf:Akua|600" in bridge.sent
+    monkeypatch.setattr(playfields_page.QInputDialog, "getItem", staticmethod(lambda *a, **k: ("deposit", True)))
+    page._on_wipe_clicked()
+    settle(qapp)
+    assert "con:wipe Akua deposit" in bridge.sent
+    cockpit.close()
+
+
+def test_playfields_page_admin_is_not_owner(monkeypatch, tmp_path):
+    from features.playfields import playfields_page
+    install(monkeypatch, tmp_path, {"getplayfields": {"type": "PLAYFIELD_LIST", "playfields": [{"name": "Akua", "loaded": True}]},
+                                    "plys": {"type": "PLAYER_CACHE", "player_list": []}})
+    qapp = get_qapp()
+    page = playfields_page.create_page()
+    cockpit = host(page, role="admin")
+    settle(qapp)
+    page.card_checks["Akua"].setChecked(True)
+    assert not any(button.isEnabled() for button in page.bulk_buttons.values())
+    cockpit.close()
+
+# endregion

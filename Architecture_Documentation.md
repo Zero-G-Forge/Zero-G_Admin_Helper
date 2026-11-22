@@ -133,7 +133,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Live list, detail and inventory (read-only); MESSAGE, WARP, KICK, BAN, SAVE & APPLY and loadouts through the Safety Flow; GOD MODE not possible from the server |
 | `factions` | FACTIONS | `features.factions.factions_page` | `FactionsPage` | Read-only: factions, members, and alliances from the bridge; SET RELATION and RENAME not possible |
 | `structures` | STRUCTURES | `features.structures.structures_page` | `StructuresPage` | Live list from `gents` with type filters; TELEPORT TO and DESTROY through the Safety Flow; SET FACTION not possible |
-| `playfields` | PLAYFIELDS | `features.playfields.playfields_page` | `PlayfieldsPage` | Layout; UNLOAD, RESTART PLAYFIELD, and WIPE disabled |
+| `playfields` | PLAYFIELDS | `features.playfields.playfields_page` | `PlayfieldsPage` | Live summary and loaded-playfield cards; UNLOAD, RESTART PLAYFIELD, and WIPE on ticked cards (owner, Safety Flow); no star map (no coordinates) |
 | `scheduler` | SCHEDULER | `features.scheduler.scheduler_page` | `SchedulerPage` | Layout only |
 | `zerogbridge` | ZEROGBRIDGE | `features.zerogbridge.zerogbridge_page` | `ZeroGBridgePage` | Live connect and disconnect; portal button for admin and above |
 | `settings` | SETTINGS | `features.settings.settings_page` | `SettingsPage` | Auto-connect is live; the read-only server files download is live (needs a bridge with `files:`); LIVE MODE is layout only |
@@ -414,10 +414,10 @@ Handled in `ZeroGBridge/Network/CommandDispatcher.cs` and `ApiCommands.cs` after
 | `msgfaction:` | `factionmsg:` | Log line only: replies `Sent` but shows nothing in game | no (stub) |
 | `getcredits:` | `credits:` | Stub: always replies `credits: 0` | no (stub) |
 | `addcredits:` | `setcredits:` | Log line only: replies `Success` but changes nothing | no (stub) |
-| `getinv:` | `getinventory:` | Read a player's inventory | no |
+| `getinv:` | `getinventory:` | Stub: always an empty `items` list (use `api:Request_Player_GetInventory`) | no (stub) |
 | `getplayfields` | `pfs`, `playfields`, plus `:all` | Playfield list | no |
-| `pfstats:` | `playfieldstats:` | Playfield stats | no |
-| `pfents:` | `playfieldentities:` | Entities on a playfield | no |
+| `pfstats:` | `playfieldstats:` | Stub: always an empty `stats` box (use `api:Request_Playfield_Stats`) | no (stub) |
+| `pfents:` | `playfieldentities:` | Stub: always an empty `entities` list (use `gents:<playfield>` or `api:Request_Playfield_Entity_List`) | no (stub) |
 | `loadpf:` | `loadplayfield:` | Load a playfield | yes |
 | `api:<RequestName>` | short names from the catalog | Eleon request, optional JSON params | depends on the request |
 | `con:<line>` | `cmd:`, `exec:` | Dedicated console command | depends on the line |
@@ -945,7 +945,7 @@ Pages talk to the bridge through `features/shared/server_actions.py`, one short 
   3. `CONFIRM` typed by hand.
   4. A 15 second countdown (`SAFETY_DELAY_SEC`) with CANCEL.
   5. The role is checked again, the command is sent, and one line is added to `data/audit/server_actions.jsonl` (time, user, role, server, action, command, ok, detail). A cancel is audited too.
-- A list of commands (a loadout) is sent one by one, 0.5 s apart; the first refusal stops the rest.
+- A list of commands (a loadout, or several playfields) is sent one by one, `gap_sec` apart (0.5 s by default, 20 s for RESTART PLAYFIELD); the first refusal stops the rest.
 - Tests replace `SEND_FUNCTION` and `ask_safety_flow`, so no test reaches a server.
 
 Action roles:
@@ -995,6 +995,12 @@ Page wiring:
 | Structures | TELEPORT TO | `plys` to pick an online player, then `api:Request_Entity_Teleport` or `api:Request_Entity_ChangePlayfield` to 15 m above the structure | yes |
 | Structures | DESTROY | `api:Request_Entity_Destroy {"id":N}` (the playfield must be loaded) | yes |
 | Structures | SET FACTION | none: no mod API request changes a structure's faction | stays disabled |
+| Playfields | Summary (known, loaded, with players) | `getplayfields:all` and `plys` | no |
+| Playfields | Cards (type, players, structures) | `getplayfields:all`, `plys`, `api:Request_Playfield_Stats {"pstr":name}` (up to 12 cards) | no |
+| Playfields | UNLOAD | `con:stoppf <name>` per ticked card (names with spaces in double quotes) | yes |
+| Playfields | RESTART PLAYFIELD | `con:stoppf <name>`, 20 s wait, `loadpf:<name>\|600` | yes |
+| Playfields | WIPE | `con:wipe <name> <deposit\|poi\|terrain\|player\|all>`; the game applies it at the next server restart | yes |
+| Playfields | Star map | none: the bridge sends no sector coordinates | summary text only |
 
 ## Planned / Not Yet Wired
 
