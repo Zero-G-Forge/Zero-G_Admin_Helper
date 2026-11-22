@@ -495,6 +495,20 @@ The game's `wipe` only marks what to clear. The clearing happens the next time t
 
 Like `msg:`, the plain `pfstats:` shorthand only answers with an empty box. ZAH asks the real Eleon request `Request_Playfield_Stats` instead.
 
+## Alerts
+
+### Where alerts come from
+
+ZAH has no separate anti-cheat feed. It builds the queue from two things it can already read: the game's own cheat flags on each player (CRITICAL), and chat lines that contain a watch word (WARNING).
+
+### Why ACK stays on the PC
+
+Acknowledging an alert is a note for the admin, not a change to the game. It only hides the row in this ZAH window until ZAH closes.
+
+### Why BEFORE and DELTA are empty
+
+The game reports how a player looks now, not how they looked a minute ago. Showing a change would need ZAH to keep its own history, so those columns stay `--` for now.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free

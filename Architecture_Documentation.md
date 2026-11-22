@@ -137,7 +137,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `scheduler` | SCHEDULER | `features.scheduler.scheduler_page` | `SchedulerPage` | Layout only |
 | `zerogbridge` | ZEROGBRIDGE | `features.zerogbridge.zerogbridge_page` | `ZeroGBridgePage` | Live connect and disconnect; portal button for admin and above |
 | `settings` | SETTINGS | `features.settings.settings_page` | `SettingsPage` | Auto-connect is live; the read-only server files download is live (needs a bridge with `files:`); LIVE MODE is layout only |
-| `alerts` | ALERTS & ANTI-CHEAT | `features.alerts.alerts_page` | `AlertsPage` | Layout; PREVIEW BAN disabled |
+| `alerts` | ALERTS & ANTI-CHEAT | `features.alerts.alerts_page` | `AlertsPage` | Live queue from cheat flags and chat watch-word hits; ACK on this PC; PREVIEW BAN through the Safety Flow |
 | `bans_audit` | BANS & AUDIT | `features.bans_audit.bans_audit_page` | `BansAuditPage` | Failed-login table is live (owner, or developer with key) |
 | `users` | USERS | `features.users.users_page` | `UsersPage` | Live add, edit, and remove through the login service; Live file editing checkbox is layout only |
 | `ecf_editor` | ECF EDITOR | `features.ecf_editor.ecf_editor_page` | `EcfEditorPage` | Lists and opens every `.ecf` from the downloaded server files (`load_server_files`); empty state when nothing is downloaded |
@@ -1001,6 +1001,11 @@ Page wiring:
 | Playfields | RESTART PLAYFIELD | `con:stoppf <name>`, 20 s wait, `loadpf:<name>\|600` | yes |
 | Playfields | WIPE | `con:wipe <name> <deposit\|poi\|terrain\|player\|all>`; the game applies it at the next server restart | yes |
 | Playfields | Star map | none: the bridge sends no sector coordinates | summary text only |
+| Alerts | ALERT QUEUE (CRITICAL) | `plys` fields `cheat` and `cheater` (every 15 s while open) | no |
+| Alerts | ALERT QUEUE (WARNING) | `chat:recent` plus the watch words saved on this PC | no |
+| Alerts | Details, EVIDENCE TIMELINE | the same reads (current flags only, so BEFORE and DELTA show `--`) | no |
+| Alerts | ACK | none: hides the alert on this PC while ZAH runs | no |
+| Alerts | COMMAND PREVIEW, PREVIEW BAN | `con:ban <entityId> <1h\|1d\|7d\|30d\|1y>` | yes |
 
 ## Planned / Not Yet Wired
 

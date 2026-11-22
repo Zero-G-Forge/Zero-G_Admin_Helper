@@ -491,3 +491,52 @@ def test_playfields_page_admin_is_not_owner(monkeypatch, tmp_path):
     cockpit.close()
 
 # endregion
+
+
+# region Alerts Page
+
+def test_alerts_page_queue_ack_and_ban(monkeypatch, tmp_path):
+    from features.alerts import alerts_page
+    from features.chat import chat_store
+    monkeypatch.setattr(chat_store, "WATCH_WORDS_FILE", str(tmp_path / "words.json"))
+    monkeypatch.setattr(chat_store, "CHAT_HISTORY", [])
+    monkeypatch.setattr(chat_store, "LAST_SEQ", {"value": 0})
+    monkeypatch.setattr(alerts_page, "ACKNOWLEDGED", set())
+    chat_store.save_watch_words([{"word": "cheat", "on": True}])
+    players = {"type": "PLAYER_CACHE", "player_list": [
+        {"entityId": "1001", "steamId": "s1", "name": "Alice", "cheat": "On", "cheater": "No", "status": "Online"},
+        {"entityId": "1002", "steamId": "s2", "name": "Bob", "cheat": "Off", "cheater": "No", "status": "Online"}]}
+    bridge = install(monkeypatch, tmp_path, {"plys": players, "chat:recent": _chat_reply(),
+                                             "con:ban": {"type": "CONSOLE_RESULT", "status": "ok"}})
+    qapp = get_qapp()
+    page = alerts_page.create_page()
+    cockpit = host(page, role="admin")
+    settle(qapp)
+    assert page.lst_alerts.count() == 2
+    assert page.lst_alerts.item(0).text().startswith("CRITICAL") and "Bob" in page.lst_alerts.item(1).text()
+    page.lst_alerts.item(1).setSelected(True)
+    assert page.txt_command_preview.toPlainText() == "con:ban 1002 1d" and page.btn_preview_ban.isEnabled()
+    page._on_ack_clicked()
+    assert page.lst_alerts.count() == 1
+    page.lst_alerts.item(0).setSelected(True)
+    monkeypatch.setattr(alerts_page.QInputDialog, "getItem", staticmethod(lambda *a, **k: ("7d", True)))
+    page._on_preview_ban_clicked()
+    settle(qapp)
+    assert "con:ban 1001 7d" in bridge.sent and bridge.asked
+    cockpit.close()
+
+
+def test_alerts_page_moderator_cannot_ban(monkeypatch, tmp_path):
+    from features.alerts import alerts_page
+    monkeypatch.setattr(alerts_page, "ACKNOWLEDGED", set())
+    players = {"type": "PLAYER_CACHE", "player_list": [{"entityId": "7", "name": "Z", "cheat": "On"}]}
+    install(monkeypatch, tmp_path, {"plys": players, "chat:recent": {"type": "CHAT_LOG", "messages": []}})
+    qapp = get_qapp()
+    page = alerts_page.create_page()
+    cockpit = host(page, role="moderator")
+    settle(qapp)
+    page.lst_alerts.item(0).setSelected(True)
+    assert not page.btn_preview_ban.isEnabled() and page.btn_ack.isEnabled()
+    cockpit.close()
+
+# endregion
