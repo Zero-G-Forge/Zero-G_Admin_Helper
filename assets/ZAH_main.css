@@ -274,3 +274,105 @@ QProgressBar#LoaderProgressBar::chunk {
 }
 
 /* endregion */
+/* region: Dashboard Page */
+
+/* Dashboard page (features/dashboard/dashboard_page.py), matched to Concept_11-17/Dashboard.jpg.
+   Letter spacing is set in dashboard_page.spread_letters().
+*/
+
+/* Each card: a slightly lighter navy glass panel with a thin cyan border, inside the content panel */
+#DashCard {
+    background-color: rgba(10, 26, 42, 215);
+    border: 1px solid rgba(40, 170, 215, 90);
+    border-radius: 8px;
+}
+
+/* Card titles like NEEDS ATTENTION: white, bold, uppercase */
+#DashCardTitle {
+    color: #eef6fb;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+/* Big numbers in the top row (18 / 64, 3, 12D 4H) */
+#DashStatValue {
+    color: #eef6fb;
+    font-size: 30px;
+    font-weight: 600;
+}
+
+/* Small label under a big number: cyan, or red for ACTIVE ALERTS */
+#DashStatLabel {
+    color: #33d6ff;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+#DashStatLabelAlert {
+    color: #ff3355;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+/* "Nothing yet" text: dim cyan, like the old PAGE LOADS HERE placeholder */
+#DashEmptyLabel {
+    color: rgba(51, 214, 255, 150);
+    font-size: 13px;
+}
+
+/* The darker box that holds the RECENT EVENTS lines */
+#DashInnerBox {
+    background-color: rgba(5, 14, 24, 180);
+    border: 1px solid rgba(40, 170, 215, 60);
+    border-radius: 6px;
+}
+
+#DashEventLabel {
+    color: #dcebf5;
+    font-size: 13px;
+}
+
+/* ONLINE PLAYERS table: no background or grid, small grey-blue column names */
+QTableWidget#DashTable {
+    background-color: transparent;
+    border: 1px solid rgba(40, 170, 215, 60);
+    border-radius: 6px;
+    color: #dcebf5;
+    font-size: 13px;
+}
+
+QTableWidget#DashTable QHeaderView::section {
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(40, 170, 215, 60);
+    color: #8aa3b5;
+    font-size: 12px;
+    padding: 6px;
+}
+
+/* QUICK ACTIONS: big outlined cyan buttons with a dark glass fill */
+QPushButton#DashActionButton {
+    background-color: rgba(10, 40, 62, 200);
+    border: 1px solid #33d6ff;
+    border-radius: 6px;
+    color: #8fe6ff;
+    font-size: 18px;
+    font-weight: 500;
+}
+
+QPushButton#DashActionButton:hover {
+    background-color: rgba(18, 90, 125, 150);
+    color: #ffffff;
+}
+
+QPushButton#DashActionButton:pressed {
+    background-color: rgba(51, 214, 255, 90);
+}
+
+/* Greyed out: same shape, dimmer border and text, so it still matches the mockup */
+QPushButton#DashActionButton:disabled {
+    border: 1px solid rgba(51, 214, 255, 70);
+    color: rgba(143, 230, 255, 90);
+}
+
+/* endregion */
