@@ -101,7 +101,9 @@ def bridge_request(profile: dict, command: str, want_type: str, req_id: str | No
                 payload = json.loads(raw.decode("utf-8-sig").strip())
             except (ValueError, UnicodeDecodeError):
                 continue
-            if not isinstance(payload, dict) or payload.get("type") != want_type:
+            # want_type may also be a tuple, e.g. ("API_RESULT", "ERROR"), so a refusal is returned, not waited out.
+            wanted = want_type if isinstance(want_type, tuple) else (want_type,)
+            if not isinstance(payload, dict) or payload.get("type") not in wanted:
                 continue
             if req_id is not None and payload.get("req_id") not in (None, req_id):
                 continue

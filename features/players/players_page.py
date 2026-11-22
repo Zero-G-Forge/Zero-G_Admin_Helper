@@ -5,13 +5,23 @@
 ## ACTIONS and LOADOUT TEMPLATES on the right.
 ## Layout only for now: there is no player data source on this page yet, so everything shows "--" or "nothing yet".
 ## Every action button stays greyed out; each one changes something on the server and gets its own step with Ray's OK.
+## Wired (Nov 22, 2026): the list comes from plys, the detail from api:Request_Player_Info, the inventory from
+## api:Request_Player_GetInventory (all read-only, refreshed every 15 s while the page is open).
+## MESSAGE (msg:), WARP (api:Request_Entity_Teleport / Request_Entity_ChangePlayfield), KICK (con:kick),
+## BAN (con:ban), SAVE & APPLY (api:Request_Player_SetInventory) and the loadouts (api:Request_Player_AddItem)
+## go through the ZAH Safety Flow in features/shared/server_actions.py. GOD MODE stays off (see GOD_MODE_TIP).
 ## ==========================================
 
 # region Imports
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton,
-                             QTableWidget, QHeaderView, QAbstractItemView, QProgressBar)
+                             QTableWidget, QHeaderView, QAbstractItemView, QProgressBar, QTableWidgetItem,
+                             QInputDialog, QDialog, QFormLayout, QLineEdit, QDoubleSpinBox, QDialogButtonBox)
+
+## Read-only bridge reads and the Safety Flow for every server-changing button.
+from features.shared import server_actions
+from features.shared.loadouts import load_templates
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
@@ -44,6 +54,21 @@ PLAYER_ACTIONS = [
 ## LOADOUT TEMPLATES buttons, in mockup order.
 LOADOUT_TEMPLATES = ["STARTER", "EXPLORER", "BUILDER"]
 
+## Which Safety Flow action key each ACTIONS button uses (see server_actions.ACTION_ROLES).
+ACTION_KEYS = {"MESSAGE": "player_message", "WARP": "player_warp", "KICK": "player_kick", "BAN": "player_ban"}
+
+## The game's godmode console command only works for the player typing it, not from the server console.
+GOD_MODE_TIP = "Not possible from the server: the game's godmode command only works in a player's own console."
+
+## Seconds between read-only refreshes while the page is open.
+REFRESH_SEC = 15
+
+## Columns of the inventory table.
+INVENTORY_COLUMNS = ["WHERE", "SLOT", "ITEM", "COUNT"]
+
+## Ban lengths offered by BAN (the game's ban command takes these forms).
+BAN_LENGTHS = ["1h", "1d", "7d", "30d", "1y"]
+
 # endregion
 
 
@@ -62,7 +87,13 @@ class PlayersPage(QWidget):
         ## Bars and action buttons by name, so later steps can fill or turn them on.
         self.stat_bars = {}
         self.action_buttons = {}
+
+        ## Live data: the plys rows, the picked player, and the inventory as read (for RESET).
+        self.players = []
+        self.selected_player = None
+        self.inventory_original = None
         self.setup_widgets()
+        self._wire_live_data()
 
     def setup_widgets(self):
 
@@ -147,6 +178,16 @@ class PlayersPage(QWidget):
         self.lbl_inventory_empty = QLabel("Pick a player to see their inventory.")
         self.lbl_inventory_empty.setObjectName("DashEmptyLabel")
         self.inventory_box_layout.addWidget(self.lbl_inventory_empty)
+
+        ## The inventory as a table. Only COUNT can be edited; SAVE & APPLY sends the whole inventory back.
+        self.tbl_inventory = QTableWidget(0, len(INVENTORY_COLUMNS))
+        self.tbl_inventory.setObjectName("DashTable")
+        self.tbl_inventory.setHorizontalHeaderLabels(INVENTORY_COLUMNS)
+        self.tbl_inventory.verticalHeader().setVisible(False)
+        self.tbl_inventory.setShowGrid(False)
+        self.tbl_inventory.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tbl_inventory.setVisible(False)
+        self.inventory_box_layout.addWidget(self.tbl_inventory, stretch=1)
         self.inventory_box_layout.addStretch()
         inventory_layout.addWidget(self.inventory_box, stretch=1)
 
@@ -240,6 +281,333 @@ class PlayersPage(QWidget):
         return btn_action
 
     # endregion
+
+    # region Live Data
+
+    def _wire_live_data(self):
+        """Connects the table and buttons, and starts the read-only refresh timer."""
+        try:
+            self.tbl_players.itemSelectionChanged.connect(self._on_player_picked)
+            self.action_buttons["MESSAGE"].clicked.connect(self._on_message_clicked)
+            self.action_buttons["WARP"].clicked.connect(self._on_warp_clicked)
+            self.action_buttons["KICK"].clicked.connect(self._on_kick_clicked)
+            self.action_buttons["BAN"].clicked.connect(self._on_ban_clicked)
+            self.action_buttons["GOD MODE"].setToolTip(GOD_MODE_TIP)
+            self.btn_inventory_reset.clicked.connect(self._on_inventory_reset)
+            self.btn_inventory_save.clicked.connect(self._on_inventory_save)
+            for btn_template, template_name in zip(self.loadout_buttons, LOADOUT_TEMPLATES):
+                btn_template.clicked.connect(lambda checked=False, name=template_name: self._on_loadout_clicked(name))
+            self.refresh_timer = QTimer(self)
+            self.refresh_timer.setInterval(REFRESH_SEC * 1000)
+            self.refresh_timer.timeout.connect(self.refresh_players)
+            self._refresh_buttons()
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Could not wire live data: {e}")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        try:
+            self.refresh_players()
+            self.refresh_timer.start()
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Refresh on show failed: {e}")
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        try:
+            self.refresh_timer.stop()
+        except Exception:
+            pass
+
+    def refresh_players(self):
+        """Reads plys (read-only) when the bridge is connected."""
+        try:
+            self._refresh_buttons()
+            if not server_actions.bridge_is_connected(self):
+                self.lbl_players_empty.setText("Connect to the server to see players.")
+                return
+            server_actions.read_bridge("plys", "PLAYER_CACHE", self._on_players_read,
+                                       lambda message: print(f"[ERROR] PlayersPage: plys failed: {message}"))
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Refresh failed: {e}")
+
+    def _on_players_read(self, reply):
+        try:
+            rows = reply.get("player_list") if isinstance(reply, dict) else None
+            self.fill_players(rows if isinstance(rows, list) else [])
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Could not show players: {e}")
+
+    def fill_players(self, rows):
+        """Fills PLAYER LIST (online first), keeping the picked player picked."""
+        picked_id = (self.selected_player or {}).get("entityId")
+        self.players = sorted([row for row in rows if isinstance(row, dict)],
+                              key=lambda row: (str(row.get("status")) != "Online", str(row.get("name", "")).lower()))
+        self.tbl_players.blockSignals(True)
+        self.tbl_players.setRowCount(len(self.players))
+        picked_row = -1
+        for row_number, player in enumerate(self.players):
+            cells = [player.get("name", "--"), player.get("status", "--"), player.get("faction", "--"),
+                     player.get("playfield", "--"), player.get("ping", "--")]
+            for column, cell in enumerate(cells):
+                self.tbl_players.setItem(row_number, column, QTableWidgetItem(str(cell)))
+            if picked_id is not None and str(player.get("entityId")) == str(picked_id):
+                picked_row = row_number
+        if picked_row >= 0:
+            self.tbl_players.selectRow(picked_row)
+        self.tbl_players.blockSignals(False)
+        self.lbl_players_empty.setText("" if self.players else "No players known yet.")
+        self.lbl_players_empty.setVisible(not self.players)
+        print(f"[INFO] PlayersPage: {len(self.players)} player(s) shown")
+
+    def _on_player_picked(self):
+        """Shows the picked row, then reads its detail and inventory (read-only)."""
+        try:
+            row = self.tbl_players.currentRow()
+            if row < 0 or row >= len(self.players):
+                self.selected_player = None
+                self._refresh_buttons()
+                return
+            self.selected_player = self.players[row]
+            player = self.selected_player
+            self.lbl_player_name.setText(str(player.get("name", "--")).upper())
+            self.lbl_player_status.setText(str(player.get("status", "--")).upper())
+            self.lbl_steam_id.setText(f"STEAM ID:  {player.get('steamId', '--')}")
+            self.lbl_faction.setText(f"FACTION:  {player.get('faction', '--')}")
+            self.lbl_playfield.setText(f"PLAYFIELD:  {player.get('playfield', '--')}")
+            self._refresh_buttons()
+            entity_id = self._entity_id()
+            if entity_id is None or not server_actions.bridge_is_connected(self):
+                return
+            server_actions.read_bridge(f'api:Request_Player_Info {{"id":{entity_id}}}', ("API_RESULT", "ERROR"),
+                                       self._on_info_read, lambda message: None)
+            server_actions.read_bridge(f'api:Request_Player_GetInventory {{"id":{entity_id}}}', ("API_RESULT", "ERROR"),
+                                       self._on_inventory_read, lambda message: None)
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Could not show the player: {e}")
+
+    def _entity_id(self):
+        try:
+            return int((self.selected_player or {}).get("entityId"))
+        except (TypeError, ValueError):
+            return None
+
+    def _on_info_read(self, reply):
+        """Fills the HEALTH / OXYGEN / FOOD bars from Request_Player_Info."""
+        try:
+            info = reply.get("data") if isinstance(reply, dict) and reply.get("status") == "ok" else None
+            if not isinstance(info, dict):
+                return
+            for bar_text, value_key, max_key in (("HEALTH", "health", "healthMax"), ("OXYGEN", "oxygen", "oxygenMax"),
+                                                 ("FOOD", "food", "foodMax")):
+                value, most = float(info.get(value_key) or 0), float(info.get(max_key) or 0)
+                self.stat_bars[bar_text].setValue(int(100 * value / most) if most > 0 else 0)
+                self.stat_bars[bar_text].setToolTip(f"{value:g} / {most:g}")
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Could not show player info: {e}")
+
+    def _on_inventory_read(self, reply):
+        try:
+            inventory = reply.get("data") if isinstance(reply, dict) and reply.get("status") == "ok" else None
+            if not isinstance(inventory, dict):
+                return
+            self.inventory_original = inventory
+            self.fill_inventory(inventory)
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Could not show inventory: {e}")
+
+    def fill_inventory(self, inventory):
+        """Shows toolbelt and bag stacks. COUNT is the only cell that can be changed."""
+        stacks = [("TOOLBELT", stack) for stack in inventory.get("toolbelt") or []] + \
+                 [("BAG", stack) for stack in inventory.get("bag") or []]
+        self.tbl_inventory.setRowCount(len(stacks))
+        for row_number, (where, stack) in enumerate(stacks):
+            cells = [where, stack.get("slotIdx", "--"), stack.get("id", "--"), stack.get("count", 0)]
+            for column, cell in enumerate(cells):
+                item = QTableWidgetItem(str(cell))
+                if column != 3:
+                    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.tbl_inventory.setItem(row_number, column, item)
+        self.tbl_inventory.setVisible(True)
+        self.lbl_inventory_empty.setVisible(not stacks)
+        self.lbl_inventory_empty.setText("The inventory is empty." if not stacks else "")
+        self._refresh_buttons()
+
+    def edited_inventory(self):
+        """The inventory as read, with the COUNT column from the table. A bad number gives None."""
+        if not isinstance(self.inventory_original, dict):
+            return None
+        stacks = list(self.inventory_original.get("toolbelt") or []) + list(self.inventory_original.get("bag") or [])
+        toolbelt_count = len(self.inventory_original.get("toolbelt") or [])
+        result = {"playerId": self._entity_id(), "toolbelt": [], "bag": []}
+        for row_number, stack in enumerate(stacks):
+            cell = self.tbl_inventory.item(row_number, 3)
+            try:
+                count = int(cell.text()) if cell else int(stack.get("count", 0))
+            except ValueError:
+                return None
+            if count < 0:
+                return None
+            new_stack = dict(stack)
+            new_stack["count"] = count
+            if count > 0:
+                result["toolbelt" if row_number < toolbelt_count else "bag"].append(new_stack)
+        return result
+
+    # endregion
+
+    # region Actions
+
+    def _refresh_buttons(self):
+        """Each button is on only for the right role, a connected bridge and a picked player."""
+        try:
+            has_player = self._entity_id() is not None
+            for title, key in ACTION_KEYS.items():
+                reason = "Pick a player first." if not has_player else server_actions.block_reason(self, key)
+                self.action_buttons[title].setEnabled(reason == "")
+                self.action_buttons[title].setToolTip(reason or "Asks for CONFIRM and waits 15 s before sending.")
+            self.action_buttons["GOD MODE"].setEnabled(False)
+            has_inventory = has_player and isinstance(self.inventory_original, dict)
+            inventory_reason = "Pick a player first." if not has_inventory else server_actions.block_reason(self, "player_inventory")
+            self.btn_inventory_save.setEnabled(inventory_reason == "")
+            self.btn_inventory_save.setToolTip(inventory_reason or "Sends the changed counts (Safety Flow).")
+            self.btn_inventory_reset.setEnabled(has_inventory)
+            self.btn_inventory_reset.setToolTip("Puts the counts back as they were read." if has_inventory else "Pick a player first.")
+            templates = load_templates()
+            for btn_template, template_name in zip(self.loadout_buttons, LOADOUT_TEMPLATES):
+                reason = "Pick a player first." if not has_player else server_actions.block_reason(self, "player_loadout")
+                if not reason and not templates.get(template_name):
+                    reason = "This template is empty. Add items on the Library page (ADD TO TEMPLATE)."
+                btn_template.setEnabled(reason == "")
+                btn_template.setToolTip(reason or ", ".join(f"{row['count']}x {row.get('name', row['id'])}"
+                                                            for row in templates[template_name]))
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Could not refresh buttons: {e}")
+
+    def _after_action(self, label):
+        """Shared result handler: one line in the terminal, and a fresh read."""
+        def done(ok, reply):
+            print(f"[{'SUCCESS' if ok else 'ERROR'}] PlayersPage: {label}: {server_actions.reply_text(reply)}")
+            self.lbl_players_empty.setVisible(True)
+            self.lbl_players_empty.setText(f"{label}: {'done' if ok else 'failed'} ({server_actions.reply_text(reply)})")
+            self.refresh_players()
+        return done
+
+    def _player_label(self):
+        return f"{(self.selected_player or {}).get('name', '?')} (id {self._entity_id()})"
+
+    def _on_message_clicked(self):
+        try:
+            text, accepted = QInputDialog.getText(self, "Message", f"Private message to {self._player_label()}:")
+            text = text.strip().replace("|", "/")
+            if not accepted or not text:
+                return
+            server_actions.run_server_action(self, "player_message", "Send a private message",
+                                             f"msg:{self._entity_id()}|{text}", self._after_action("Message"))
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Message failed: {e}")
+
+    def _on_kick_clicked(self):
+        try:
+            reason, accepted = QInputDialog.getText(self, "Kick", f"Reason shown to {self._player_label()}:")
+            reason = reason.strip().replace("'", "")
+            if not accepted or not reason:
+                return
+            server_actions.run_server_action(self, "player_kick", "Kick a player",
+                                             f"con:kick {self._entity_id()} '{reason}'", self._after_action("Kick"),
+                                             explanation=f"Removes {self._player_label()} from the server.")
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Kick failed: {e}")
+
+    def _on_ban_clicked(self):
+        try:
+            length, accepted = QInputDialog.getItem(self, "Ban", f"Ban length for {self._player_label()}:", BAN_LENGTHS, 1, False)
+            if not accepted or length not in BAN_LENGTHS:
+                return
+            server_actions.run_server_action(self, "player_ban", "Ban a player",
+                                             f"con:ban {self._entity_id()} {length}", self._after_action("Ban"),
+                                             explanation=f"Bans {self._player_label()} for {length}.")
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Ban failed: {e}")
+
+    def _on_warp_clicked(self):
+        try:
+            target = ask_warp_target(self, str((self.selected_player or {}).get("playfield", "")))
+            if target is None:
+                return
+            playfield, x, y, z = target
+            entity_id = self._entity_id()
+            position = f'"pos":{{"x":{x},"y":{y},"z":{z}}},"rot":{{"x":0,"y":0,"z":0}}'
+            if playfield == str((self.selected_player or {}).get("playfield", "")):
+                command = f'api:Request_Entity_Teleport {{"id":{entity_id},{position}}}'
+            else:
+                command = f'api:Request_Entity_ChangePlayfield {{"id":{entity_id},"playfield":"{playfield}",{position}}}'
+            server_actions.run_server_action(self, "player_warp", "Warp a player", command, self._after_action("Warp"),
+                                             explanation=f"Moves {self._player_label()} to {playfield} ({x}, {y}, {z}).")
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Warp failed: {e}")
+
+    def _on_inventory_reset(self):
+        if isinstance(self.inventory_original, dict):
+            self.fill_inventory(self.inventory_original)
+
+    def _on_inventory_save(self):
+        try:
+            import json
+            inventory = self.edited_inventory()
+            if inventory is None:
+                print("[WARN] PlayersPage: A COUNT cell is not a whole number of 0 or more. Nothing was sent.")
+                return
+            command = "api:Request_Player_SetInventory " + json.dumps(inventory, separators=(",", ":"))
+            server_actions.run_server_action(self, "player_inventory", "Replace a player's inventory", command,
+                                             self._after_action("Inventory"),
+                                             explanation=f"Replaces the toolbelt and bag of {self._player_label()}.")
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Inventory save failed: {e}")
+
+    def _on_loadout_clicked(self, template_name):
+        try:
+            rows = load_templates().get(template_name) or []
+            if not rows:
+                return
+            entity_id = self._entity_id()
+            commands = [f'api:Request_Player_AddItem {{"id":{entity_id},"item":{{"id":{row["id"]},"count":{row["count"]}}}}}'
+                        for row in rows]
+            server_actions.run_server_action(self, "player_loadout", f"Give the {template_name} loadout", commands,
+                                             self._after_action(f"Loadout {template_name}"),
+                                             explanation=f"Adds {len(rows)} item stack(s) to {self._player_label()}.")
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Loadout failed: {e}")
+
+    # endregion
+
+# endregion
+
+
+# region Warp Dialog
+
+## Asks for a playfield and a position. Returns (playfield, x, y, z) or None when cancelled.
+def ask_warp_target(parent, current_playfield):
+    dialog = QDialog(parent)
+    dialog.setWindowTitle("Warp")
+    form = QFormLayout(dialog)
+    txt_playfield = QLineEdit(current_playfield)
+    form.addRow("PLAYFIELD", txt_playfield)
+    spins = []
+    for axis in ("X", "Y", "Z"):
+        spin = QDoubleSpinBox()
+        spin.setRange(-1000000.0, 1000000.0)
+        spin.setDecimals(1)
+        form.addRow(axis, spin)
+        spins.append(spin)
+    buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    form.addRow(buttons)
+    if dialog.exec() != QDialog.DialogCode.Accepted or not txt_playfield.text().strip():
+        return None
+    playfield = txt_playfield.text().strip().replace('"', "")
+    return playfield, spins[0].value(), spins[1].value(), spins[2].value()
 
 # endregion
 

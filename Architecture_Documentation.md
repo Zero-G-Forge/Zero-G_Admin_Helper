@@ -130,7 +130,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | --- | --- | --- | --- | --- |
 | `dashboard` | DASHBOARD | `features.dashboard.dashboard_page` | `DashboardPage` | Layout plus live bridge status, event list, and disabled quick actions |
 | `chat` | CHAT | `features.chat.chat_page` | `ChatPage` | Layout; SEND, WARN, and MUTE disabled |
-| `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Layout; player actions and loadouts disabled |
+| `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Live list, detail and inventory (read-only); MESSAGE, WARP, KICK, BAN, SAVE & APPLY and loadouts through the Safety Flow; GOD MODE not possible from the server |
 | `factions` | FACTIONS | `features.factions.factions_page` | `FactionsPage` | Layout; SET RELATION and RENAME disabled |
 | `structures` | STRUCTURES | `features.structures.structures_page` | `StructuresPage` | Layout; TELEPORT, SET FACTION, and DESTROY disabled |
 | `playfields` | PLAYFIELDS | `features.playfields.playfields_page` | `PlayfieldsPage` | Layout; UNLOAD, RESTART PLAYFIELD, and WIPE disabled |
@@ -157,6 +157,8 @@ Supporting modules (not nav pages):
 | `features/bridge/bridge_connection.py` | Socket helpers and line protocol |
 | `features/bridge/server_settings.py` | Reads the active profile from `data/server_config.json` |
 | `features/shared/ecf_parser.py` | Read-only ECF parse, Ref merge, and CSV name lookup |
+| `features/shared/server_actions.py` | Read-only bridge reads, the ZAH Safety Flow, the action role table, and the audit log |
+| `features/shared/loadouts.py` | Loadout templates in `data/loadout_templates.json` |
 | `features/library/item_library.py` | Builds the item list from `ItemsConfig.ecf` and `Localization.csv` |
 | `features/library/item_tiles.py` | Hex tiles and the wrapping tile flow area |
 | `features/library/item_stats_dialog.py` | Full stats window for one item |
@@ -906,6 +908,44 @@ Current CSS regions, in file order:
 | Multi-Server Page | Server cards and rings |
 
 Widgets are targeted by `objectName` (`SettingsPage`, `DashCard`, `DashCardTitle`, `LibraryTileArea`, `ItemStatsDialog`, and others). Prefer adding a name and a rule in the matching region rather than a one-off style in Python.
+
+## Live Pages and the Safety Flow
+
+Pages talk to the bridge through `features/shared/server_actions.py`, one short session per command (`live_client.bridge_request`, which now also accepts a tuple of reply types so an `ERROR` comes back at once).
+
+- **Read-only** (`read_bridge`): lists, stats and inventories. No confirmation. Runs on Qt's thread pool.
+- **Server-changing** (`run_server_action`): the ZAH Safety Flow.
+  1. Role check from `ACTION_ROLES` (an action missing from the table is refused) and a connected bridge.
+  2. Command preview: the exact line that will be sent.
+  3. `CONFIRM` typed by hand.
+  4. A 15 second countdown (`SAFETY_DELAY_SEC`) with CANCEL.
+  5. The role is checked again, the command is sent, and one line is added to `data/audit/server_actions.jsonl` (time, user, role, server, action, command, ok, detail). A cancel is audited too.
+- A list of commands (a loadout) is sent one by one, 0.5 s apart; the first refusal stops the rest.
+- Tests replace `SEND_FUNCTION` and `ask_safety_flow`, so no test reaches a server.
+
+Action roles:
+
+| Action | Lowest role |
+| --- | --- |
+| Private message, kick, chat send, chat warn, announce | moderator |
+| Ban, unban, warp, inventory, loadout, give item, structure teleport, structure destroy, broadcast to all servers, ban from an alert | admin |
+| Playfield unload, restart, wipe | owner |
+
+Page wiring:
+
+| Page | Control | Bridge command | Changes the server |
+| --- | --- | --- | --- |
+| Players | PLAYER LIST | `plys` (every 15 s while open) | no |
+| Players | PLAYER DETAIL bars | `api:Request_Player_Info {"id":N}` | no |
+| Players | INVENTORY | `api:Request_Player_GetInventory {"id":N}` | no |
+| Players | MESSAGE | `msg:<entityId>\|<text>` | yes |
+| Players | WARP | `api:Request_Entity_Teleport` (same playfield) or `api:Request_Entity_ChangePlayfield` | yes |
+| Players | KICK | `con:kick <entityId> '<reason>'` | yes |
+| Players | BAN | `con:ban <entityId> <1h\|1d\|7d\|30d\|1y>` | yes |
+| Players | SAVE & APPLY | `api:Request_Player_SetInventory` (counts edited in the table; 0 removes a stack) | yes |
+| Players | RESET | none (puts the read counts back) | no |
+| Players | STARTER / EXPLORER / BUILDER | one `api:Request_Player_AddItem` per template item | yes |
+| Players | GOD MODE | none: the game's `godmode` only works in a player's own console | stays disabled |
 
 ## Planned / Not Yet Wired
 

@@ -410,6 +410,27 @@ The portal's Browse button can now send a new `ZeroGBridge.Core.dll` (and its `.
 
 The tests start the bridge's real C# file code as a small local stand-in server (`ServerFilesTest serve`), with `ZGB_TEST_MODDIR` pointing at a throwaway folder for its `Uploads/`, `Backups/` and `Updates/`. ZAH then uploads to that stand-in exactly as it would to the real one. The tests check the happy path, a refused stale upload, every "No" answer, the role gate, LIVE MODE, and a core upload. The live server was never written to.
 
+## The Safety Flow
+
+### Four brakes before a server change
+
+A kick, a ban or a wipe cannot be undone with Ctrl+Z, so every such button goes through the same four brakes:
+
+1. **Who are you?** The role ladder decides. An action that is not in the table is refused, so a new button can never be "open by accident".
+2. **What exactly?** The real command line is shown before anything else. What is shown is what is sent.
+3. **Do you mean it?** Typing `CONFIRM` takes a moment of thought that a reflex click does not.
+4. **Last chance.** 15 seconds to change one's mind, with CANCEL.
+
+After the send, one line goes into the audit log, like a ship's logbook: who did what, when, on which server, and what the server answered. Cancelled actions are logged too.
+
+### Read-only views need no brakes
+
+Lists, stats and inventories only look, so they load in the background without asking. Their buttons still check the role before anything that changes the server.
+
+### Why GOD MODE stays off
+
+The game's `godmode` command toggles the player who types it in their own console. The server console has no player to toggle, so there is no way to send it from ZAH.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free
