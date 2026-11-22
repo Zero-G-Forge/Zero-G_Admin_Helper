@@ -311,6 +311,24 @@ ZeroGBridge is two DLLs: a small loader that never changes, and a **core** that 
 - A second stand-in plays an "old bridge" to prove the fail-closed message.
 - The Settings page is created off-screen to check the button states: off with no connection, on when connected, off while downloading.
 
+## Reading the Downloaded Copy Instead of the Game Folder
+
+### One source of truth
+
+Before, the Library could read any folder it was pointed at, including a game install on this PC. That copy can be older or different from what the server runs. Now every page reads only the photocopy the download made, so what ZAH shows is what the server has.
+
+### Why the save copy wins
+
+When a game is first started, the scenario's files are copied into the save. After that the server reads the save's copy. So when the same file exists in both places, ZAH shows the save's copy.
+
+### Why the scenario name is not written into the code
+
+The bridge reports the scenario name, and the download names the local folder after it. ZAH looks the folder up from Settings instead of assuming a name, so a switch from "Default Multiplayer" to "Ascension-Reborn" needs no code change.
+
+### Pictures: one look at the folder, then a lookup table
+
+The Library may hold over a thousand items. Asking the disk "is there a picture for this one?" a thousand times is slow, so ZAH lists the Images folder once and builds a table from lower-case item name to picture file. Each item then just looks itself up. The picture is cut to the hex shape with a **clip path**, which works like a stencil: paint only lands inside the shape.
+
 ## Writing Files Back Through the Bridge
 
 ### The mail slot now has a return tray

@@ -74,7 +74,7 @@ class ItemStatsDialog(QDialog):
         header_row = QHBoxLayout()
         header_row.setSpacing(16)
         lbl_picture = QLabel()
-        lbl_picture.setPixmap(make_hex_pixmap(84, item["filter_group"], item["display_name"]))
+        lbl_picture.setPixmap(make_hex_pixmap(84, item["filter_group"], item["display_name"], item.get("image_path")))
         lbl_picture.setFixedSize(84, 84)
         header_row.addWidget(lbl_picture, alignment=Qt.AlignmentFlag.AlignTop)
         header_text = QVBoxLayout()

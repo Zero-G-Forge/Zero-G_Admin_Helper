@@ -3,6 +3,8 @@
 ## HexTile: one item drawn as a hex (like the concept mockup), with its short initials inside,
 ##          the name and ID underneath. The game's item pictures aren't in the server files,
 ##          so each category gets its own edge colour instead.
+##          (Nov 22, 2026: when the downloaded server files have SharedData/Content/Images/<ItemName>.jpg
+##          or .png, that picture is drawn inside the hex instead of the initials. No picture = the drawn hex.)
 ## TileFlowArea: a scrolling grid that re-flows the tiles into as many columns as fit.
 ## ==========================================
 
@@ -11,7 +13,7 @@
 import math
 
 from PyQt6.QtCore import Qt, QPointF, QRectF, QSize, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QPolygonF
+from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PyQt6.QtWidgets import QAbstractButton, QButtonGroup, QFrame, QGridLayout, QScrollArea, QWidget
 
 # endregion
@@ -35,6 +37,9 @@ GROUP_COLORS = {
 TILE_WIDTH = 108
 TILE_HEIGHT = 124
 TILE_SPACING = 10
+
+## Pictures already read from disk, by (path, size), so scrolling the grid doesn't reload them.
+PICTURE_CACHE = {}
 
 # endregion
 
@@ -77,14 +82,53 @@ def draw_hex_badge(painter, center_x, center_y, radius, group, initials, lit):
                      Qt.AlignmentFlag.AlignCenter, initials)
 
 
-def make_hex_pixmap(size, group, display_name):
+def load_picture(image_path, side):
+    """The item picture scaled to fill a side x side square, or None if there is none or it can't be read."""
+    if not image_path:
+        return None
+    cache_key = (image_path, int(side))
+    if cache_key not in PICTURE_CACHE:
+        picture = QPixmap(image_path)
+        if picture.isNull():
+            print(f"[WARNING] ItemTiles: Could not read picture {image_path}")
+            PICTURE_CACHE[cache_key] = None
+        else:
+            PICTURE_CACHE[cache_key] = picture.scaled(int(side), int(side), Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                                      Qt.TransformationMode.SmoothTransformation)
+    return PICTURE_CACHE[cache_key]
+
+
+def draw_hex_picture(painter, center_x, center_y, radius, group, picture, lit):
+    """Draws the picture cut to the hex shape, then the category-coloured hex edge on top."""
+    hex_shape = hex_polygon(center_x, center_y, radius)
+    painter.save()
+
+    ## A clip path is a stencil: only the part of the picture inside the hex gets painted.
+    clip_path = QPainterPath()
+    clip_path.addPolygon(hex_shape)
+    painter.setClipPath(clip_path)
+    painter.drawPixmap(int(center_x - picture.width() / 2), int(center_y - picture.height() / 2), picture)
+    painter.restore()
+    edge_color = QColor(GROUP_COLORS.get(group, GROUP_COLORS[""]))
+    painter.setPen(QPen(QColor("#ffffff") if lit else edge_color, 3 if lit else 2))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawPolygon(hex_shape)
+
+
+def make_hex_pixmap(size, group, display_name, image_path=None):
     """A square picture of the hex badge, used by the detail card and the stats window."""
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     try:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        draw_hex_badge(painter, size / 2, size / 2, size / 2 - 3, group, short_initials(display_name), True)
+
+        ## The item's own picture when the server files have one, otherwise the initials badge.
+        picture = load_picture(image_path, size)
+        if picture is not None:
+            draw_hex_picture(painter, size / 2, size / 2, size / 2 - 3, group, picture, True)
+        else:
+            draw_hex_badge(painter, size / 2, size / 2, size / 2 - 3, group, short_initials(display_name), True)
 
     ## finally: always runs, so the painter is closed even if drawing fails.
     finally:
@@ -115,8 +159,14 @@ class HexTile(QAbstractButton):
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             lit = self.isChecked() or self.underMouse()
-            draw_hex_badge(painter, TILE_WIDTH / 2, 38, 34, self.item["filter_group"],
-                           short_initials(self.item["display_name"]), lit)
+
+            ## The item's own picture when the server files have one, otherwise the initials badge.
+            picture = load_picture(self.item.get("image_path"), 68)
+            if picture is not None:
+                draw_hex_picture(painter, TILE_WIDTH / 2, 38, 34, self.item["filter_group"], picture, lit)
+            else:
+                draw_hex_badge(painter, TILE_WIDTH / 2, 38, 34, self.item["filter_group"],
+                               short_initials(self.item["display_name"]), lit)
 
             ## Name (cut with … if too long) and ID under the hex.
             name_font = QFont(self.font())

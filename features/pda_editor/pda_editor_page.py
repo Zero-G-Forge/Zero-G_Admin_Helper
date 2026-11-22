@@ -5,6 +5,8 @@
 ## CHAPTERS on the left, the CODE editor filling the rest, and a backup line along the bottom.
 ## PDA files live on the server in Content/Scenarios/<scenario>/Extras/PDA (PDA.yaml plus its PDA.csv text).
 ## Download, edit, upload: edits only change the local copy until UPLOAD, which stays locked until Ray OKs that step.
+## (Nov 22, 2026: the file dropdown now lists the .yaml and .csv files in the downloaded PDA folders,
+## through load_server_files. With nothing downloaded it says how to download them.)
 ## ==========================================
 
 # region Imports
@@ -21,6 +23,9 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
 
+## The downloaded server files on this PC (never the local base game).
+from features.server_files.local_files import NO_FILES_TEXT, current_scenario_folder, list_files
+
 ## The same code editor as the ECF Editor (line numbers, current line, brace matching), with YAML colours.
 from features.ecf_editor.ecf_code_editor import EcfCodeEditor
 from features.pda_editor.pda_yaml_highlighter import PdaYamlHighlighter
@@ -35,6 +40,9 @@ LATER_TIP = "Coming in a later step."
 
 ## File types the dropdown lists from the downloaded PDA folder.
 PDA_FILE_TYPES = (".yaml", ".csv")
+
+## Where the PDA files sit inside a downloaded root (the game uses SharedData; older scenarios use Content).
+PDA_FOLDERS = ("SharedData/Content/Extras/PDA", "Content/Extras/PDA")
 
 ## Finds chapter lines like '  - ChapterTitle: pda_uW0W4W4' and keeps the title.
 CHAPTER_PATTERN = re.compile(r"^\s*-\s*ChapterTitle:\s*(.+?)\s*$")
@@ -60,6 +68,13 @@ class PdaEditorPage(QWidget):
         ## Name that ZAH_main.css can use to style the page.
         self.setObjectName("PdaEditorPage")
         self.setup_widgets()
+
+        ## The picked file: its server entry ({"root", "path", "full", "label"}) and the text it had when opened.
+        self.current_entry = None
+        self.original_text = ""
+
+        ## Fill the file dropdown from the downloaded server files (or say how to download them).
+        self.load_server_files()
 
     def setup_widgets(self):
 
@@ -92,6 +107,9 @@ class PdaEditorPage(QWidget):
 
         ## Folder on this computer that holds the downloaded copies. None until a download has happened.
         self.local_folder = None
+
+        ## The downloaded scenario folder (data/server_files/<scenario>), set by load_server_files.
+        self.server_folder = None
         toolbar_layout.addStretch(1)
 
         ## DOWNLOAD only reads from the server; VALIDATE and SAVE work on the local copy.
@@ -186,6 +204,42 @@ class PdaEditorPage(QWidget):
 
     # endregion
 
+    # region Server Files
+
+    def load_server_files(self, folder=None):
+        """Fills the file dropdown from the downloaded server files. folder=None uses the last download."""
+        try:
+            if folder is None:
+                folder = current_scenario_folder()
+            self.server_folder = folder
+            entries = list_files(folder, PDA_FILE_TYPES, under=PDA_FOLDERS)
+
+            ## blockSignals stops _on_file_picked firing for every name while the list is being filled.
+            self.cmb_file.blockSignals(True)
+            self.cmb_file.clear()
+            for entry in entries:
+
+                ## The whole entry rides along with each row, so picking it knows the exact local file.
+                self.cmb_file.addItem(entry["label"], entry)
+                self.cmb_file.setItemData(self.cmb_file.count() - 1, entry["root"] + "/" + entry["path"], Qt.ItemDataRole.ToolTipRole)
+            self.cmb_file.setCurrentIndex(-1)
+            self.cmb_file.blockSignals(False)
+            self.cmb_file.setEnabled(bool(entries))
+            if entries:
+                self.cmb_file.setPlaceholderText("Pick a file")
+                self.cmb_file.setToolTip("Pick a downloaded server file to edit.")
+                self.code_editor.setPlaceholderText("Pick a file to edit.")
+            else:
+                self.cmb_file.setPlaceholderText("No files downloaded")
+                self.cmb_file.setToolTip(NO_FILES_TEXT)
+                self.code_editor.setPlaceholderText(NO_FILES_TEXT if folder is None else "The downloaded server files have no PDA files.")
+            return entries
+        except Exception as e:
+            print(f"[ERROR] PdaEditorPage: Could not list the downloaded server files: {e}")
+            return []
+
+    # endregion
+
     # region Local Files
 
     def load_local_folder(self, folder_path):
@@ -210,9 +264,20 @@ class PdaEditorPage(QWidget):
 
     def _on_file_picked(self, index):
         """Opens the picked file from the local folder in the editor and lists its chapters."""
-        if index < 0 or self.local_folder is None:
+        if index < 0:
             return
-        file_path = os.path.join(self.local_folder, self.cmb_file.itemText(index))
+
+        ## A row from load_server_files carries its full local path; a row from load_local_folder is a plain name.
+        ## For a server row, local_folder becomes the file's own folder, so PDA.csv names are found next to it.
+        entry = self.cmb_file.itemData(index)
+        if isinstance(entry, dict):
+            file_path = entry["full"]
+            self.local_folder = os.path.dirname(file_path)
+        elif self.local_folder is None:
+            return
+        else:
+            file_path = os.path.join(self.local_folder, self.cmb_file.itemText(index))
+        self.current_entry = entry if isinstance(entry, dict) else {"root": "", "path": self.cmb_file.itemText(index), "full": file_path, "label": self.cmb_file.itemText(index)}
         try:
 
             ## errors="replace" keeps odd characters from stopping the file opening.
@@ -224,6 +289,7 @@ class PdaEditorPage(QWidget):
             file_text = ""
         else:
             self.code_editor.load_text(file_text)
+        self.original_text = file_text
         self._fill_chapters(file_text)
 
     # endregion

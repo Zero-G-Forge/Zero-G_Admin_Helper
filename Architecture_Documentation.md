@@ -140,11 +140,11 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `alerts` | ALERTS & ANTI-CHEAT | `features.alerts.alerts_page` | `AlertsPage` | Layout; PREVIEW BAN disabled |
 | `bans_audit` | BANS & AUDIT | `features.bans_audit.bans_audit_page` | `BansAuditPage` | Failed-login table is live (owner, or developer with key) |
 | `users` | USERS | `features.users.users_page` | `UsersPage` | Live add, edit, and remove through the login service; Live file editing checkbox is layout only |
-| `ecf_editor` | ECF EDITOR | `features.ecf_editor.ecf_editor_page` | `EcfEditorPage` | Local folder and code view work; download, upload, validate, and save are disabled |
-| `pda_editor` | PDA EDITOR | `features.pda_editor.pda_editor_page` | `PdaEditorPage` | Local folder, chapters, and YAML view work; server buttons are disabled |
+| `ecf_editor` | ECF EDITOR | `features.ecf_editor.ecf_editor_page` | `EcfEditorPage` | Lists and opens every `.ecf` from the downloaded server files (`load_server_files`); empty state when nothing is downloaded |
+| `pda_editor` | PDA EDITOR | `features.pda_editor.pda_editor_page` | `PdaEditorPage` | Lists and opens the downloaded PDA `.yaml` / `.csv` files, chapters with English names; empty state when nothing is downloaded |
 | `backups` | BACKUPS | `features.backups.backups_page` | `BackupsPage` | Layout; restore is locked |
 | `bp_editor` | BP EDITOR | `features.bp_editor.bp_editor_page` | `LibraryPage` (blueprints tab) | Layout; blueprint data is not loaded yet |
-| `items` | ITEMS | `features.items.items_page` | `LibraryPage` (items tab) | Can load items from a Content folder via `load_items_from`; images and server download are not wired |
+| `items` | ITEMS | `features.items.items_page` | `LibraryPage` (items tab) | Reads items from the downloaded server files on opening (`load_server_files`), with item pictures; empty state when nothing is downloaded |
 | `servers` | SERVERS | `features.multi_server.multi_server_page` | `MultiServerPage` | Layout; shown only with two or more connected servers |
 
 Supporting modules (not nav pages):
@@ -164,6 +164,7 @@ Supporting modules (not nav pages):
 | `features/server_files/file_client.py` | Own short bridge session and the `files:` request helper (`ServerFilesSession`) |
 | `features/server_files/download_worker.py` | `ServerFileDownloadWorker` thread: list, compare, download, verify |
 | `features/server_files/file_store.py` | Local folder layout, safe local paths, manifest, time text |
+| `features/server_files/local_files.py` | Finds the downloaded scenario folder, files in it (save copy wins), and item pictures |
 
 ## Roles
 
@@ -267,6 +268,14 @@ Rows are kept for 30 days. List calls cap the count (default 50, hard max 200).
 - `tools/set_owner_login.py` — one-time setup of the offline owner login (hash only).
 - `tools/add_login_user.py` — adds an online user (owner, admin, or moderator) and asks which saved server they belong to.
 - `tools/clear_pycache.py` — removes `__pycache__` folders.
+
+## Downloaded Server Files as the Data Source
+
+The Library and both editors read only `data/server_files/<scenario>/`, the folder the Settings download made. They never read the local base game.
+
+- **Which scenario:** `local_files.current_scenario_folder()` uses `server_files_local_folder` from `app_settings` when it is a folder directly inside `data/server_files` with a manifest. Otherwise it takes the newest such folder. No folder means the empty state. The scenario name is whatever `files:info` reported, so nothing is hard-coded.
+- **Which copy:** a path that exists in both `save/` and `scenario/` is read from `save/`, because the running game uses the save's copy. `ItemsConfig.ecf` and `Localization.csv` are looked up separately, so one can come from the save and the other from the scenario.
+- **Empty state:** every page shows `No server files yet. Use Settings > DOWNLOAD SERVER FILES.`
 
 ## Settings
 
@@ -652,6 +661,15 @@ def load_manifest(folder)
 def save_manifest(folder, manifest)
 def now_iso()
 def format_last_pulled(iso_text)
+
+## features/server_files/local_files.py
+NO_FILES_TEXT = "No server files yet. Use Settings > DOWNLOAD SERVER FILES."
+def current_scenario_folder()                   # None when nothing is downloaded
+def scenario_label(folder)
+def find_file(folder, parts)                    # (root, full path), save first, or (None, None)
+def list_files(folder, extensions, under=None)  # [{root, path, full, label}]
+def build_image_index(folder)                   # {lower item name: picture path}
+def find_item_image(folder, item_name, image_index=None)
 ```
 
 ### Login, users, and settings
@@ -852,6 +870,8 @@ Still to do:
 - Lookup path, once the scenario is downloaded: `Scenarios/<scenario>/SharedData/Content/Images/<ItemName>.jpg`.
 - An item with no image falls back to the drawn hex tile.
 - Files in that folder that do not match an item name (for example PDA pictures) are skipped.
+- Done (Nov 22, 2026): `local_files.build_image_index` reads `SharedData/Content/Images` in the downloaded save and scenario folders (save first, `.jpg` before `.png`, names compared without case). The tile, the detail card and the stats window draw the picture cut to the hex shape (`item_tiles.draw_hex_picture`), with the category colour as the edge. Pictures are cached by path and size (`PICTURE_CACHE`).
+- The live server currently reports the scenario **Default Multiplayer**, which has no Images folder, so every item shows the drawn hex there until the real scenario is confirmed.
 
 ### LIVE MODE
 
@@ -879,6 +899,8 @@ Still to wire, all against **downloaded server files** (or LIVE MODE once approv
 - **UPLOAD TO SERVER** through ZeroGBridge, only with explicit approval
 
 Until then, the toolbar buttons stay disabled with `Coming in a later step.` The ECF and PDA pages can already open a local folder for layout and editor testing. That path is not the long-term data source.
+
+Done (Nov 22, 2026): both editors fill their file dropdown from the downloaded server files on opening (`load_server_files`). Each row is shown as `<file name>  (scenario)` or `(save)`, carries its whole entry (`root`, server `path`, local `full` path), and has the server path as its tooltip. The PDA list only takes `.yaml` and `.csv` under `SharedData/Content/Extras/PDA` or `Content/Extras/PDA`. With nothing downloaded the dropdown is disabled and the editor says `No server files yet. Use Settings > DOWNLOAD SERVER FILES.` `load_local_folder` stays for tests.
 
 ### Other agreed follow-ups
 

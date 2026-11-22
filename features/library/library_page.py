@@ -5,6 +5,8 @@
 ## the picked tile's details, GIVE ITEM and LOADOUT TEMPLATES on the right.
 ## The ITEMS and BP EDITOR nav entries both open this page, each starting on its own tab.
 ## ITEMS reads a game Content folder (ItemsConfig.ecf + Localization.csv) through load_items_from; read-only.
+## (Nov 22, 2026: on opening, ITEMS reads the downloaded server files through load_server_files, never the
+## local base game. Pictures come from the downloaded SharedData/Content/Images/<ItemName>.jpg or .png.)
 ## BLUEPRINTS has no data yet, so it shows "nothing yet".
 ## GIVE ITEM changes a live player, so its button stays off until Ray OKs that step.
 ## ==========================================
@@ -22,6 +24,10 @@ from features.dashboard.dashboard_page import make_card, spread_letters
 from features.library.item_library import load_items
 from features.library.item_tiles import TileFlowArea, make_hex_pixmap
 from features.library.item_stats_dialog import ItemStatsDialog
+
+## Where the downloaded server files are, and the item pictures inside them.
+from features.server_files.local_files import (NO_FILES_TEXT, ITEMS_FILE, NAMES_FILE, current_scenario_folder,
+                                               find_file, build_image_index)
 
 # endregion
 
@@ -68,7 +74,13 @@ class LibraryPage(QWidget):
         self.items = []
         self.picked_item = None
         self.stats_dialog = None
+
+        ## The downloaded scenario folder the items came from (None = nothing downloaded).
+        self.server_folder = None
         self.setup_widgets()
+
+        ## Fill ITEMS from the downloaded server files (or show how to download them) before the first tab shows.
+        self.load_server_files()
         self._on_tab_clicked(self.active_tab)
 
     def setup_widgets(self):
@@ -276,6 +288,37 @@ class LibraryPage(QWidget):
 
     # region Items
 
+    def load_server_files(self, folder=None):
+        """Loads ITEMS from the downloaded server files. folder=None uses the last download. Returns how many loaded."""
+        try:
+            if folder is None:
+                folder = current_scenario_folder()
+            self.server_folder = folder
+            items_root, items_path = find_file(folder, ITEMS_FILE)
+            if items_path is None:
+
+                ## Nothing downloaded (or no ItemsConfig.ecf in it): the grid says how to get the files.
+                TAB_EMPTY_TEXT["items"] = NO_FILES_TEXT if folder is None else "The downloaded server files have no ItemsConfig.ecf."
+                self.items = []
+                self.tile_area.set_items(self.items)
+                self._apply_filters()
+                return 0
+            TAB_EMPTY_TEXT["items"] = "No items loaded yet."
+
+            ## Localization.csv may be missing (the scenario then shows internal names).
+            names_root, names_path = find_file(folder, NAMES_FILE)
+            self.items = load_items(None, items_path=items_path, names_path=names_path or "")
+            image_index = build_image_index(folder)
+            for item in self.items:
+                item["image_path"] = image_index.get(item["name"].lower())
+            self.tile_area.set_items(self.items)
+            self._apply_filters()
+            print(f"[INFO] LibraryPage: {len(self.items)} items from {items_root}, {sum(1 for item in self.items if item['image_path'])} with pictures")
+            return len(self.items)
+        except Exception as e:
+            print(f"[ERROR] LibraryPage: Could not load the downloaded server files: {e}")
+            return 0
+
     def load_items_from(self, content_folder):
         """Reads every item from a game Content folder and fills the grid. Read-only. Returns how many loaded."""
         self.items = load_items(content_folder)
@@ -316,7 +359,7 @@ class LibraryPage(QWidget):
     def _on_tile_picked(self, item):
         """Fills the detail card with the picked item and turns on VIEW ALL STATS."""
         self.picked_item = item
-        self.lbl_detail_picture.setPixmap(make_hex_pixmap(80, item["filter_group"], item["display_name"]))
+        self.lbl_detail_picture.setPixmap(make_hex_pixmap(80, item["filter_group"], item["display_name"], item.get("image_path")))
         self.lbl_detail_name.setText(item["display_name"])
         self.lbl_detail_id.setText("ID:  " + item["id"])
         self.lbl_detail_stack.setText("STACK SIZE:  " + item["stack_size"])

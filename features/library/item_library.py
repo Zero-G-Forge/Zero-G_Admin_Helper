@@ -53,16 +53,22 @@ def _filter_group(item_name, category, ammo_names):
     return ""
 
 
-def load_items(content_folder):
+def load_items(content_folder, items_path=None, names_path=None):
     """Returns a list of item dicts sorted by name, or [] if ItemsConfig.ecf can't be read."""
-    items_path = os.path.join(content_folder, "Configuration", "ItemsConfig.ecf")
+
+    ## items_path / names_path let the downloaded server files point at each file on its own
+    ## (ItemsConfig.ecf may come from the save while Localization.csv comes from the scenario).
+    if items_path is None:
+        items_path = os.path.join(content_folder, "Configuration", "ItemsConfig.ecf")
     try:
         with open(items_path, encoding="utf-8", errors="replace") as items_file:
             file_text = items_file.read()
     except OSError as e:
         print(f"[ERROR] ItemLibrary: Could not read {items_path}: {e}")
         return []
-    english_names = read_english_names(os.path.join(content_folder, "Extras", "Localization.csv"))
+    if names_path is None:
+        names_path = os.path.join(content_folder, "Extras", "Localization.csv")
+    english_names = read_english_names(names_path)
     item_blocks = [block for block in resolve_refs(parse_ecf_blocks(file_text)) if block["type"] == "Item"]
 
     ## Every name used as AmmoType by a weapon mode counts as ammo.
