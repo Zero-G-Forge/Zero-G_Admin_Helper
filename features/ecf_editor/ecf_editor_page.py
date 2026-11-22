@@ -5,7 +5,7 @@
 ## TRADERS on the left, ITEMS in the middle, VALIDATION and CHANGES PREVIEW on the right,
 ## and a backup line along the bottom.
 ## Layout only for now: no ECF file is loaded yet, so every panel shows "nothing yet".
-## UPLOAD TO GTX changes the live server, so it stays locked until Ray OKs that step.
+## UPLOAD TO SERVER changes the live server, so it stays locked until Ray OKs that step.
 ## ==========================================
 
 # region Imports
@@ -62,7 +62,7 @@ class EcfEditorPage(QWidget):
         toolbar_layout.setContentsMargins(14, 10, 14, 10)
         toolbar_layout.setSpacing(12)
 
-        ## Which ECF file to edit, e.g. TraderNPCConfig.ecf. Empty until the files are read from GTX.
+        ## Which ECF file to edit, e.g. TraderNPCConfig.ecf. Empty until the files are read from the server.
         self.cmb_file = QComboBox()
         self.cmb_file.setObjectName("EcfFileCombo")
         self.cmb_file.setPlaceholderText("No file loaded")
@@ -73,12 +73,12 @@ class EcfEditorPage(QWidget):
         toolbar_layout.addStretch(1)
 
         ## DOWNLOAD only reads from the server; VALIDATE and SAVE work on the local copy.
-        self.btn_download = self._make_tool_button("DOWNLOAD FROM GTX (READ-ONLY)", "DashActionButton")
+        self.btn_download = self._make_tool_button("DOWNLOAD FROM SERVER (READ-ONLY)", "DashActionButton")
         self.btn_validate = self._make_tool_button("VALIDATE", "DashActionButton")
         self.btn_save = self._make_tool_button("SAVE (BACKUP FIRST)", "DashActionButton")
 
         ## UPLOAD changes the live server, so it's amber with a lock, like the other server-changing buttons.
-        self.btn_upload = self._make_tool_button("🔒  UPLOAD TO GTX", "AlertBanButton")
+        self.btn_upload = self._make_tool_button("🔒  UPLOAD TO SERVER", "AlertBanButton")
         for tool_button in (self.btn_download, self.btn_validate, self.btn_save, self.btn_upload):
             toolbar_layout.addWidget(tool_button)
         page_grid.addWidget(toolbar_card, 0, 0, 1, 3)
