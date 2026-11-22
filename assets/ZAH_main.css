@@ -341,6 +341,11 @@ QTableWidget#DashTable {
     font-size: 13px;
 }
 
+/* The header strip behind the column names: transparent too, or Qt paints it white */
+QTableWidget#DashTable QHeaderView {
+    background-color: transparent;
+}
+
 QTableWidget#DashTable QHeaderView::section {
     background-color: transparent;
     border: none;
@@ -373,6 +378,56 @@ QPushButton#DashActionButton:pressed {
 QPushButton#DashActionButton:disabled {
     border: 1px solid rgba(51, 214, 255, 70);
     color: rgba(143, 230, 255, 90);
+}
+
+/* endregion */
+
+/* region: Alerts Page */
+
+/* Alerts & Anti-Cheat page (features/alerts/alerts_page.py), matched to Concept_11-17/Alerts_Anti-cheat.jpg.
+   Cards, tables and "nothing yet" text reuse the Dashboard styles above.
+*/
+
+/* "PLAYER: NovaStriker" line under the alert title */
+#AlertPlayerLabel {
+    color: #8fe6ff;
+    font-size: 13px;
+}
+
+/* COMMAND PREVIEW box: dark inner box with monospace text */
+QPlainTextEdit#AlertPreviewBox {
+    background-color: rgba(5, 14, 24, 180);
+    border: 1px solid rgba(40, 170, 215, 60);
+    border-radius: 6px;
+    color: #dcebf5;
+    font-family: "DejaVu Sans Mono", monospace;
+    font-size: 13px;
+    padding: 6px;
+}
+
+/* PREVIEW BAN: amber outlined button with a dark amber fill */
+QPushButton#AlertBanButton {
+    background-color: rgba(60, 40, 8, 200);
+    border: 1px solid #f5a623;
+    border-radius: 6px;
+    color: #ffc04d;
+    font-size: 18px;
+    font-weight: 500;
+}
+
+QPushButton#AlertBanButton:hover {
+    background-color: rgba(110, 72, 12, 200);
+    color: #ffffff;
+}
+
+QPushButton#AlertBanButton:pressed {
+    background-color: rgba(245, 166, 35, 90);
+}
+
+/* Greyed out: same shape, dimmer amber */
+QPushButton#AlertBanButton:disabled {
+    border: 1px solid rgba(245, 166, 35, 80);
+    color: rgba(255, 192, 77, 100);
 }
 
 /* endregion */
