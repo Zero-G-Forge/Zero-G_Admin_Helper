@@ -189,6 +189,17 @@ def _draw_ecf_editor(painter, color):
     for y in (28, 38, 48):
         painter.drawLine(QPointF(20, y), QPointF(44, y))
 
+def _draw_pda_editor(painter, color):
+    ## Handheld PDA: rounded body, a screen with two text lines, and a round button below
+    painter.setPen(_make_pen(color, 5))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(14, 6, 36, 52), 6, 6)
+    painter.setPen(_make_pen(color, 3))
+    painter.drawRect(QRectF(20, 13, 24, 26))
+    painter.drawLine(QPointF(24, 21), QPointF(40, 21))
+    painter.drawLine(QPointF(24, 30), QPointF(36, 30))
+    painter.drawEllipse(QRectF(28, 45, 8, 8))
+
 def _draw_backups(painter, color):
     ## Database cylinder: top oval, sides and two bands
     painter.setPen(_make_pen(color, 5))
@@ -253,6 +264,7 @@ ICON_DRAWERS = {
     "world": _draw_world,
     "library": _draw_library,
     "ecf_editor": _draw_ecf_editor,
+    "pda_editor": _draw_pda_editor,
     "backups": _draw_backups,
     "bp_editor": _draw_bp_editor,
     "items": _draw_items,

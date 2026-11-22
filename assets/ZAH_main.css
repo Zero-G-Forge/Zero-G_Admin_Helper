@@ -788,7 +788,8 @@ QPushButton#StructFilterButton:checked {
 /* region: ECF Editor Page */
 
 /* Toolbar buttons: smaller text than the dashboard's big buttons, with room on each side */
-#EcfEditorPage QPushButton {
+/* The PDA Editor page uses the same layout, so it shares every ECF Editor style in this region */
+#EcfEditorPage QPushButton, #PdaEditorPage QPushButton {
     font-size: 13px;
     padding: 0px 16px;
 }

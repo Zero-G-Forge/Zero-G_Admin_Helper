@@ -34,6 +34,7 @@ PAGE_MODULES = {
     "bans_audit": "features.bans_audit.bans_audit_page",
     "users": "features.users.users_page",
     "ecf_editor": "features.ecf_editor.ecf_editor_page",
+    "pda_editor": "features.pda_editor.pda_editor_page",
     "backups": "features.backups.backups_page",
     "bp_editor": "features.bp_editor.bp_editor_page",
     "items": "features.items.items_page",

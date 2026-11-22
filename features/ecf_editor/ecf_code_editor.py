@@ -139,7 +139,7 @@ class LineNumberArea(QWidget):
 class EcfCodeEditor(QPlainTextEdit):
     """The ECF code editor: a QPlainTextEdit with line numbers, colours, current line and brace matching."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, highlighter_class=None):
         super().__init__(parent)
 
         ## Name that ZAH_main.css can use to style the editor.
@@ -157,7 +157,8 @@ class EcfCodeEditor(QPlainTextEdit):
         self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * 2)
         self.setPlaceholderText("No file loaded.")
 
-        self.highlighter = EcfHighlighter(self.document())
+        ## Which colour rules to use. .ecf by default; the PDA Editor passes its YAML highlighter instead.
+        self.highlighter = (highlighter_class or EcfHighlighter)(self.document())
         self.line_number_area = LineNumberArea(self)
 
         ## Keep the line numbers and highlights in step with typing and scrolling.

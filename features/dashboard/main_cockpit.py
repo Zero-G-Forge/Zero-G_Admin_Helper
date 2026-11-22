@@ -121,6 +121,7 @@ NAV_PAGES = [
     ("bans_audit", "BANS & AUDIT"),
     ("users", "USERS"),
     ("ecf_editor", "ECF EDITOR"),
+    ("pda_editor", "PDA EDITOR"),
     ("backups", "BACKUPS"),
     ("bp_editor", "BP EDITOR"),
     ("items", "ITEMS"),
@@ -132,7 +133,7 @@ NAV_PAGES = [
 NAV_GROUPS = {
     "world": ("WORLD", None, ["structures", "playfields"]),
     "library": ("LIBRARY", None, ["bp_editor", "items"]),
-    "settings": ("SETTINGS", "settings", ["alerts", "bans_audit", "users", "ecf_editor", "backups"]),
+    "settings": ("SETTINGS", "settings", ["alerts", "bans_audit", "users", "ecf_editor", "pda_editor", "backups"]),
 }
 
 ## Top-to-bottom order of the nav column. A key found in NAV_GROUPS becomes a pop-out menu group.
