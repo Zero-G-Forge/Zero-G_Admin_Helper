@@ -105,13 +105,13 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
             return False
         return secrets.compare_digest(str(sent_key or ""), DEV_LOG_KEY)
 
-    ## Who is asking to manage users: an owner's username, DEVELOPER_MANAGER for the developer key,
-    ## or None if they aren't allowed (fails closed).
+    ## Who is asking to manage users: an owner's or admin's username, DEVELOPER_MANAGER for the developer key,
+    ## or None if they aren't allowed (fails closed). Admins are limited to moderators further down.
     def _user_manager(self, login_data):
         if self._dev_key_ok(login_data.get("dev_key")):
             return DEVELOPER_MANAGER
         token = str(login_data.get("token") or "")
-        if self._token_role(token) != "owner":
+        if self._token_role(token) not in ("owner", "admin"):
             return None
         session = active_sessions.get(token)
         if session is not None:
@@ -186,7 +186,8 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
                 return
 
             ## /users, /users/save and /users/delete: owners, or the developer key, manage the login users.
-            ## 403 = not allowed. A bad token and a non-owner get the same reply, so nobody can test tokens.
+            ## Admins can see the list too, but can only add, change or remove moderators.
+            ## 403 = not allowed. A bad token and a moderator get the same reply, so nobody can test tokens.
             if self.path.startswith("/users"):
                 manager_name = self._user_manager(login_data)
                 if manager_name is None:
@@ -194,14 +195,49 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
                     return
                 target_name = str(login_data.get("username", "")).strip().lower()
 
+                ## Every user, read once and used by all three routes below.
+                all_users = list_users()
+                if all_users is None:
+                    self._send_json(500, {"status": "error", "message": "server error"})
+                    return
+
+                ## Owners manage only their own server's users; the developer key manages every server.
+                ## manager_server is the owner's (server_name, server_address), or None for the developer.
+                ## An owner with no server gets nothing (fails closed) until the developer sets one.
+                manager_server = None
+                manager_role = "developer"
+                user_list = all_users
+                if manager_name != DEVELOPER_MANAGER:
+                    manager_record = next((user for user in all_users if user.get("username") == manager_name), None)
+                    if manager_record is None or not manager_record.get("server_name"):
+                        self._send_json(403, {"status": "error", "message": "your account has no server, ask the developer to set one"})
+                        return
+                    manager_server = (manager_record.get("server_name", ""), manager_record.get("server_address", ""))
+                    manager_role = manager_record.get("role", "")
+                    user_list = [user for user in all_users
+                                 if (user.get("server_name", ""), user.get("server_address", "")) == manager_server]
+
                 ## /users: the list of names, roles and dates. Never any password data.
                 if self.path == "/users":
-                    user_list = list_users()
-                    if user_list is None:
-                        self._send_json(500, {"status": "error", "message": "server error"})
-                        return
                     self._send_json(200, {"status": "ok", "users": user_list})
                     return
+
+                ## An owner can't touch a user on another server. A brand new name is fine (it's an add).
+                target_elsewhere = (any(user.get("username") == target_name for user in all_users)
+                                    and not any(user.get("username") == target_name for user in user_list))
+                if manager_server is not None and target_elsewhere:
+                    self._send_json(403, {"status": "error", "message": "that user is on another server"})
+                    return
+
+                ## An admin manages moderators only: the user must be a moderator (or brand new),
+                ## and the only role an admin can give is moderator. This also stops an admin changing themselves.
+                if manager_role == "admin":
+                    target_record = next((user for user in user_list if user.get("username") == target_name), None)
+                    target_is_moderator = target_record is None or target_record.get("role") == "moderator"
+                    gives_moderator = self.path == "/users/delete" or login_data.get("role") == "moderator"
+                    if not (target_is_moderator and gives_moderator):
+                        self._send_json(403, {"status": "error", "message": "admins can only manage moderators"})
+                        return
 
                 ## An owner can't remove or demote their own account, so nobody can lock themselves out.
                 if target_name == manager_name and (self.path == "/users/delete" or login_data.get("role") != "owner"):
@@ -226,6 +262,10 @@ class LoginRequestHandler(BaseHTTPRequestHandler):
 
                 ## The name as ZAH sent it, capitals kept. user_store lowers it for sign-in and keeps this for showing.
                 typed_name = str(login_data.get("username", "")).strip()
+
+                ## An owner always saves users onto their own server, whatever ZAH sent.
+                if manager_server is not None:
+                    server_name, server_address = manager_server
 
                 if new_password:
                     saved = add_user(typed_name, new_password, login_data.get("role"), server_name, server_address)

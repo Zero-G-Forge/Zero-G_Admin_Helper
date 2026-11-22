@@ -1,6 +1,7 @@
 ## ==========================================
 ## ZERO-G ADMIN HELPER - USERS PAGE
 ## Owners (and Ray's developer login) see, add, edit and remove the online login users in ZAH-DB.
+## Admins see the same list but can only add, edit and remove moderators.
 ## The login service checks the owner's token or the developer key itself, so ZAH can't be tricked.
 ## ==========================================
 
@@ -120,7 +121,7 @@ class UserTaskRunner(QThread):
 ## The small ADD USER / EDIT USER window. It only collects the values; the page sends them.
 class UserEditDialog(QDialog):
 
-    def __init__(self, username="", role="moderator", parent=None, server_name="", server_address=""):
+    def __init__(self, username="", role="moderator", parent=None, server_name="", server_address="", role_choices=None):
         super().__init__(parent)
 
         ## A name means editing an existing user; a blank name means adding a new one.
@@ -133,10 +134,15 @@ class UserEditDialog(QDialog):
         self.original_name = str(username).lower()
         self.txt_username = QLineEdit(username)
         form.addRow("USERNAME", self.txt_username)
+        ## role_choices limits the list, e.g. admins only get "moderator". The service checks this again.
+        role_choices = role_choices or ROLE_CHOICES
         self.cmb_role = QComboBox()
-        self.cmb_role.addItems(ROLE_CHOICES)
-        if role in ROLE_CHOICES:
-            self.cmb_role.setCurrentText(role)
+
+        ## Shown with a capital ("Moderator"), but each item keeps the lower-case role as its data for the service.
+        for role_choice in role_choices:
+            self.cmb_role.addItem(role_choice.capitalize(), role_choice)
+        if role in role_choices:
+            self.cmb_role.setCurrentIndex(self.cmb_role.findData(role))
         form.addRow("ROLE", self.cmb_role)
 
         ## Which server this user belongs to. Each item keeps (name, address) hidden as its data.
@@ -185,7 +191,7 @@ class UserEditDialog(QDialog):
 
     ## Returns (username, role, password). Names keep their capitals; the service lowers them for sign-in.
     def get_values(self):
-        return self.txt_username.text().strip(), self.cmb_role.currentText(), self.txt_password.text()
+        return self.txt_username.text().strip(), self.cmb_role.currentData(), self.txt_password.text()
 
     ## Returns (server_name, server_address) for the picked server. ("", "") means UNASSIGNED.
     def get_server(self):
@@ -249,7 +255,7 @@ class UsersPage(QWidget):
         self.btn_users_remove.clicked.connect(self.remove_user_clicked)
         title_row.addWidget(self.btn_users_remove)
 
-        ## Starts greyed out; refresh_users turns it on only for an owner who can reach the service.
+        ## Starts greyed out; refresh_users turns it on only for an admin or owner who can reach the service.
         self.btn_users_refresh = QPushButton("REFRESH")
         self.btn_users_refresh.setObjectName("BansAuditButton")
         self.btn_users_refresh.clicked.connect(self.refresh_users)
@@ -311,9 +317,9 @@ class UsersPage(QWidget):
         user_has_role = getattr(cockpit, "user_has_role", None)
         session_token = getattr(cockpit, "session_token", None)
 
-        ## Owners and up only.
-        if not (user_has_role and user_has_role("owner")):
-            self._show_message("Owners only.")
+        ## Admins and up only. Admins can manage moderators only; the service enforces that.
+        if not (user_has_role and user_has_role("admin")):
+            self._show_message("Admins and up only.")
             return None
 
         ## No token? The developer login can use the developer key instead, if this computer has one.
@@ -321,7 +327,7 @@ class UsersPage(QWidget):
         if not session_token and user_has_role("developer") and load_dev_key is not None:
             dev_key = load_dev_key()
         if not session_token and not dev_key:
-            self._show_message("Sign in online as an owner to manage users.")
+            self._show_message("Sign in online as an admin or owner to manage users.")
             return None
         return session_token, dev_key
 
@@ -420,7 +426,7 @@ class UsersPage(QWidget):
                 self._show_message("Login service unreachable, try REFRESH later.")
                 return
             if task_result != "ok" or users is None:
-                self._show_message("The login service refused. Sign out and back in as an owner.")
+                self._show_message("The login service refused. Sign out and back in, or ask the developer to set your server.")
                 return
 
             ## Each server gets a heading row (name and IP), a USERNAME / ROLE / ADDED row, then its users.
@@ -438,7 +444,7 @@ class UsersPage(QWidget):
                     ## .get with "" keeps a broken entry from stopping the whole table.
                     self._add_table_row([
                         shown_name(user),
-                        str(user.get("role", "")).upper(),
+                        str(user.get("role", "")).capitalize(),
                         make_readable_date(user.get("created_at", "")),
                     ], user, "user", 1)
             self.lbl_users_status.setText(f"{len(users)} login users.")
@@ -459,12 +465,25 @@ class UsersPage(QWidget):
         if 0 <= selected_row < len(self.row_users):
             return self.row_users[selected_row]
         return None
+
+    ## True (with a message) when an admin picks someone who isn't a moderator.
+    ## Admins manage moderators only; owners and the developer can manage anyone. The service checks this again.
+    def _admin_blocked(self, picked_user):
+        cockpit = self.window()
+        if getattr(cockpit, "user_has_role", lambda needed_role: False)("owner"):
+            return False
+        if str(picked_user.get("role", "")) == "moderator":
+            return False
+        self.lbl_users_status.setText("Admins can only edit or remove moderators.")
+        return True
     def add_user_clicked(self):
         self._open_user_dialog("", "moderator")
     def edit_user_clicked(self):
         picked_user = self._selected_user()
         if picked_user is None:
             self.lbl_users_status.setText("Pick a user in the table first.")
+            return
+        if self._admin_blocked(picked_user):
             return
         self._open_user_dialog(shown_name(picked_user), str(picked_user.get("role", "")),
                                str(picked_user.get("server_name", "")), str(picked_user.get("server_address", "")))
@@ -479,7 +498,22 @@ class UsersPage(QWidget):
             if save_function is None:
                 self.lbl_users_status.setText("Users can't be changed, see log.")
                 return
-            user_dialog = UserEditDialog(username, role, self, server_name, server_address)
+            ## Owners and the developer can give any role; an admin can only give moderator.
+            cockpit = self.window()
+            can_give_any_role = getattr(cockpit, "user_has_role", lambda needed_role: False)("owner")
+            role_choices = None if can_give_any_role else ["moderator"]
+
+            ## Owners and admins only ever save onto their own server (the service forces it), so the dropdown
+            ## shows that server and is locked. Their list holds only their server's users, so any row tells us which.
+            ## The developer can still pick any server.
+            is_developer = getattr(cockpit, "user_has_role", lambda needed_role: False)("developer")
+            own_server = next(((str(user.get("server_name", "")), str(user.get("server_address", "")))
+                               for user in self.row_users if user), None)
+            if not is_developer and own_server is not None:
+                server_name, server_address = own_server
+            user_dialog = UserEditDialog(username, role, self, server_name, server_address, role_choices)
+            if not is_developer:
+                user_dialog.cmb_server.setEnabled(False)
 
             ## exec() waits here until OK or Cancel is pressed.
             if user_dialog.exec() != QDialog.DialogCode.Accepted:
@@ -501,6 +535,8 @@ class UsersPage(QWidget):
             picked_user = self._selected_user()
             if picked_user is None:
                 self.lbl_users_status.setText("Pick a user in the table first.")
+                return
+            if self._admin_blocked(picked_user):
                 return
             access = self._get_access()
             remove_function = remove_user

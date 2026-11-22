@@ -436,9 +436,10 @@ class MainCockpit(QMainWindow):
                     app.quit()
                 return
             
-            ## Signed in again: show the new user, reload the page for their role, and bring the cockpit back.
+            ## Signed in again: show the new user, go back to the DASHBOARD (ZAH always lands there), and bring the cockpit back.
+            ## _on_nav_clicked also ticks the DASHBOARD button and sets the title, not just the page.
             self.set_signed_in_user(login.signed_in_user, login.signed_in_role, login.session_token)
-            self._show_page(self.active_page)
+            self._on_nav_clicked("dashboard")
             self.show()
 
         except Exception as e:
