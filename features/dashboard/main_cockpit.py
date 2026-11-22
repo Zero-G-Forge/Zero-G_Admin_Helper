@@ -858,6 +858,10 @@ class MainCockpit(QMainWindow):
             ## safely once the current click has finished.
             if old_widget is not None:
                 self.content_panel_layout.removeWidget(old_widget)
+
+                ## Hide it right away. While the Settings dropdown menu is open, Qt waits
+                ## to run deleteLater, so the old page would stay drawn under the new one.
+                old_widget.hide()
                 old_widget.deleteLater()
 
             ## Put the new widget in. stretch=1 lets it fill the free space.
