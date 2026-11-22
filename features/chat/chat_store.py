@@ -9,6 +9,7 @@
 
 import json
 import os
+import re
 
 from features.paths import DATA_DIR
 
@@ -83,15 +84,32 @@ def save_watch_words(rows):
     os.replace(part, WATCH_WORDS_FILE)
 
 
-## Messages that contain a switched-on watch word (case does not matter). Newest first, as (word, message).
-def find_hits(messages=None, rows=None):
-    words = [row["word"].lower() for row in (rows if rows is not None else load_watch_words()) if row.get("on")]
+## True when text contains word, using the given matching rules.
+## The defaults (case-insensitive, substring) are the original find_hits behaviour.
+def text_has_watch_word(text, word, case_sensitive=False, whole_word=False):
+    if not word:
+        return False
+    haystack = text if case_sensitive else str(text).lower()
+    needle = word if case_sensitive else str(word).lower()
+    if not whole_word:
+        return needle in haystack
+    return re.search(r"\b" + re.escape(needle) + r"\b", haystack) is not None
+
+
+## Messages that contain a switched-on watch word. Newest first, as (word, message).
+## case_sensitive and whole_word default to off, so a missing call still does a
+## case-insensitive substring match (the original behaviour).
+def find_hits(messages=None, rows=None, case_sensitive=False, whole_word=False):
+    rows = rows if rows is not None else load_watch_words()
     hits = []
     for message in reversed(messages if messages is not None else CHAT_HISTORY):
-        text = str(message.get("text", "")).lower()
-        for word in words:
-            if word and word in text:
-                hits.append((word, message))
+        text = str(message.get("text", ""))
+        for row in rows:
+            if not row.get("on"):
+                continue
+            word = str(row.get("word", ""))
+            if text_has_watch_word(text, word, case_sensitive, whole_word):
+                hits.append((word if case_sensitive else word.lower(), message))
                 break
     return hits
 

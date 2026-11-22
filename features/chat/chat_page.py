@@ -20,6 +20,7 @@ from datetime import datetime
 ## Read-only bridge reads, the Safety Flow, and the shared chat history and watch words.
 from features.shared import server_actions
 from features.chat import chat_store
+from features.cheat_checker.cheat_checker_settings import watch_match_kwargs
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
@@ -335,7 +336,7 @@ class ChatPage(QWidget):
             self.lbl_messages_empty.setVisible(not messages)
             if not messages:
                 self.lbl_messages_empty.setText("No chat messages yet.")
-            self.shown_hits = chat_store.find_hits()[:50]
+            self.shown_hits = chat_store.find_hits(**watch_match_kwargs())[:50]
             self.lst_hits.blockSignals(True)
             self.lst_hits.clear()
             for word, message in self.shown_hits:

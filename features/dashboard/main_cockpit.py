@@ -132,6 +132,7 @@ NAV_PAGES = [
     ("zerogbridge", "ZEROGBRIDGE"),
     ("settings", "SETTINGS"),
     ("alerts", "ALERTS & ANTI-CHEAT"),
+    ("cheat_checker", "CHEAT CHECKER SETTINGS"),
     ("bans_audit", "BANS & AUDIT"),
     ("users", "USERS"),
     ("ecf_editor", "ECF EDITOR"),
@@ -147,7 +148,7 @@ NAV_PAGES = [
 NAV_GROUPS = {
     "world": ("WORLD", None, ["structures", "playfields"]),
     "library": ("LIBRARY", None, ["bp_editor", "items"]),
-    "settings": ("SETTINGS", "settings", ["alerts", "bans_audit", "users", "ecf_editor", "pda_editor", "backups"]),
+    "settings": ("SETTINGS", "settings", ["alerts", "cheat_checker", "bans_audit", "users", "ecf_editor", "pda_editor", "backups"]),
 }
 
 ## Top-to-bottom order of the nav column. A key found in NAV_GROUPS becomes a pop-out menu group.

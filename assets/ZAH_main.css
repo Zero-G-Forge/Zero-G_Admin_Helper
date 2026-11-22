@@ -1021,3 +1021,28 @@ QProgressBar#SettingsProgressBar::chunk {
 }
 
 /* endregion */
+
+/* region: Cheat Checker Page */
+
+/* Cheat Checker Settings page (features/cheat_checker/cheat_checker_page.py).
+   Cards, checkboxes, combos and action buttons reuse the Dashboard, Settings and Chat styles.
+*/
+
+QScrollArea#CheatCheckerScroll, QWidget#CheatCheckerInner {
+    background: transparent;
+    border: none;
+}
+
+QFrame#SafetyNoteBox {
+    background-color: rgba(60, 40, 8, 180);
+    border: 1px solid #f5a623;
+    border-radius: 6px;
+}
+
+#CheatCheckerPage QPushButton#DashActionButton {
+    font-size: 14px;
+    padding: 8px 18px;
+    min-height: 36px;
+}
+
+/* endregion */

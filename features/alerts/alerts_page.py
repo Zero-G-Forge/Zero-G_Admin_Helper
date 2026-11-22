@@ -8,6 +8,10 @@
 ## Wired (Nov 22, 2026): the queue is built here from two read-only sources: the plys cheat flags (CRITICAL) and
 ## chat watch-word hits from chat:recent (WARNING). ACK hides an alert on this PC. PREVIEW BAN fills COMMAND
 ## PREVIEW with con:ban and sends it only through the Safety Flow (admin and up).
+## Cheat checker settings (Nov 22, 2026): the queue also reads data/cheat_checker_settings.json.
+## With no saved file the behaviour above is unchanged. Detection toggles, matching, thresholds,
+## the refresh interval, a role filter and a local log apply only after they are saved. Kicks and
+## bans still go only through the Safety Flow; nothing is sent automatically.
 ## ==========================================
 
 # region Imports
@@ -20,8 +24,11 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QGridLayout, 
 ## Read-only bridge reads, the Safety Flow, chat watch-word hits, the cheat-flag rule and the ban lengths.
 from features.shared import server_actions
 from features.chat import chat_store
-from features.dashboard.dashboard_page import is_flagged
 from features.players.players_page import BAN_LENGTHS
+from features.cheat_checker.cheat_checker_settings import (
+    build_configured_alerts, load_cheat_checker_settings, watch_match_kwargs,
+    user_may_see_alerts, poll_interval_ms, load_persisted_acks, persist_ack, append_alert_log,
+)
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
@@ -41,17 +48,13 @@ REFRESH_SEC = 15
 ACKNOWLEDGED = set()
 
 
-## Builds the alert list: one CRITICAL per flagged player, one WARNING per chat hit. Newest hits first.
-def build_alerts(players, hits):
-    alerts = []
-    for player in players:
-        if isinstance(player, dict) and is_flagged(player):
-            alerts.append({"key": f"cheat:{player.get('steamId') or player.get('name')}", "level": "CRITICAL",
-                           "title": "CHEAT FLAG", "player": player, "entity_id": str(player.get("entityId", "")),
-                           "name": str(player.get("name", "?"))})
-    for word, message in hits:
-        alerts.append({"key": f"chat:{message.get('seq')}", "level": "WARNING", "title": f"WATCH WORD: {word.upper()}",
-                       "message": message, "entity_id": str(message.get("senderId", "")), "name": "", "word": word})
+## Builds the alert list from plys flags and chat watch-word hits.
+## With no saved cheat-checker settings this is still one CRITICAL per flagged player
+## and one WARNING per chat hit, newest hits first.
+def build_alerts(players, hits, flag_poll_counts=None, settings=None):
+    alerts, _counts = build_configured_alerts(
+        players, hits, settings=settings, flag_poll_counts=flag_poll_counts
+    )
     return alerts
 
 # endregion
@@ -72,6 +75,9 @@ class AlertsPage(QWidget):
         ## Read players, and the alerts shown in the queue now.
         self.players = []
         self.alerts = []
+
+        ## Consecutive plys polls in which each cheat: key was still flagged (for the poll threshold).
+        self.flag_poll_counts = {}
         self.setup_widgets()
         self._wire_live_data()
 
@@ -189,7 +195,7 @@ class AlertsPage(QWidget):
             self.btn_ack.clicked.connect(self._on_ack_clicked)
             self.btn_preview_ban.clicked.connect(self._on_preview_ban_clicked)
             self.refresh_timer = QTimer(self)
-            self.refresh_timer.setInterval(REFRESH_SEC * 1000)
+            self.refresh_timer.setInterval(poll_interval_ms())
             self.refresh_timer.timeout.connect(self.refresh_live)
         except Exception as e:
             print(f"[ERROR] AlertsPage: Could not wire live data: {e}")
@@ -197,6 +203,7 @@ class AlertsPage(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         try:
+            self.refresh_timer.setInterval(poll_interval_ms())
             self.refresh_live()
             self.refresh_timer.start()
         except Exception as e:
@@ -245,7 +252,24 @@ class AlertsPage(QWidget):
     def show_alerts(self):
         try:
             picked = self.selected_alert()
-            self.alerts = [alert for alert in build_alerts(self.players, chat_store.find_hits()) if alert["key"] not in ACKNOWLEDGED]
+            settings = load_cheat_checker_settings()
+            ACKNOWLEDGED.update(load_persisted_acks())
+            if not user_may_see_alerts(self, settings):
+                self.alerts = []
+                self.lst_alerts.blockSignals(True)
+                self.lst_alerts.clear()
+                self.lst_alerts.blockSignals(False)
+                self.lbl_queue_empty.setVisible(True)
+                self.lbl_queue_empty.setText("Your role cannot see these alerts.")
+                self.show_detail()
+                return
+            hits = chat_store.find_hits(**watch_match_kwargs(settings))
+            built, self.flag_poll_counts = build_configured_alerts(
+                self.players, hits, settings=settings, flag_poll_counts=self.flag_poll_counts
+            )
+            self.alerts = [alert for alert in built if alert["key"] not in ACKNOWLEDGED]
+            for alert in self.alerts:
+                append_alert_log(alert)
             self.lst_alerts.blockSignals(True)
             self.lst_alerts.clear()
             for alert in self.alerts:
@@ -307,7 +331,7 @@ class AlertsPage(QWidget):
                     message = alert["message"]
                     rows.append(("WATCH WORD", "--", alert["word"], "--"))
                     rows.append(("CHANNEL", "--", str(message.get("channel", "--")), "--"))
-                    for word, hit in chat_store.find_hits():
+                    for word, hit in chat_store.find_hits(**watch_match_kwargs()):
                         if str(hit.get("senderId")) == alert["entity_id"]:
                             self.lst_timeline.addItem(f"{str(hit.get('time', ''))[11:16]} UTC  \"{word}\"  {hit.get('text', '')}")
                 for row_values in rows:
@@ -338,6 +362,7 @@ class AlertsPage(QWidget):
             alert = self.selected_alert()
             if alert is not None:
                 ACKNOWLEDGED.add(alert["key"])
+                persist_ack(alert["key"])
                 self.show_alerts()
         except Exception as e:
             print(f"[ERROR] AlertsPage: ACK failed: {e}")
@@ -357,6 +382,7 @@ class AlertsPage(QWidget):
                 print(f"[{'SUCCESS' if ok else 'ERROR'}] AlertsPage: Ban: {server_actions.reply_text(reply)}")
                 if ok:
                     ACKNOWLEDGED.add(alert["key"])
+                    persist_ack(alert["key"])
                     self.refresh_live()
             server_actions.run_server_action(self, "alert_ban", "Ban from an alert", command, done,
                                              explanation=f"Bans {alert['name']} for {length} because of: {alert['title']}.")

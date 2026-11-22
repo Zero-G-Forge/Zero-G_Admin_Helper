@@ -40,8 +40,9 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 | `features/bridge/` | Socket login, command queue thread, server profile loading |
 | `features/login/` | Login window, password hashing, online and offline sessions |
 | `features/settings/` | Settings page and `app_settings.json` helpers |
+| `features/cheat_checker/` | Cheat Checker Settings page and `data/cheat_checker_settings.json` helpers |
 | `features/server_files/` | Read-only download of the server's editable files (bridge client, worker thread, local folder rules) |
-| `tests/` | Python checks, run with `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests -q`: download (`test_server_files.py`), downloaded-file lookups (`test_local_files.py`), validate/diff/save (`test_edit_tools.py`), and uploads, role gate, LIVE MODE and core upload against the local harness only (`test_server_writes.py`) |
+| `tests/` | Python checks, run with `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests -q`: download (`test_server_files.py`), downloaded-file lookups (`test_local_files.py`), validate/diff/save (`test_edit_tools.py`), uploads, role gate, LIVE MODE and core upload against the local harness only (`test_server_writes.py`), and cheat-checker settings (`test_cheat_checker.py`) |
 | `features/library/` | Shared Items and Blueprints library (tiles, stats, ECF loading) |
 | `features/ecf_editor/` | ECF Editor page and code view |
 | `features/pda_editor/` | PDA Editor page and YAML highlighter |
@@ -110,7 +111,7 @@ Three tables must stay in sync when a page is added:
 | --- | --- | --- | --- |
 | `world` | WORLD | (none) | `structures`, `playfields` |
 | `library` | LIBRARY | (none) | `bp_editor`, `items` |
-| `settings` | SETTINGS | `settings` | `alerts`, `bans_audit`, `users`, `ecf_editor`, `pda_editor`, `backups` |
+| `settings` | SETTINGS | `settings` | `alerts`, `cheat_checker`, `bans_audit`, `users`, `ecf_editor`, `pda_editor`, `backups` |
 
 The **SERVERS** button is hidden unless two or more servers are connected. If it hides while that page is open, the cockpit returns to **DASHBOARD**.
 
@@ -138,7 +139,8 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `scheduler` | SCHEDULER | `features.scheduler.scheduler_page` | `SchedulerPage` | Layout only |
 | `zerogbridge` | ZEROGBRIDGE | `features.zerogbridge.zerogbridge_page` | `ZeroGBridgePage` | Live connect and disconnect; portal button for admin and above |
 | `settings` | SETTINGS | `features.settings.settings_page` | `SettingsPage` | Auto-connect is live; the read-only server files download is live, with CANCEL DOWNLOAD; LIVE MODE follows the role gate (see **Server uploads and LIVE MODE**) |
-| `alerts` | ALERTS & ANTI-CHEAT | `features.alerts.alerts_page` | `AlertsPage` | Live queue from cheat flags and chat watch-word hits; ACK on this PC; PREVIEW BAN through the Safety Flow |
+| `alerts` | ALERTS & ANTI-CHEAT | `features.alerts.alerts_page` | `AlertsPage` | Live queue from cheat flags and chat watch-word hits, using `data/cheat_checker_settings.json` when present (defaults keep the original behaviour); ACK on this PC; PREVIEW BAN through the Safety Flow |
+| `cheat_checker` | CHEAT CHECKER SETTINGS | `features.cheat_checker.cheat_checker_page` | `CheatCheckerPage` | Local detection, watch-word matching, thresholds, suggest-only auto-actions, role filter, poll interval and log retention; SAVE / RESET / EXPORT; inventory jump, speed or position delta, and uncommanded god mode stay off (no server data) |
 | `bans_audit` | BANS & AUDIT | `features.bans_audit.bans_audit_page` | `BansAuditPage` | Failed-login table is live (owner, or developer with key) |
 | `users` | USERS | `features.users.users_page` | `UsersPage` | Live add, edit, and remove through the login service; Live file editing checkbox for owners and the developer (`/users/live_files`, needs the updated service and the column) |
 | `ecf_editor` | ECF EDITOR | `features.ecf_editor.ecf_editor_page` | `EcfEditorPage` | Lists and opens every `.ecf` from the downloaded server files (`load_server_files`); DOWNLOAD FOLDER runs the read-only download and refills the list; empty state when nothing is downloaded |
@@ -174,7 +176,8 @@ Supporting modules (not nav pages):
 | `features/server_files/upload_flow.py` | The three upload confirmations, the role gate helpers, and the online-player count |
 | `features/server_files/write_worker.py` | `files:put`, `coreupload:put`, and single-file `files:get` steps, run in `ServerWriteWorker` |
 | `features/multi_server/server_monitor.py` | `ServerMonitor`: read-only poll of every saved server every 30 s (`hot:status`, `plys`, `api:Request_Dedi_Stats`) |
-| `features/chat/chat_store.py` | Chat history in memory (from `chat:recent`) and watch words in `data/chat_watch_words.json`; shared by Chat and Alerts |
+| `features/chat/chat_store.py` | Chat history in memory (from `chat:recent`) and watch words in `data/chat_watch_words.json`; shared by Chat, Alerts, and Cheat Checker Settings |
+| `features/cheat_checker/cheat_checker_settings.py` | Load, save and export `data/cheat_checker_settings.json`; alert building, matching helpers, and the optional local ACK / alert log |
 
 ## Roles
 
@@ -331,6 +334,18 @@ The portal's Browse button on live data uploads a new core (developer only, brid
 | `server_files_local_folder` | `""` | Local folder of the last download. Empty means none yet |
 
 LIVE MODE is **not** a saved setting. The switch always starts off when ZAH opens, and it is not written to the settings file.
+
+### Cheat checker settings
+
+`features/cheat_checker/cheat_checker_settings.py` reads and writes `data/cheat_checker_settings.json`. Only known keys with the default value's type (and an allowed value) are kept. A missing file, a wrong type, or an unknown action or role name all fall back to the defaults, which are the Alerts behaviour from before this page existed: both `cheat` and `cheater` on at Alert (queued as CRITICAL), watch words as a case-insensitive substring at Warn (queued as WARNING), no auto-ban-protection detector, no extra role filter, 1 watch-word hit, 1 plys poll, 15 second refresh, and no persistent log (`log_retention_days` is 0).
+
+Watch words are still stored in `data/chat_watch_words.json`, the same list the Chat page uses. The Cheat Checker Settings page writes that list when SAVE is pressed. RESET TO DEFAULTS restores the cheat-checker keys only and does not clear the watch-word list. EXPORT writes a JSON file of the current settings plus the watch-word list, on this PC only.
+
+Inventory jump, speed or position delta, and uncommanded god mode are shown on the page but stay disabled, with a tooltip that the server does not send that data. `api:Request_Dedi_Stats` is fps, memory, and uptime only, and is not used for cheat flags.
+
+Auto-actions are suggest-only. `preview_ban` fills COMMAND PREVIEW on the Alerts page; the admin still starts PREVIEW BAN. These settings never send a kick or a ban. Kicks and bans stay on the Alerts and Players pages and still go through the Safety Flow.
+
+The Settings dropdown lists this page immediately after ALERTS & ANTI-CHEAT.
 
 The Settings page also has a **SERVER FILES** section:
 
@@ -809,6 +824,15 @@ class FailedLoginFetcher(QThread)
 
 def load_app_settings()
 def save_app_setting(key, value)
+
+def load_cheat_checker_settings()
+def save_cheat_checker_settings(values)
+def export_cheat_checker_settings(path, watch_words=None)
+def build_configured_alerts(players, hits, settings=None, flag_poll_counts=None, now=None)
+def user_may_see_alerts(widget, settings=None)
+def watch_match_kwargs(settings=None)
+
+class CheatCheckerPage(QWidget)
 ```
 
 ### Library and editors
@@ -971,6 +995,7 @@ Current CSS regions, in file order:
 | Backups Page | Snapshots and restore |
 | Library Page | Tiles, filters, detail, and stats dialog |
 | Settings Page | Sections, checkbox, and notes |
+| Cheat Checker Page | Scroll area and safety-note box |
 | Multi-Server Page | Server cards and rings |
 
 Widgets are targeted by `objectName` (`SettingsPage`, `DashCard`, `DashCardTitle`, `LibraryTileArea`, `ItemStatsDialog`, and others). Prefer adding a name and a rule in the matching region rather than a one-off style in Python.
@@ -1042,11 +1067,13 @@ Page wiring:
 | Playfields | RESTART PLAYFIELD | `con:stoppf <name>`, 20 s wait, `loadpf:<name>\|600` | yes |
 | Playfields | WIPE | `con:wipe <name> <deposit\|poi\|terrain\|player\|all>`; the game applies it at the next server restart | yes |
 | Playfields | Star map | none: the bridge sends no sector coordinates | summary text only |
-| Alerts | ALERT QUEUE (CRITICAL) | `plys` fields `cheat` and `cheater` (every 15 s while open) | no |
-| Alerts | ALERT QUEUE (WARNING) | `chat:recent` plus the watch words saved on this PC | no |
+| Alerts | ALERT QUEUE (CRITICAL) | `plys` fields `cheat` and `cheater`, filtered by `data/cheat_checker_settings.json` (defaults: both on, every 15 s while open) | no |
+| Alerts | ALERT QUEUE (WARNING) | `chat:recent` plus the watch words saved on this PC, using the saved matching options | no |
 | Alerts | Details, EVIDENCE TIMELINE | the same reads (current flags only, so BEFORE and DELTA show `--`) | no |
-| Alerts | ACK | none: hides the alert on this PC while ZAH runs | no |
+| Alerts | ACK | none: hides the alert on this PC while ZAH runs (kept in a local file only when log retention is above 0 days) | no |
 | Alerts | COMMAND PREVIEW, PREVIEW BAN | `con:ban <entityId> <1h\|1d\|7d\|30d\|1y>` | yes |
+| Cheat Checker Settings | Detection, matching, thresholds, role, poll, retention | none (local `data/cheat_checker_settings.json` and `data/chat_watch_words.json`) | no |
+| Cheat Checker Settings | SAVE, RESET TO DEFAULTS, EXPORT | none (this PC only) | no |
 | Backups | SNAPSHOTS, BACKUP SCHEDULE, DISK USAGE | none: the bridge has no snapshot or backup listing (`backup` answers `not_available`) | panels say why |
 | Backups | PREVIEW, RESTORE SELECTED | none: restoring a save needs the server stopped, which is a restart | stays disabled |
 | Servers | Cards (status, players, RAM, TICK RATE, core, uptime) | `ServerMonitor`: `hot:status`, `plys`, `api:Request_Dedi_Stats` per saved server, every 30 s | no |

@@ -31,6 +31,7 @@ PAGE_MODULES = {
     "zerogbridge": "features.zerogbridge.zerogbridge_page",
     "settings": "features.settings.settings_page",
     "alerts": "features.alerts.alerts_page",
+    "cheat_checker": "features.cheat_checker.cheat_checker_page",
     "bans_audit": "features.bans_audit.bans_audit_page",
     "users": "features.users.users_page",
     "ecf_editor": "features.ecf_editor.ecf_editor_page",

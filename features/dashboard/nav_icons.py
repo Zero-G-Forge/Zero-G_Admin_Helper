@@ -259,6 +259,7 @@ ICON_DRAWERS = {
     "zerogbridge": _draw_zerogbridge,
     "settings": _draw_settings,
     "alerts": _draw_alerts,
+    "cheat_checker": _draw_alerts,
     "bans_audit": _draw_bans_audit,
     "users": _draw_users,
     "world": _draw_world,

@@ -511,6 +511,24 @@ Acknowledging an alert is a note for the admin, not a change to the game. It onl
 
 The game reports how a player looks now, not how they looked a minute ago. Showing a change would need ZAH to keep its own history, so those columns stay `--` for now.
 
+## Cheat Checker Settings
+
+### Why the defaults look like the old Alerts page
+
+The settings file is optional. If it is missing, or a value is the wrong type, ZAH uses the same rules Alerts already had: both player flags on, a watch-word hit as soon as the word appears anywhere in the line (case does not matter), a 15 second refresh, and no extra role filter. Turning a switch off, or raising a threshold, only happens after someone presses SAVE.
+
+### Why some detections stay greyed out
+
+Inventory jumps, speed or position changes, and god mode turned on without a command would be useful, but the server never sends them. The page shows those rows so it is clear they were considered, and the tooltip states the real reason they cannot be switched on. The flags ZAH can already read are the plys fields `cheat`, `cheater`, and (if turned on) `auto_ban_protection` when it is not Active.
+
+### Why a kick or ban is never sent from this page
+
+A settings page decides what to watch, not what to do to a player. Suggest PREVIEW BAN only fills the command box on the Alerts page. The admin still has to start PREVIEW BAN, type CONFIRM, and wait through the 15 second delay. There is no automatic kick or ban.
+
+### Why the watch-word list is not reset
+
+The word list is the same one the Chat page already saved on this PC. RESET TO DEFAULTS puts the detection switches and intervals back, but it does not throw away words the admin typed in.
+
 ## Why Backups Stay Locked
 
 A save folder is many files that the game keeps writing while it runs. Copying it in the middle can catch some files old and some new, and putting an old copy back while the game runs would be overwritten or break the save. Both need the server stopped first, and stopping it is a restart, which ZAH does not do. So the BACKUPS page explains this instead of offering buttons that cannot work.
