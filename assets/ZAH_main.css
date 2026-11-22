@@ -986,6 +986,21 @@ QTreeWidget#ItemStatsTree::item:selected {
 
 /* endregion */
 
+/* region: Settings Page */
+
+/* Smaller text so the long DOWNLOAD SERVER FILES label fits its button */
+#SettingsPage QPushButton {
+    font-size: 13px;
+}
+
+/* Checkbox text in the light page color, or it shows dark on the dark background */
+QCheckBox#SettingsCheckBox {
+    color: #dcebf5;
+    font-size: 13px;
+}
+
+/* endregion */
+
 /* region: Multi-Server Page */
 
 /* Server card and SEND buttons: smaller text than the dashboard's big buttons */
