@@ -942,6 +942,48 @@ QSpinBox#LibraryQuantityBox {
     padding: 6px 8px;
 }
 
+/* Hex tile grid: see-through so the inner box shows behind the tiles */
+QScrollArea#LibraryTileArea, QWidget#LibraryTileInner {
+    background-color: transparent;
+    border: none;
+}
+
+/* Full stats window: same dark background as the ECF changes window */
+QDialog#ItemStatsDialog {
+    background-color: #08121e;
+}
+
+/* Stats list: transparent like the dashboard tables */
+QTreeWidget#ItemStatsTree {
+    background-color: transparent;
+    border: 1px solid rgba(40, 170, 215, 60);
+    border-radius: 6px;
+    color: #dcebf5;
+    font-size: 13px;
+}
+
+QTreeWidget#ItemStatsTree QHeaderView {
+    background-color: transparent;
+}
+
+QTreeWidget#ItemStatsTree QHeaderView::section {
+    background-color: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(40, 170, 215, 60);
+    color: #8aa3b5;
+    font-size: 12px;
+    padding: 6px;
+}
+
+QTreeWidget#ItemStatsTree::item {
+    padding: 3px;
+}
+
+QTreeWidget#ItemStatsTree::item:selected {
+    background-color: rgba(51, 214, 255, 50);
+    color: #ffffff;
+}
+
 /* endregion */
 
 /* region: Multi-Server Page */
