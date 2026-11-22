@@ -67,6 +67,11 @@ namespace ZeroGBridge
                 string cleanCmd = command.Trim();
                 string lowerCmd = cleanCmd.ToLowerInvariant();
 
+                // 1.6.1: read-only server file access (files:info, files:list, files:get). Nothing is ever written.
+                // Handled before the trace line below because a download sends hundreds of these commands
+                // (ServerFiles logs its own short summary lines instead).
+                if (ServerFiles.IsFilesLine(lowerCmd)) return ServerFiles.Handle(cleanCmd);
+
                 // Live server console trace
                 ZgbLog.Write($"[ZGB] -INFO- Received command from ZAH: \"{cleanCmd}\"");
 

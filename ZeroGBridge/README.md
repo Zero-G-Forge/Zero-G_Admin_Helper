@@ -197,6 +197,44 @@ con:ticks                       read-only form
   console), `blocked` (`replaceblocks`: never run on a server; `changemode`: does not work in multiplayer),
   `unknown_command`, `empty`, `bad_text`.
 
+### `files:` - read-only server files (1.6.1)
+
+**Core-only update** (hot-swappable on the 1.5.0 loader). Lets ZAH copy the active scenario's and the current
+save game's editable files down. It never writes, renames or deletes anything on the server. The code is
+`Network/ServerFiles.cs`; `tests/ServerFilesTest` holds its self-checks (`dotnet run`).
+
+```
+files:info
+files:list:{"root":"scenario","offset":0,"limit":1000,"req_id":"a1"}
+files:get:{"root":"scenario","items":[{"path":"Content/Configuration/Items.ecf","offset":0}],"req_id":"a2"}
+```
+
+Every reply is one `"type":"FILES"` line. A failed request has `"ok":false,"error":"<code>","message":"..."`
+(codes: `bad_request`, `unknown_root`, `root_unavailable`, `too_many_items`, `unknown_command`, `exception`).
+
+- `files:info` returns `protocol` (1), `readOnly`, `scenario`, `saveName`, `roots` (per root: `available`, `name`,
+  `topFolders`, `allowedFolders`), `limits` and `extensions`.
+- `files:list` returns `total`, `offset`, `count`, `next` (null on the last page) and `files`: `{path, size, mtime}`.
+  Paths are relative to the root and use `/`. The list is sorted by path.
+- `files:get` takes up to 50 items. Each result is `{path, size, mtime, offset, length, eof, data}` where `data`
+  is base64. One reply carries at most 192 KB of raw file bytes (about 256 KB of text). An item that does not fit
+  comes back `{path, deferred:true}`, and a file larger than the budget comes back in pieces (`eof:false`): ZAH asks
+  again with `offset` = previous `offset` + `length`. A refused item is `{path, error}` with `bad_path`,
+  `not_allowed`, `not_found`, `too_large` or `read_failed`.
+
+Safety, in order:
+
+1. Only two roots exist: `scenario` (the active scenario folder) and `save` (the current save game folder). Both
+   are read from the game on the game thread (`IApplication.GetPathFor`), with `dedicated.yaml` as a fallback.
+2. Only whitelisted sub-folders (`AllowedFolders` in `ServerFiles.cs`) plus files directly in the root, and only
+   `.ecf .yaml .yml .csv .jpg .jpeg .png`. `global.db`, `.json`, `.dll` and everything else is unreachable.
+3. A request path is refused when it is empty, absolute, has a drive letter or `:`, has `..` or `.` or an empty
+   segment, has control characters or wildcards, a segment ending in a dot or space, or a Windows device name.
+4. The resolved full path must stay under the root folder, and no file or folder on the way may be a symlink or junction.
+5. Files open with `FileAccess.Read` and `FileShare.ReadWrite` only. Files over 16 MB are refused.
+6. The AuthToken is never read here; the `auth:` handshake already happened, and the dispatcher still refuses
+   any line that contains the token.
+
 ### Older commands
 
 `plys`, `gents[:<playfield>]`, `getplayfields[:all]`, `alert:{...}`, `add_player:`, and the `hot:` commands are unchanged.

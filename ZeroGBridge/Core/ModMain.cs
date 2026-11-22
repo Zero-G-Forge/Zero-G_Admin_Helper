@@ -307,6 +307,11 @@ namespace ZeroGBridge
         {
             try { _serverView?.OnUpdate(); }
             catch { /* never let the frame loop see an exception */ }
+
+            // 1.6.1: re-read the active scenario and save game folders for the read-only files: commands
+            // (throttled to once every 30 seconds inside RefreshRoots; runs here because this is the game thread).
+            try { ServerFiles.RefreshRoots(_modApi); }
+            catch { /* never let the frame loop see an exception */ }
         }
 
         private void OnPlayfieldLoaded(IPlayfield playfield)

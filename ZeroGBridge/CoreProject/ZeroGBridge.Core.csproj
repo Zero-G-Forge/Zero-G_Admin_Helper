@@ -23,7 +23,8 @@
     <MinorVersion>6</MinorVersion>
     <!-- Core release name; can be overridden for test builds: -p:ReleaseVersion=1.6.0-test2 -->
     <!-- 1.6.0: full Eleon API (api:), console catalog (con:/cmds) -->
-    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.0</ReleaseVersion>
+    <!-- 1.6.1: read-only files:info / files:list / files:get (Network/ServerFiles.cs) -->
+    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.1</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
     <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>

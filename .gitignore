@@ -37,6 +37,8 @@ AI_INSTRUCTIONS.md
 !ZeroGBridge/bin/
 ZeroGBridge/obj/
 ZeroGBridge/CoreProject/obj/
+ZeroGBridge/tests/ServerFilesTest/bin/
+ZeroGBridge/tests/ServerFilesTest/obj/
 *.user
 *.suo
 *.csproj.user

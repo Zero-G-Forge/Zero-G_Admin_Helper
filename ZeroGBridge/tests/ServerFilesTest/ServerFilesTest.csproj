@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Self-checks for Network/ServerFiles.cs. Runs on Linux or Windows with: dotnet run
+       The real ServerFiles.cs is compiled here, next to small stand-ins for the game's interfaces (Stubs.cs),
+       so no game files are needed. It builds temporary folders and deletes only those at the end. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <RootNamespace>ServerFilesTest</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../../Network/ServerFiles.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>../../lib/Additional Libs/Newtonsoft.Json.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+</Project>
