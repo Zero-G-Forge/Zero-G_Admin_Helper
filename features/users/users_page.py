@@ -15,7 +15,7 @@ from features.paths import data_path
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QCoreApplication
 from PyQt6.QtWidgets import (QWidget, QLabel, QVBoxLayout, QHBoxLayout, QPushButton,
                              QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-                             QDialog, QMessageBox, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox)
+                             QDialog, QMessageBox, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox, QCheckBox)
 
 ## Guarded import: if online_login is missing, the page just says the users can't be loaded.
 try:
@@ -167,6 +167,16 @@ class UserEditDialog(QDialog):
         self.txt_password.setPlaceholderText("leave blank to keep the password" if self.is_edit else "8 or more characters")
         form.addRow("PASSWORD", self.txt_password)
 
+        ## Lets an admin or moderator use LIVE MODE in Settings. Developers and owners always have it, so the box
+        ## hides when Owner is picked. Disabled until ZAH-DB has a column to save it in (a database change Ray applies).
+        self.chk_live_files = QCheckBox("Live file editing")
+        self.chk_live_files.setChecked(False)
+        self.chk_live_files.setEnabled(False)
+        self.chk_live_files.setToolTip("Coming in a later step.")
+        form.addRow("PERMISSIONS", self.chk_live_files)
+        self.cmb_role.currentIndexChanged.connect(self._update_live_files_row)
+        self._update_live_files_row()
+
         ## Shows what's wrong without closing the window.
         self.lbl_error = QLabel("")
         form.addRow(self.lbl_error)
@@ -174,6 +184,12 @@ class UserEditDialog(QDialog):
         dialog_buttons.accepted.connect(self._check_and_accept)
         dialog_buttons.rejected.connect(self.reject)
         form.addRow(dialog_buttons)
+
+    ## Hides the Live file editing row for owners, who already have it.
+    def _update_live_files_row(self, *args):
+        show_row = self.cmb_role.currentData() != "owner"
+        self.chk_live_files.setVisible(show_row)
+        self.layout().labelForField(self.chk_live_files).setVisible(show_row)
 
     ## Checks the fields before closing with OK. The service checks them again, so this is only for a quick answer.
     def _check_and_accept(self):
