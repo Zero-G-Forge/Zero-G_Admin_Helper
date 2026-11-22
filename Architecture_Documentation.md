@@ -132,7 +132,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `chat` | CHAT | `features.chat.chat_page` | `ChatPage` | Live chat from `chat:recent` (core 1.6.3); SEND and WARN through the Safety Flow; watch words; MUTE and DISCORD not possible |
 | `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Live list, detail and inventory (read-only); MESSAGE, WARP, KICK, BAN, SAVE & APPLY and loadouts through the Safety Flow; GOD MODE not possible from the server |
 | `factions` | FACTIONS | `features.factions.factions_page` | `FactionsPage` | Read-only: factions, members, and alliances from the bridge; SET RELATION and RENAME not possible |
-| `structures` | STRUCTURES | `features.structures.structures_page` | `StructuresPage` | Layout; TELEPORT, SET FACTION, and DESTROY disabled |
+| `structures` | STRUCTURES | `features.structures.structures_page` | `StructuresPage` | Live list from `gents` with type filters; TELEPORT TO and DESTROY through the Safety Flow; SET FACTION not possible |
 | `playfields` | PLAYFIELDS | `features.playfields.playfields_page` | `PlayfieldsPage` | Layout; UNLOAD, RESTART PLAYFIELD, and WIPE disabled |
 | `scheduler` | SCHEDULER | `features.scheduler.scheduler_page` | `SchedulerPage` | Layout only |
 | `zerogbridge` | ZEROGBRIDGE | `features.zerogbridge.zerogbridge_page` | `ZeroGBridgePage` | Live connect and disconnect; portal button for admin and above |
@@ -991,6 +991,10 @@ Page wiring:
 | Factions | FOUNDED | none: the game does not report it | shows `--` |
 | Factions | SET RELATION | none: `alliances` is a player-console command; no mod API request | stays disabled |
 | Factions | RENAME | none: no console command or mod API request | stays disabled |
+| Structures | STRUCTURES table, count, detail | `gents` (every 30 s while open; loaded playfields only), filtered on this PC | no |
+| Structures | TELEPORT TO | `plys` to pick an online player, then `api:Request_Entity_Teleport` or `api:Request_Entity_ChangePlayfield` to 15 m above the structure | yes |
+| Structures | DESTROY | `api:Request_Entity_Destroy {"id":N}` (the playfield must be loaded) | yes |
+| Structures | SET FACTION | none: no mod API request changes a structure's faction | stays disabled |
 
 ## Planned / Not Yet Wired
 

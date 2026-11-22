@@ -463,6 +463,20 @@ The faction list, each faction's members (from the player list), and which facti
 
 Changing relations is something the game only lets a player do from their own console, and neither the mod API nor the server console can rename a faction. The bridge could only pretend, so the buttons stay off and say why.
 
+## Structures
+
+### The list only shows what is awake
+
+The bridge reports structures from playfields that are loaded right now (`gents`). A base on an empty planet nobody visits may be missing until that playfield loads. The count bar counts what was reported, not every structure in the save.
+
+### Why TELEPORT TO lifts the player
+
+The bridge gives the structure's centre point. Landing exactly there could put the player inside a wall, so ZAH aims 15 m above it.
+
+### Why SET FACTION stays off
+
+The mod API can rename or destroy a structure, but it has no request to hand one to another faction. The button stays off and says why.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free

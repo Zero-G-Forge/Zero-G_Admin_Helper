@@ -387,3 +387,54 @@ def test_factions_page_reads_lists_and_alliances(monkeypatch, tmp_path):
     cockpit.close()
 
 # endregion
+
+
+# region Structures Page
+
+def test_structures_page_filters_teleports_and_destroys(monkeypatch, tmp_path):
+    from features.structures import structures_page
+    entities = {"type": "ENTITY_LIST", "status": "Synced", "count": 2, "entities": [
+        {"id": 3001, "name": "Home Base", "type": "BA", "faction": "SOF", "playfield": "Akua", "pos": "10.0, 20.0, 30.0",
+         "powered": True, "blocks": 1234, "devices": 50},
+        {"id": 3002, "name": "Hauler", "type": "CV", "faction": "RSL", "playfield": "Omicron", "pos": "1.0, 2.0, 3.0",
+         "powered": None, "blocks": None, "devices": None}]}
+    players = {"type": "PLAYER_CACHE", "player_list": [
+        {"entityId": "1001", "name": "Alice", "status": "Online", "playfield": "Omicron"},
+        {"entityId": "--", "name": "Ghost", "status": "Offline"}]}
+    bridge = install(monkeypatch, tmp_path, {"gents": entities, "plys": players,
+                                             "api:Request_Entity": {"type": "API_RESULT", "status": "ok"}})
+    qapp = get_qapp()
+    page = structures_page.create_page()
+    cockpit = host(page, role="admin")
+    settle(qapp)
+    assert page.tbl_structures.rowCount() == 2 and page.lbl_structure_count.text() == "2 STRUCTURES"
+    page._on_filter_clicked("CV")
+    assert page.tbl_structures.rowCount() == 1 and page.tbl_structures.item(0, 1).text() == "Hauler"
+    page._on_filter_clicked("ALL")
+    page.tbl_structures.selectRow(0)
+    assert page.lbl_structure_blocks.text() == "BLOCKS:  1234"
+    assert page.action_buttons["DESTROY"].isEnabled() and not page.action_buttons["SET FACTION"].isEnabled()
+    monkeypatch.setattr(structures_page.QInputDialog, "getItem", staticmethod(lambda *a, **k: ("Alice  (Omicron)", True)))
+    page._on_teleport_clicked()
+    settle(qapp)
+    moves = [cmd for cmd in bridge.sent if cmd.startswith("api:Request_Entity_ChangePlayfield")]
+    assert moves and '"id":1001' in moves[0] and '"playfield":"Akua"' in moves[0] and '"y":35.0' in moves[0]
+    page._on_destroy_clicked()
+    settle(qapp)
+    assert 'api:Request_Entity_Destroy {"id": 3001}' in bridge.sent
+    cockpit.close()
+
+
+def test_structures_page_moderator_cannot_destroy(monkeypatch, tmp_path):
+    from features.structures import structures_page
+    entities = {"type": "ENTITY_LIST", "entities": [{"id": 1, "name": "B", "type": "BA", "playfield": "Akua", "pos": "0, 0, 0"}]}
+    install(monkeypatch, tmp_path, {"gents": entities})
+    qapp = get_qapp()
+    page = structures_page.create_page()
+    cockpit = host(page, role="moderator")
+    settle(qapp)
+    page.tbl_structures.selectRow(0)
+    assert not page.action_buttons["DESTROY"].isEnabled() and not page.action_buttons["TELEPORT TO"].isEnabled()
+    cockpit.close()
+
+# endregion
