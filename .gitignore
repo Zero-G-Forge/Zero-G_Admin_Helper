@@ -24,6 +24,7 @@ git_token.txt
 *.json
 !ZeroGBridge/ZeroGBridge.json
 !.instructions/Examples/**/*.json
+!.instructions/.markdownlint.json
 # endregion
 
 # region: Scratch and AI notes
