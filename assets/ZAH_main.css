@@ -630,3 +630,24 @@ QPushButton#PlayerMuteButton:disabled {
 }
 
 /* endregion */
+
+/* region: Factions Page */
+
+/* Factions page (features/factions/factions_page.py), matched to Concept_11-17/Factions.jpg.
+   Cards, tables, inner boxes and buttons reuse the Dashboard styles above.
+*/
+
+/* Big white faction name in FACTION DETAIL */
+#FactionNameLabel {
+    color: #eef6fb;
+    font-size: 22px;
+    font-weight: 600;
+}
+
+/* ORIGIN and FOUNDED lines: cyan */
+#FactionInfoLabel {
+    color: #33d6ff;
+    font-size: 13px;
+}
+
+/* endregion */
