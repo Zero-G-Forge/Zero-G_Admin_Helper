@@ -431,3 +431,79 @@ QPushButton#AlertBanButton:disabled {
 }
 
 /* endregion */
+
+/* region: Chat Page */
+
+/* Chat page (features/chat/chat_page.py), matched to Concept_11-17/Chat.jpg.
+   Cards, inner boxes, SEND and "nothing yet" text reuse the Dashboard styles above.
+*/
+
+/* Chat tabs: plain text, with a cyan underline on the picked tab */
+QPushButton#ChatTabButton {
+    background-color: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #c7d6e0;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 4px 10px;
+}
+
+QPushButton#ChatTabButton:hover {
+    color: #ffffff;
+}
+
+QPushButton#ChatTabButton:checked {
+    color: #33d6ff;
+    border-bottom: 2px solid #33d6ff;
+}
+
+/* REPLY AS SERVER box: dark inner box style */
+QLineEdit#ChatReplyBox {
+    background-color: rgba(5, 14, 24, 180);
+    border: 1px solid rgba(40, 170, 215, 60);
+    border-radius: 6px;
+    color: #dcebf5;
+    font-size: 14px;
+    padding: 4px 10px;
+}
+
+/* WARN: red outlined button */
+QPushButton#ChatWarnButton {
+    background-color: rgba(60, 10, 18, 200);
+    border: 1px solid #ff3355;
+    border-radius: 6px;
+    color: #ff6b80;
+    font-size: 15px;
+}
+
+QPushButton#ChatWarnButton:hover {
+    background-color: rgba(110, 18, 32, 200);
+    color: #ffffff;
+}
+
+QPushButton#ChatWarnButton:disabled {
+    border: 1px solid rgba(255, 51, 85, 80);
+    color: rgba(255, 107, 128, 100);
+}
+
+/* MUTE: grey outlined button */
+QPushButton#ChatMuteButton {
+    background-color: rgba(30, 40, 50, 200);
+    border: 1px solid #6b7c8a;
+    border-radius: 6px;
+    color: #dcebf5;
+    font-size: 15px;
+}
+
+QPushButton#ChatMuteButton:hover {
+    background-color: rgba(60, 75, 90, 200);
+    color: #ffffff;
+}
+
+QPushButton#ChatMuteButton:disabled {
+    border: 1px solid rgba(107, 124, 138, 80);
+    color: rgba(220, 235, 245, 90);
+}
+
+/* endregion */
