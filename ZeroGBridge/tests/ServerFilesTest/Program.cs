@@ -143,9 +143,15 @@ namespace ServerFilesTest
             {
                 string serverDir = Path.Combine(temp, "server");
                 string scenario = Path.Combine(serverDir, "Content", "Scenarios", "TestScenario");
+                string otherScenario = Path.Combine(serverDir, "Content", "Scenarios", "Other Scenario");
+                string namedScenario = Path.Combine(serverDir, "Content", "Scenarios", "Stranded at Nemesis (Survival Challenge)");
                 string save = Path.Combine(serverDir, "Saves", "Games", "TestSave");
+                string otherSave = Path.Combine(serverDir, "Saves", "Games", "Other Save");
                 string outside = Path.Combine(temp, "outside");
                 Directory.CreateDirectory(Path.Combine(scenario, "Content", "Configuration"));
+                Directory.CreateDirectory(Path.Combine(otherScenario, "Content", "Configuration"));
+                Directory.CreateDirectory(Path.Combine(namedScenario, "Content", "Configuration"));
+                Directory.CreateDirectory(Path.Combine(otherSave, "Content", "Configuration"));
                 Directory.CreateDirectory(Path.Combine(scenario, "SharedData", "Content", "Images"));
                 Directory.CreateDirectory(Path.Combine(scenario, "SharedData", "Content", "Extras", "PDA"));
                 Directory.CreateDirectory(Path.Combine(scenario, "Playfields", "Secret"));
@@ -162,6 +168,12 @@ namespace ServerFilesTest
                 File.WriteAllText(Path.Combine(scenario, "description.txt"), "txt is not whitelisted\n");
                 File.WriteAllText(Path.Combine(save, "Shared", "Content", "Configuration", "Save.ecf"), "save file\n");
                 File.WriteAllText(Path.Combine(save, "global.db"), "database\n");
+                File.WriteAllText(Path.Combine(save, "gameoptions.yaml"), "Options:\n  CustomScenario: Other Scenario\n  IsManagedScenario: false\n  CustomPlayerTab: Ignore Me\n  ScenarioName: Should Not Win\n");
+                File.WriteAllText(Path.Combine(otherScenario, "Content", "Configuration", "Other.ecf"), "other item\n");
+                File.WriteAllText(Path.Combine(otherScenario, "gameoptions.yaml"), "other: scenario\n");
+                File.WriteAllText(Path.Combine(namedScenario, "Content", "Configuration", "Nemesis.ecf"), "nemesis item\n");
+                File.WriteAllText(Path.Combine(otherSave, "Content", "Configuration", "OtherSave.ecf"), "other save\n");
+                File.WriteAllText(Path.Combine(serverDir, "Content", "Scenarios", "not-a-folder.yaml"), "files in the parent are not catalog folders\n");
                 File.WriteAllText(Path.Combine(outside, "stolen.ecf"), "must never be readable\n");
                 // A 400 KB binary-looking image: forces chunking (budget is 192 KB per reply).
                 var bigBytes = new byte[400 * 1024];
@@ -288,6 +300,41 @@ namespace ServerFilesTest
                 Check("get with 51 items fails", (string)Run("files:get:{\"root\":\"scenario\",\"items\":[" + manyItems + "]}")["error"] == "too_many_items");
                 Check("bad JSON fails", (string)Run("files:get:{not json")["error"] == "bad_request");
                 Check("unknown sub-command fails", (string)Run("files:delete:{\"root\":\"scenario\"}")["error"] == "unknown_command");
+
+                // 1.6.4: catalog lists sibling folders; list/get may pick one; put stays on the reported pair.
+                JObject catalog = Run("files:catalog:{\"req_id\":\"c1\"}");
+                Check("catalog ok", (bool)catalog["ok"] && (string)catalog["cmd"] == "catalog");
+                Check("catalog reports the current pair", (string)catalog["current"]["scenario"] == "TestScenario" && (string)catalog["current"]["save"] == "TestSave");
+                Check("catalog reports the save's origin scenario", (string)catalog["originScenario"] == "Other Scenario" && (string)catalog["originSource"] == "save/gameoptions.yaml");
+                var scenarioNames = catalog["scenarios"].Select(t => (string)t).ToList();
+                var saveNames = catalog["saves"].Select(t => (string)t).ToList();
+                Check("catalog lists both scenario folders", scenarioNames.Contains("TestScenario") && scenarioNames.Contains("Other Scenario") && scenarioNames.Contains("Stranded at Nemesis (Survival Challenge)") && scenarioNames.Count == 3);
+                Check("catalog lists both save folders", saveNames.Contains("TestSave") && saveNames.Contains("Other Save") && saveNames.Count == 2);
+                Check("catalog reply is one line", ServerFiles.Handle("files:catalog").IndexOf('\n') < 0);
+
+                JObject namedList = Run("files:list:{\"root\":\"scenario\",\"scenario\":\"Other Scenario\"}");
+                Check("list with a scenario name is ok", (bool)namedList["ok"] && (string)namedList["name"] == "Other Scenario");
+                var namedPaths = namedList["files"].Select(f => (string)f["path"]).ToList();
+                Check("list with a scenario name sees only that folder", namedPaths.Contains("Content/Configuration/Other.ecf") && namedPaths.Contains("gameoptions.yaml") && !namedPaths.Contains("Content/Configuration/Items.ecf"));
+                JObject defaultList = Run("files:list:{\"root\":\"scenario\"}");
+                var defaultPaths = defaultList["files"].Select(f => (string)f["path"]).ToList();
+                Check("list without a name still uses the reported scenario", defaultPaths.Contains("Content/Configuration/Items.ecf") && !defaultPaths.Contains("Content/Configuration/Other.ecf"));
+
+                JObject namedGet = Run("files:get:{\"root\":\"scenario\",\"scenario\":\"Other Scenario\",\"items\":[{\"path\":\"Content/Configuration/Other.ecf\"}]}");
+                Check("get with a scenario name reads that folder", (bool)namedGet["ok"] && (string)namedGet["name"] == "Other Scenario" && Encoding.UTF8.GetString(Convert.FromBase64String((string)namedGet["files"][0]["data"])) == "other item\n");
+                JObject namedSave = Run("files:list:{\"root\":\"save\",\"save\":\"Other Save\"}");
+                Check("list with a save name sees that folder", (bool)namedSave["ok"] && (string)namedSave["name"] == "Other Save" && namedSave["files"].Select(f => (string)f["path"]).Contains("Content/Configuration/OtherSave.ecf"));
+
+                Check("list refuses a traversal name", (string)Run("files:list:{\"root\":\"scenario\",\"scenario\":\"..\"}")["error"] == "bad_path");
+                Check("list refuses a name with a slash", (string)Run("files:list:{\"root\":\"scenario\",\"scenario\":\"Content/Scenarios\"}")["error"] == "bad_path");
+                Check("list refuses a rooted name", (string)Run("files:list:{\"root\":\"scenario\",\"scenario\":\"/TestScenario\"}")["error"] == "bad_path");
+                Check("list refuses an unknown folder", (string)Run("files:list:{\"root\":\"scenario\",\"scenario\":\"Does Not Exist\"}")["error"] == "unknown_folder");
+                Check("get refuses a traversal name", (string)Run("files:get:{\"root\":\"scenario\",\"scenario\":\"..\",\"items\":[{\"path\":\"Content/Configuration/Items.ecf\"}]}")["error"] == "bad_path");
+                Check("get refuses an unknown folder", (string)Run("files:get:{\"root\":\"save\",\"save\":\"Does Not Exist\",\"items\":[{\"path\":\"Content/Configuration/OtherSave.ecf\"}]}")["error"] == "unknown_folder");
+                JObject parenList = Run("files:list:{\"root\":\"scenario\",\"scenario\":\"Stranded at Nemesis (Survival Challenge)\"}");
+                Check("list accepts a name with spaces and parentheses", (bool)parenList["ok"] && (string)parenList["name"] == "Stranded at Nemesis (Survival Challenge)" && parenList["files"].Select(f => (string)f["path"]).Contains("Content/Configuration/Nemesis.ecf"));
+                JObject parenGet = Run("files:get:{\"root\":\"scenario\",\"scenario\":\"Stranded at Nemesis (Survival Challenge)\",\"items\":[{\"path\":\"Content/Configuration/Nemesis.ecf\"}]}");
+                Check("get accepts a name with spaces and parentheses", (bool)parenGet["ok"] && Encoding.UTF8.GetString(Convert.FromBase64String((string)parenGet["files"][0]["data"])) == "nemesis item\n");
                 Check("negative offset reads from zero", (long)Run("files:get:{\"root\":\"scenario\",\"items\":[{\"path\":\"Content/Configuration/Items.ecf\",\"offset\":-5}]}")["files"][0]["offset"] == 0);
                 Check("offset past the end is refused", Run("files:get:{\"root\":\"scenario\",\"items\":[{\"path\":\"Content/Configuration/Items.ecf\",\"offset\":999}]}")["files"][0]["error"] != null);
                 Check("numeric req_id echoed as string", (string)Run("files:info:{\"req_id\":42}")["req_id"] == "42");
@@ -358,6 +405,24 @@ namespace ServerFilesTest
                 Check("put needs base_sha256", (string)SendInChunks("scenario", "Content/Configuration/Items.ecf", newItems, "", 64)["error"] == "bad_request");
                 Check("save root put works", (bool)SendInChunks("save", "Shared/Content/Configuration/Save.ecf", newItems, Sha(Encoding.UTF8.GetBytes("save file\n")), 64)["ok"]);
                 Check("file still the last good version after refusals", File.ReadAllBytes(itemsPath).SequenceEqual(newer));
+
+                byte[] currentItems = File.ReadAllBytes(itemsPath);
+                byte[] pinned = Encoding.UTF8.GetBytes("still the reported scenario\n");
+                string otherPath = Path.Combine(otherScenario, "Content", "Configuration", "Other.ecf");
+                string otherBefore = File.ReadAllText(otherPath);
+                JObject pinnedPut = Run("files:put:" + new JObject {
+                    ["root"] = "scenario",
+                    ["scenario"] = "Other Scenario",
+                    ["path"] = "Content/Configuration/Items.ecf",
+                    ["offset"] = 0,
+                    ["total"] = pinned.Length,
+                    ["sha256"] = Sha(pinned),
+                    ["base_sha256"] = Sha(currentItems),
+                    ["data"] = Convert.ToBase64String(pinned),
+                    ["req_id"] = "pin"
+                }.ToString(Newtonsoft.Json.Formatting.None));
+                Check("put ignores a different scenario name and stays on the reported pair",
+                    (bool)pinnedPut["ok"] && File.ReadAllBytes(itemsPath).SequenceEqual(pinned) && File.ReadAllText(otherPath) == otherBefore);
 
                 // ---------------- coreupload: with the real core build when it exists
                 string builtCore = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "CoreProject", "bin", "Release", "net48", "ZeroGBridge.Core.dll"));

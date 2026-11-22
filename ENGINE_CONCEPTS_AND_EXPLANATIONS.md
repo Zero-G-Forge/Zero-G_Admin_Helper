@@ -242,9 +242,9 @@ Connect on the ZeroGBridge page is the safe exception: it logs in to the active 
 
 **Analogy:** a librarian who guards two named shelves. ZAH hands the librarian a slip with a shelf name and a book title. The librarian checks the slip, fetches a **photocopy**, and passes it through the window. The librarian never hands over the original and never lets anyone walk into the stacks.
 
-- The two shelves are `scenario` (the scenario that is being played) and `save` (the current save game).
+- The two shelves are `scenario` and `save`. By default they are the live pair from the server config. From core 1.6.4 you can also point the slip at any other scenario or save folder the librarian can see on those shelves.
 - The librarian is the `files:` commands inside ZeroGBridge. ZAH is the person at the window.
-- The photocopy lands in `data/server_files/<scenario>/` on this PC, laid out like the server's folders.
+- The photocopy lands in `data/server_files/<chosen scenario>/` on this PC, laid out like the server's folders.
 
 ### Why the bridge only reads
 
@@ -294,6 +294,16 @@ Old local files are never deleted, even if the server no longer has them. Deleti
 
 The dashboard's connection is a radio that keeps broadcasting status lines. A download wants exact answers to exact questions. Sharing one line would mean sorting reports from answers. So the download opens a **second, short connection**, logs in the same way, and hangs up when done. The password is only ever written to that socket. It is never printed, logged, or put in an error message.
 
+### Why you pick the scenario and save yourself
+
+The live config can name a different scenario than the one the save was actually started from. On the live server, `game+dedicated.yaml` reported `Default Multiplayer`, while the game being played is `Ascension-Reborn` with the save `Zero-G Server - Season 4`. The old download followed the config names, so it pulled the wrong scenario.
+
+**Analogy:** a library card that still has last year's shelf written on it. The librarian can now also list every folder on the scenario wall (`Content/Scenarios`) and every folder on the save wall (`Saves/Games`, not `Cache` or `Blueprints`). You pick one from each list. The two picks are independent: any scenario can be paired with any save.
+
+The starting pick is, in order: the last choice you saved for that server, if it is still in the list; the origin scenario written in the save's `gameoptions.yaml` when that name is in the list; then `Ascension-Reborn` and `Zero-G Server - Season 4` when those folders exist; then the live config pair; then the first name. If the catalog command is missing, the lists stay empty and the download still uses the live pair, so an older core does not silently pull a neighbour folder. When a chosen name is sent, the reply must echo that name. An older core that ignored the extra key is stopped, rather than quietly handing over the wrong shelf.
+
+`files:put` does not get this choice. Writing still goes only to the live pair, so a typo in a picker cannot overwrite some other save.
+
 ### Why an old bridge fails closed
 
 The server will not have the `files:` commands until the new core is installed. An old bridge answers an unknown command with a generic "Acknowledged." ZAH sees that the answer is not a `FILES` answer, stops, writes nothing, and says: `This server's ZeroGBridge does not have the file commands yet. Ask the owner to update the bridge.` A wrong guess here could have meant treating "Acknowledged" as success and showing an empty download.
@@ -308,10 +318,10 @@ ZeroGBridge is two DLLs: a small loader that never changes, and a **core** that 
 
 ### How it was tested without touching a server
 
-- A C# check program compiles the real `ServerFiles.cs` and runs it against a temporary folder full of test files, including attack paths and symlinks.
-- The same program can act as a stand-in bridge. ZAH's Python tests download from it, change a file, and download again to prove only the changed file comes down.
-- A second stand-in plays an "old bridge" to prove the fail-closed message.
-- The Settings page is created off-screen to check the button states: off with no connection, on when connected, off while downloading.
+- A C# check program compiles the real `ServerFiles.cs` and runs it against a temporary folder full of test files, including attack paths and symlinks. It also builds a neighbour scenario whose name has spaces and parentheses, proves `files:catalog` lists it, and proves a named list or get can read it while a traversal or unknown name is refused. `files:put` still ignores an extra name and writes only to the live pair.
+- The same program can act as a stand-in bridge. ZAH's Python tests download from it, change a file, and download again to prove only the changed file comes down. A later test sends a chosen scenario and save name and checks that the downloaded folder and manifest use those names.
+- A second stand-in plays an "old bridge" to prove the fail-closed message. The Settings picker also stays empty, and the download falls back to the live pair, when the catalog command is missing.
+- The Settings page is created off-screen to check the button states: off with no connection, on when connected, off while downloading, and on with the two dropdowns independent of each other.
 
 ## Reading the Downloaded Copy Instead of the Game Folder
 
@@ -325,7 +335,7 @@ When a game is first started, the scenario's files are copied into the save. Aft
 
 ### Why the scenario name is not written into the code
 
-The bridge reports the scenario name, and the download names the local folder after it. ZAH looks the folder up from Settings instead of assuming a name, so a switch from "Default Multiplayer" to "Ascension-Reborn" needs no code change.
+The download names the local folder after the scenario you picked (or, without a pick, the name the bridge reports). ZAH looks that folder up from Settings instead of assuming a name, so a switch from "Default Multiplayer" to "Ascension-Reborn" needs no code change. `Ascension-Reborn` and `Zero-G Server - Season 4` are only used as the starting highlight when those folders are actually in the catalog.
 
 ### Pictures: one look at the folder, then a lookup table
 
@@ -667,7 +677,11 @@ These are lessons already paid for in git history. Each one is written as "what 
 
 **What broke:** `msg:`, `msgfaction:`, `broadcast:`, `destroystruct:`, `touchstruct:` and the credit commands in the core dispatcher only write a log line and answer "Sent" or "Success". Nothing reaches the game. The first wiring of MESSAGE, ANNOUNCE, chat SEND and WARN used them, so ZAH would have reported success for messages nobody saw.
 
-**Why the fix works:** ZAH now sends the real Eleon requests (`api:Request_InGameMessage_SinglePlayer`, `_Faction`, `_AllPlayers`, `api:Request_Entity_Destroy`). Those wait for the game's own `Event_Ok`, so "ok" means the game really took it. The stubs are marked as stubs in the command table and are not used.
+**Why the fix works:** ZAH now sends the real Eleon requests (`api:Request_InGameMessage_SinglePlayer`, `_Faction`, `_AllPlayers`, `api:Request_Entity_Destroy`). The stubs are marked as stubs in the command table and are not used.
+
+The message requests are a special case. The game accepted `Request_InGameMessage_AllPlayers` (it was not rejected), but it sent back neither `Event_Ok` nor `Event_Error` within 500 ms. ZAH used to treat that silence as a failure, even though the request had already been handed to the game. Official Eleon docs describe these requests as a notice on the top right of the player's HUD. They are not a console or chat line, so they never appear in the dedicated server console. Chat text in the console is a different command (`SAY`, which ZAH already uses for Chat SEND on GLOBAL). If no players are online, nobody has a HUD to show the notice on.
+
+**Why the follow-up works:** for those three message requests only, core 1.6.4 still waits the 500 ms in case `Event_Error` arrives (that is still a failure). When the request was accepted and no event comes back, the reply is `ok` with the honest text `sent (the game sends no confirmation for messages)`. Every other request still fails on a silent timeout.
 
 ### Faction rows were easy to mis-count
 

@@ -17,9 +17,10 @@ namespace ZeroGBridge
     // How long a request normally waits for its answer
     public enum ReplyWait
     {
-        Data,   // a data event (Event_Player_Info ...) or Event_Error
-        Ok,     // Event_Ok or Event_Error
-        Player  // the answer comes when a player clicks (dialog / item exchange): short wait, then "accepted"
+        Data,    // a data event (Event_Player_Info ...) or Event_Error
+        Ok,      // Event_Ok or Event_Error
+        Player,  // the answer comes when a player clicks (dialog / item exchange): short wait, then "accepted"
+        Message  // HUD messages: the game often sends no event; accepted with no answer is success, Event_Error is still a failure
     }
 
     public sealed class EleonRequest
@@ -134,11 +135,13 @@ namespace ZeroGBridge
             Add("Request_Get_Factions", typeof(Id), new[] { CmdId.Event_Get_Factions }, ray: true, defaults: new Dictionary<string, object> { { "id", 1 } }, shortNames: new[] { "factions" },
                 desc: "Faction list starting at id (default 1) (Event_Get_Factions = FactionInfoList). Also refreshes the bridge's faction cache.");
             Add("Request_InGameMessage_SinglePlayer", typeof(IdMsgPrio), ok, ray: true, visible: true, req: new[] { "id", "msg" }, alias: new[] { "text=msg", "duration=time" },
-                defaults: new Dictionary<string, object> { { "prio", (byte)1 }, { "time", 10f } }, wait: ReplyWait.Ok, shortNames: new[] { "msg", "msgplayer" },
-                desc: "HUD message to one player (entity id).");
+                defaults: new Dictionary<string, object> { { "prio", (byte)1 }, { "time", 10f } }, wait: ReplyWait.Message, shortNames: new[] { "msg", "msgplayer" },
+                desc: "HUD message to one player (entity id). Shown on the player's HUD, not in the dedicated server console.",
+                note: "The game usually sends no Event_Ok or Event_Error for this request.");
             Add("Request_InGameMessage_AllPlayers", typeof(IdMsgPrio), ok, ray: true, visible: true, req: new[] { "msg" }, alias: new[] { "text=msg", "duration=time" },
-                defaults: new Dictionary<string, object> { { "prio", (byte)1 }, { "time", 10f } }, wait: ReplyWait.Ok, shortNames: new[] { "broadcast", "msgall" },
-                desc: "HUD message to every player.");
+                defaults: new Dictionary<string, object> { { "prio", (byte)1 }, { "time", 10f } }, wait: ReplyWait.Message, shortNames: new[] { "broadcast", "msgall" },
+                desc: "HUD message to every player. Shown on each player's HUD (top right), not in the dedicated server console.",
+                note: "The game usually sends no Event_Ok or Event_Error for this request.");
             Add("Request_ShowDialog_SinglePlayer", typeof(DialogBoxData), new[] { CmdId.Event_DialogButtonIndex }, ray: true, visible: true, req: new[] { "Id", "MsgText" },
                 alias: new[] { "text=MsgText", "msg=MsgText", "yes=PosButtonText", "no=NegButtonText" }, wait: ReplyWait.Player, shortNames: new[] { "dialog" },
                 desc: "Dialog box for one player; the answer (Event_DialogButtonIndex = IdAndIntValue) comes when the player clicks.");
@@ -161,8 +164,9 @@ namespace ZeroGBridge
             Add("Request_GetBannedPlayers", null, new[] { CmdId.Event_BannedPlayers }, shortNames: new[] { "banned" },
                 desc: "Banned players (Event_BannedPlayers = BannedPlayerData).");
             Add("Request_InGameMessage_Faction", typeof(IdMsgPrio), ok, visible: true, req: new[] { "id", "msg" }, alias: new[] { "text=msg", "duration=time" },
-                defaults: new Dictionary<string, object> { { "prio", (byte)1 }, { "time", 10f } }, wait: ReplyWait.Ok, shortNames: new[] { "msgfaction", "factionmsg" },
-                desc: "HUD message to one faction (faction id).");
+                defaults: new Dictionary<string, object> { { "prio", (byte)1 }, { "time", 10f } }, wait: ReplyWait.Message, shortNames: new[] { "msgfaction", "factionmsg" },
+                desc: "HUD message to one faction (faction id). Shown on those players' HUDs, not in the dedicated server console.",
+                note: "The game usually sends no Event_Ok or Event_Error for this request.");
             Add("Request_Load_Playfield", typeof(PlayfieldLoad), new[] { CmdId.Event_Playfield_Loaded, CmdId.Event_Ok }, changes: true, req: new[] { "playfield" },
                 alias: new[] { "name=playfield", "seconds=sec" }, defaults: new Dictionary<string, object> { { "sec", 60f } }, wait: ReplyWait.Ok,
                 shortNames: new[] { "loadpf", "loadplayfield" }, desc: "Starts a playfield for 'sec' seconds (default 60) so commands can reach it.",

@@ -1,6 +1,6 @@
 // =====================================================================
 // MODULE: ZeroGBridge/Network/ServerFiles.cs
-// DESCRIPTION: 1.6.1 READ-ONLY file access for ZAH. Three commands, each answered with one
+// DESCRIPTION: 1.6.1 READ-ONLY file access for ZAH. Commands, each answered with one
 //   single-line JSON reply of "type":"FILES" (file content travels as base64 text):
 //   files:info                                  -> which roots are available and the limits
 //   files:list:{"root":"scenario|save","offset":0,"limit":1000}   -> relative path, size, mtime
@@ -9,6 +9,12 @@
 // FileAccess.Read and FileShare.ReadWrite, so the running game is never blocked.
 // 1.6.2: files:put is routed from here to Network/ServerFileWrites.cs, which does the writing
 // (backup first, same path checks). This file itself still only reads.
+// 1.6.4: files:catalog lists the scenario folders under Content/Scenarios and the save folders
+//   under Saves/Games (names only), plus the pair dedicated.yaml / the game currently reports.
+//   files:list and files:get accept an optional "scenario" or "save" folder name. That name must
+//   be a plain folder name (no separators, no "..", no rooted path) and must be in the catalog.
+//   The same allowed folders and extensions apply. files:put stays pinned to the reported pair
+//   and ignores any extra name. ProtocolVersion stays 1 (reply shape of info/list/get is unchanged).
 // Safety: two whitelisted roots, whitelisted sub-folders and file types, no ".." or absolute
 // paths, the resolved full path must stay under the root, no symlinks or junctions, size caps.
 // The bridge AuthToken is never read or printed here (the auth handshake already happened).
@@ -220,6 +226,7 @@ namespace ZeroGBridge
         }
 
         // A folder name with no separators, no dots-only names and no control characters.
+        // Spaces, parentheses, hyphens and underscores are allowed (Empyrion scenario names use them).
         private static bool IsPlainFolderName(string name)
         {
             if (string.IsNullOrWhiteSpace(name) || name == "." || name == "..") return false;
@@ -323,7 +330,7 @@ namespace ZeroGBridge
         public static bool IsFilesLine(string lower) => lower != null && lower.StartsWith(Prefix, StringComparison.Ordinal);
 
         /// <summary>
-        /// Routes files:info, files:list and files:get. Always returns exactly one JSON line.
+        /// Routes files:info, files:list, files:get, files:catalog and files:put. Always returns exactly one JSON line.
         /// </summary>
         public static string Handle(string line)
         {
@@ -349,9 +356,12 @@ namespace ZeroGBridge
                     case "list": return HandleList(request, reqId);
                     case "get": return HandleGet(request, reqId);
 
+                    // 1.6.4: names of every scenario and save folder, plus the reported pair.
+                    case "catalog": return HandleCatalog(reqId);
+
                     // 1.6.2: the one write command (Network/ServerFileWrites.cs).
                     case "put": return ServerFileWrites.HandlePut(request, reqId);
-                    default: return Fail(sub, reqId, "unknown_command", "Use files:info, files:list, files:get or files:put.");
+                    default: return Fail(sub, reqId, "unknown_command", "Use files:info, files:list, files:get, files:put or files:catalog.");
                 }
             }
             catch (Exception ex)
@@ -389,6 +399,281 @@ namespace ZeroGBridge
                 if (rootName == "save") return _saveRoot;
                 return null;
             }
+        }
+
+        // Most folder names one catalog reply will include for one parent (scenarios or saves).
+        private const int MaxCatalogEntries = 500;
+
+        // Parent of the reported scenario or save (Content/Scenarios or Saves/Games). Prefers the
+        // parent of the game-reported folder; falls back to dedicated.yaml's usual place under the
+        // server working directory. Returns null when that parent cannot be used.
+        private static string CatalogParentFor(string rootName)
+        {
+            string currentRoot = RootFolderFor(rootName);
+            if (!string.IsNullOrEmpty(currentRoot))
+            {
+                try
+                {
+                    var parent = Directory.GetParent(currentRoot.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                    if (parent != null && Directory.Exists(parent.FullName) && !IsReparsePoint(parent.FullName)
+                        && parent.Parent != null)
+                    {
+                        return parent.FullName;
+                    }
+                }
+                catch { }
+            }
+
+            try
+            {
+                // Prefer the parent of the live folder above (so a save under Saves/Games or
+                // directly under Saves is both fine). These paths are only used when that parent
+                // is not known yet: Scenarios under Content, then Saves/Games, then Saves.
+                string serverDir = Directory.GetCurrentDirectory();
+                if (rootName == "scenario") return UsableCatalogDirectory(Path.Combine(serverDir, "Content", "Scenarios"));
+                if (rootName == "save")
+                {
+                    string games = UsableCatalogDirectory(Path.Combine(serverDir, "Saves", "Games"));
+                    if (games != null) return games;
+                    return UsableCatalogDirectory(Path.Combine(serverDir, "Saves"));
+                }
+                return null;
+            }
+            catch { return null; }
+        }
+
+        // A real, non-rooted, non-symlink folder that catalog listing may use as a parent.
+        private static string UsableCatalogDirectory(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return null;
+            try
+            {
+                string full = Path.GetFullPath(path);
+                if (!Directory.Exists(full) || IsReparsePoint(full)) return null;
+                if (Directory.GetParent(full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) == null) return null;
+                return full;
+            }
+            catch { return null; }
+        }
+
+        // Immediate child folder names under a catalog parent. Names only, no paths, no files.
+        // Reparse points and names that fail IsPlainFolderName are skipped. Sorted for a stable reply.
+        private static List<string> ListCatalogNames(string rootName)
+        {
+            var names = new List<string>();
+            string parent = CatalogParentFor(rootName);
+            if (parent == null) return names;
+            try
+            {
+                foreach (string dir in Directory.GetDirectories(parent))
+                {
+                    if (names.Count >= MaxCatalogEntries) break;
+                    if (IsReparsePoint(dir)) continue;
+                    string name = LastSegment(dir);
+                    if (!IsPlainFolderName(name)) continue;
+                    string stem = name.Split('.')[0].ToUpperInvariant();
+                    if (ReservedNames.Contains(stem)) continue;
+                    names.Add(name);
+                }
+            }
+            catch (Exception ex)
+            {
+                ZgbLog.Write("[ZGB] -WARN- [ServerFiles] Catalog scan stopped early: " + ex.Message);
+            }
+            names.Sort(StringComparer.OrdinalIgnoreCase);
+            return names;
+        }
+
+        // Optional "scenario" or "save" folder name on files:list / files:get. Missing or blank means
+        // the pair reported by the game or dedicated.yaml. A bad name fails closed (no fallback).
+        // outName is the requested name when it is present and valid, otherwise null.
+        private static bool TryOptionalFolderName(JObject request, string rootName, string cmd, string reqId, out string outName, out string failLine)
+        {
+            outName = null;
+            failLine = null;
+            string key = rootName == "scenario" ? "scenario" : "save";
+            JToken token = request?[key];
+            if (token == null || token.Type == JTokenType.Null) return true;
+            if (token.Type != JTokenType.String)
+            {
+                failLine = Fail(cmd, reqId, ErrBadPath, "The " + key + " value must be a folder name.");
+                return false;
+            }
+            string raw = ((string)token).Trim();
+            if (raw.Length == 0) return true;
+            if (raw.Length > 255 || !IsPlainFolderName(raw))
+            {
+                failLine = Fail(cmd, reqId, ErrBadPath, "The " + key + " value must be a plain folder name.");
+                return false;
+            }
+            outName = raw;
+            return true;
+        }
+
+        // Resolves a catalog folder name to a full path. The name must appear in the live listing
+        // (exact match). The resolved path must stay under the parent and must be a real folder,
+        // not a symlink or junction. error and message are set when this returns null.
+        private static string ResolveCatalogFolder(string rootName, string folderName, out string error, out string message)
+        {
+            error = null;
+            message = null;
+            string kind = rootName == "scenario" ? "scenario" : "save";
+            List<string> names = ListCatalogNames(rootName);
+            if (!names.Contains(folderName, StringComparer.Ordinal))
+            {
+                error = "unknown_folder";
+                message = "That folder is not in the " + kind + " list.";
+                return null;
+            }
+            string parent = CatalogParentFor(rootName);
+            if (parent == null)
+            {
+                error = "root_unavailable";
+                message = "The server has not reported the " + kind + " folder yet.";
+                return null;
+            }
+            try
+            {
+                string parentWithSeparator = parent.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+                string candidate = Path.GetFullPath(Path.Combine(parentWithSeparator, folderName));
+                StringComparison comparison = Path.DirectorySeparatorChar == '\\' ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+                if (!candidate.StartsWith(parentWithSeparator, comparison))
+                {
+                    error = ErrBadPath;
+                    message = "The " + kind + " value must be a plain folder name.";
+                    return null;
+                }
+                if (!Directory.Exists(candidate) || IsReparsePoint(candidate))
+                {
+                    error = "unknown_folder";
+                    message = "That folder is not in the " + kind + " list.";
+                    return null;
+                }
+                return candidate;
+            }
+            catch
+            {
+                error = ErrBadPath;
+                message = "The " + kind + " value must be a plain folder name.";
+                return null;
+            }
+        }
+
+        // The folder list or get will read from: the optional name when it is present, otherwise
+        // the reported pair. Returns null and has already built failLine when something is refused.
+        private static string ResolveReadRoot(JObject request, string rootName, string cmd, string reqId, out string failLine)
+        {
+            failLine = null;
+            string named;
+            if (!TryOptionalFolderName(request, rootName, cmd, reqId, out named, out failLine)) return null;
+            if (named == null)
+            {
+                string current = RootFolderFor(rootName);
+                if (current == null)
+                {
+                    failLine = Fail(cmd, reqId, "root_unavailable", "The server has not reported the " + rootName + " folder yet.");
+                    return null;
+                }
+                return current;
+            }
+            string error, message;
+            string resolved = ResolveCatalogFolder(rootName, named, out error, out message);
+            if (resolved == null)
+            {
+                failLine = Fail(cmd, reqId, error, message);
+                return null;
+            }
+            return resolved;
+        }
+
+        #endregion
+
+        #region files:catalog
+
+        // 1.6.4: folder names only, plus the pair the game or dedicated.yaml currently reports.
+        // originScenario is the scenario the current save was created from, when a save yaml names
+        // it and that name is in the scenario catalog. It is independent of the reported pair.
+        private static string HandleCatalog(string reqId)
+        {
+            string scenario, save, source;
+            lock (RootLock) { scenario = _scenarioName; save = _saveName; source = _rootSource; }
+
+            List<string> scenarios = ListCatalogNames("scenario");
+            List<string> saves = ListCatalogNames("save");
+            string originSource;
+            string originScenario = ReadOriginScenario(scenarios, out originSource);
+            ZgbLog.Write($"[ZGB] -INFO- [ServerFiles] catalog: current scenario=\"{scenario}\" save=\"{save}\" origin=\"{originScenario}\" scenarios={scenarios.Count} saves={saves.Count}");
+            return JsonConvert.SerializeObject(new
+            {
+                type = "FILES",
+                cmd = "catalog",
+                req_id = reqId,
+                ok = true,
+                protocol = ProtocolVersion,
+                source,
+                current = new { scenario, save },
+                originScenario,
+                originSource,
+                scenarios,
+                saves
+            });
+        }
+
+        // Read-only: looks in the current save's own yaml (never dedicated.yaml, which can name the
+        // wrong scenario) for a plain folder name that is also in the scenario catalog.
+        private static string ReadOriginScenario(List<string> scenarioNames, out string originSource)
+        {
+            originSource = null;
+            string saveRoot = RootFolderFor("save");
+            if (string.IsNullOrEmpty(saveRoot) || scenarioNames == null || scenarioNames.Count == 0) return null;
+
+            foreach (string fileName in new[] { "gameoptions.yaml", "gameoptions.yml", "game.yaml", "game.yml" })
+            {
+                string found = TryReadScenarioKey(Path.Combine(saveRoot, fileName));
+                if (string.IsNullOrEmpty(found)) continue;
+                if (!scenarioNames.Contains(found, StringComparer.Ordinal)) continue;
+                originSource = "save/" + fileName;
+                return found;
+            }
+            return null;
+        }
+
+        // Opens one yaml file read-only (the game may have it open) and returns the first usable
+        // CustomScenario, ScenarioName or Scenario value. Other keys that only contain those words
+        // (for example IsManagedScenario or CustomPlayerTab) are ignored.
+        private static string TryReadScenarioKey(string path)
+        {
+            try
+            {
+                if (!File.Exists(path) || IsReparsePoint(path)) return null;
+                var info = new FileInfo(path);
+                if (info.Length <= 0 || info.Length > 1024 * 1024) return null;
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var reader = new StreamReader(stream, Encoding.UTF8, true))
+                {
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        string value = ScenarioKeyValue(line);
+                        if (IsPlainFolderName(value)) return value;
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static string ScenarioKeyValue(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return null;
+            string line = raw.Trim();
+            if (line.StartsWith("- ", StringComparison.Ordinal)) line = line.Substring(2).Trim();
+            string[] keys = { "CustomScenario:", "ScenarioName:", "Scenario:" };
+            foreach (string key in keys)
+            {
+                if (line.StartsWith(key, StringComparison.Ordinal)) return YamlValue(line.Substring(key.Length));
+            }
+            return null;
         }
 
         #endregion
@@ -445,8 +730,9 @@ namespace ZeroGBridge
         {
             string rootName = (string)request?["root"];
             if (rootName == null || !AllowedFolders.ContainsKey(rootName)) return Fail("list", reqId, "unknown_root", "root must be scenario or save.");
-            string rootFolder = RootFolderFor(rootName);
-            if (rootFolder == null) return Fail("list", reqId, "root_unavailable", "The server has not reported the " + rootName + " folder yet.");
+            string failLine;
+            string rootFolder = ResolveReadRoot(request, rootName, "list", reqId, out failLine);
+            if (rootFolder == null) return failLine;
 
             int offset = Math.Max(0, ReadInt(request, "offset", 0));
             int limit = Math.Min(MaxListPage, Math.Max(1, ReadInt(request, "limit", 1000)));
@@ -454,7 +740,8 @@ namespace ZeroGBridge
             List<FileEntry> all = ScanRoot(rootName, rootFolder, offset == 0);
             var page = all.Skip(offset).Take(limit).Select(f => new { path = f.Path, size = f.Size, mtime = f.Mtime }).ToList();
             int next = offset + page.Count;
-            ZgbLog.Write($"[ZGB] -INFO- [ServerFiles] list root={rootName} total={all.Count} offset={offset} returned={page.Count}");
+            string folderName = LastSegment(rootFolder);
+            ZgbLog.Write($"[ZGB] -INFO- [ServerFiles] list root={rootName} name=\"{folderName}\" total={all.Count} offset={offset} returned={page.Count}");
             return JsonConvert.SerializeObject(new
             {
                 type = "FILES",
@@ -462,6 +749,7 @@ namespace ZeroGBridge
                 req_id = reqId,
                 ok = true,
                 root = rootName,
+                name = folderName,
                 total = all.Count,
                 offset,
                 count = page.Count,
@@ -486,7 +774,8 @@ namespace ZeroGBridge
             {
                 // forceFresh (first page) skips the saved scan; later pages reuse it so the paging stays consistent.
                 KeyValuePair<DateTime, List<FileEntry>> cached;
-                if (!forceFresh && ListCache.TryGetValue(rootName, out cached) && (DateTime.UtcNow - cached.Key).TotalSeconds < ListCacheSeconds) return cached.Value;
+                string cacheKey = rootName + "\0" + rootFolder;
+                if (!forceFresh && ListCache.TryGetValue(cacheKey, out cached) && (DateTime.UtcNow - cached.Key).TotalSeconds < ListCacheSeconds) return cached.Value;
             }
 
             var found = new List<FileEntry>();
@@ -507,7 +796,7 @@ namespace ZeroGBridge
             }
 
             found.Sort((a, b) => string.CompareOrdinal(a.Path, b.Path));
-            lock (ListCache) { ListCache[rootName] = new KeyValuePair<DateTime, List<FileEntry>>(DateTime.UtcNow, found); }
+            lock (ListCache) { ListCache[rootName + "\0" + rootFolder] = new KeyValuePair<DateTime, List<FileEntry>>(DateTime.UtcNow, found); }
             return found;
         }
 
@@ -556,8 +845,9 @@ namespace ZeroGBridge
         {
             string rootName = (string)request?["root"];
             if (rootName == null || !AllowedFolders.ContainsKey(rootName)) return Fail("get", reqId, "unknown_root", "root must be scenario or save.");
-            string rootFolder = RootFolderFor(rootName);
-            if (rootFolder == null) return Fail("get", reqId, "root_unavailable", "The server has not reported the " + rootName + " folder yet.");
+            string failLine;
+            string rootFolder = ResolveReadRoot(request, rootName, "get", reqId, out failLine);
+            if (rootFolder == null) return failLine;
 
             var items = request["items"] as JArray;
             if (items == null || items.Count == 0) return Fail("get", reqId, "bad_request", "items must be a non-empty list.");
@@ -569,7 +859,7 @@ namespace ZeroGBridge
             {
                 results.Add(ReadOneItem(rootName, rootFolder, item as JObject, ref budget));
             }
-            return JsonConvert.SerializeObject(new { type = "FILES", cmd = "get", req_id = reqId, ok = true, root = rootName, files = results });
+            return JsonConvert.SerializeObject(new { type = "FILES", cmd = "get", req_id = reqId, ok = true, root = rootName, name = LastSegment(rootFolder), files = results });
         }
 
         // Reads one item. Per-item problems are reported inside the reply, never as a thrown error.

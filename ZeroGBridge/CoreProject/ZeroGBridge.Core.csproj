@@ -26,7 +26,8 @@
     <!-- 1.6.1: read-only files:info / files:list / files:get (Network/ServerFiles.cs) -->
     <!-- 1.6.2: files:put (backup first) and coreupload: (new core into Updates/), Network/ServerFileWrites.cs -->
     <!-- 1.6.3: read-only chat:recent history from Application.ChatMessageSent, Network/ChatLog.cs -->
-    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.3</ReleaseVersion>
+    <!-- 1.6.4: files:catalog lists scenario and save folders; list/get can pick one; put stays on the reported pair -->
+    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.4</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
     <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>

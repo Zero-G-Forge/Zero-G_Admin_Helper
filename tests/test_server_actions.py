@@ -128,6 +128,28 @@ def test_command_list_stops_at_first_refusal(qapp, monkeypatch, tmp_path):
 def test_reply_ok(reply, ok):
     assert server_actions.reply_ok(reply) is ok
 
+
+def test_hud_message_with_no_game_answer_is_sent():
+    ## Request_InGameMessage_* is fire-and-forget: the game accepts the request and usually
+    ## sends no Event_Ok. That used to be reported as a timeout failure. Other requests keep
+    ## the strict timeout check.
+    sent = {
+        "type": "API_RESULT",
+        "status": "ok",
+        "request": "Request_InGameMessage_AllPlayers",
+        "error": "sent (the game sends no confirmation for messages)",
+    }
+    assert server_actions.reply_ok(sent) is True
+    assert server_actions.reply_text(sent) == "sent (the game sends no confirmation for messages)"
+    still_strict = {
+        "type": "API_RESULT",
+        "status": "timeout",
+        "request": "Request_Player_Info",
+        "error": "no answer from the game within 500 ms (the request was accepted)",
+    }
+    assert server_actions.reply_ok(still_strict) is False
+    assert "no answer from the game" in server_actions.reply_text(still_strict)
+
 # endregion
 
 

@@ -152,6 +152,13 @@ namespace ZeroGBridge
                 {
                     res.Status = "accepted";      // shown to the player; the answer comes when they click
                 }
+                else if (def.Wait == ReplyWait.Message)
+                {
+                    // HUD messages: Game_Request was accepted. The game usually sends no Event_Ok
+                    // or Event_Error, so a quiet timeout is not a failure. Event_Error still fails above.
+                    res.Status = "ok";
+                    res.Error = "sent (the game sends no confirmation for messages)";
+                }
                 else
                 {
                     res.Status = "timeout";

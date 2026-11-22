@@ -28,8 +28,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication, QMainWindow
 
-from features.server_files import file_client, file_store
+from features.server_files import download_settings, file_client, file_store
 from features.server_files.download_worker import ServerFileDownloadWorker
+from features.server_files.file_client import ServerFilesSession
 from features.settings import app_settings, settings_page
 
 # endregion
@@ -52,7 +53,10 @@ def isolated_paths(tmp_path, monkeypatch):
     ## Downloads and app settings go to a temporary folder, never to the real data/ folder.
     monkeypatch.setattr(file_store, "SERVER_FILES_DIR", str(tmp_path / "server_files"))
     monkeypatch.setattr(app_settings, "APP_SETTINGS_FILE", str(tmp_path / "app_settings.json"))
+    monkeypatch.setattr(download_settings, "DOWNLOAD_SETTINGS_FILE", str(tmp_path / "download_settings.json"))
     monkeypatch.setattr(file_client, "COMMAND_GAP_SEC", 0.0)
+    ## Existing page tests must not open a catalog thread against a real server.
+    monkeypatch.setattr(settings_page, "AUTO_FETCH_CATALOG", False)
 
 
 def free_port():
@@ -92,8 +96,8 @@ def build_server_tree(root):
     return scenario, save
 
 
-def run_worker(profile):
-    worker = ServerFileDownloadWorker(profile_provider=lambda: profile)
+def run_worker(profile, selection=None):
+    worker = ServerFileDownloadWorker(profile_provider=lambda: profile, selection=selection)
     result = {"progress": [], "ok": None, "failed": None}
     worker.progress.connect(lambda done, total, text: result["progress"].append((done, total, text)))
     worker.finished_ok.connect(lambda summary: result.__setitem__("ok", summary))
@@ -244,6 +248,11 @@ class FakeWorker(QThread):
     failed = pyqtSignal(str)
     outcome = {"downloaded": 3, "skipped": 2, "failed": [], "folder": "/tmp/zah_fake_folder"}
     fail_message = None
+    last_selection = None
+
+    def __init__(self, parent=None, selection=None, **kwargs):
+        super().__init__(parent)
+        FakeWorker.last_selection = selection
 
     def run(self):
         self.progress.emit(1, 5, "Downloading 1 of 5 files")
@@ -366,9 +375,10 @@ class SlowWorker(QThread):
     finished_ok = pyqtSignal(dict)
     failed = pyqtSignal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, selection=None, **kwargs):
         super().__init__(parent)
         self.stop_asked = False
+        self.selection = selection
 
     def request_stop(self):
         self.stop_asked = True
@@ -415,5 +425,215 @@ def test_editor_download_folder_runs_the_read_only_download(qapp, tmp_path):
     assert reloaded == [None] and page.btn_download.text() == "DOWNLOAD FOLDER FROM SERVER (READ-ONLY)"
     assert app_settings.load_app_settings()["server_files_local_folder"] == "/tmp/zah_fake_folder"
     cockpit.close()
+
+# endregion
+
+
+# region Download Picker and files:catalog
+
+@pytest.mark.parametrize("name,ok", [
+    ("Ascension-Reborn", True),
+    ("Zero-G Server - Season 4", True),
+    ("Stranded at Nemesis (Survival Challenge)", True),
+    ("Invader vs Defender - Conflict of Cygnus", True),
+    ("_TestEmpyrion-SE", True),
+    ("Default Akua-Omicron", True),
+    ("..", False),
+    (".", False),
+    ("Content/Scenarios", False),
+    ("/Ascension-Reborn", False),
+    ("Saves\\Games", False),
+    ("", False),
+    (None, False),
+])
+def test_plain_folder_names_allow_spaces_and_parentheses(name, ok):
+    assert download_settings.is_plain_folder_name(name) is ok
+
+
+def test_download_settings_persist_per_server(tmp_path):
+    assert download_settings.save_server_download_settings(
+        "Zero-G Forge Reborn",
+        scenario="Ascension-Reborn",
+        save="Zero-G Server - Season 4",
+        types={"ecf": True, "yaml": True, "csv": False, "images": False},
+    )
+    saved = download_settings.load_server_download_settings("Zero-G Forge Reborn")
+    assert saved["scenario"] == "Ascension-Reborn"
+    assert saved["save"] == "Zero-G Server - Season 4"
+    assert saved["types"]["csv"] is False and saved["types"]["ecf"] is True
+    other = download_settings.load_server_download_settings("Some Other Server")
+    assert "scenario" not in other
+    assert download_settings.save_server_download_settings("Zero-G Forge Reborn", scenario="..") is False
+    assert download_settings.load_server_download_settings("Zero-G Forge Reborn")["scenario"] == "Ascension-Reborn"
+
+
+def test_first_available_name_prefers_saved_then_origin_then_fallback():
+    names = ["Default Multiplayer", "Ascension-Reborn", "Tutorial"]
+    assert download_settings.first_available_name(names, "saved-missing", "Ascension-Reborn", "Tutorial") == "Ascension-Reborn"
+    assert download_settings.first_available_name(names, "Tutorial") == "Tutorial"
+    assert download_settings.first_available_name(names, "Nope") == "Default Multiplayer"
+    assert download_settings.first_available_name([], "Ascension-Reborn") == ""
+
+
+def test_selection_for_download_is_independent_and_fail_closed():
+    types = dict(download_settings.DEFAULT_TYPES)
+    assert download_settings.selection_for_download("S", False, "Ascension-Reborn", "Zero-G Server - Season 4", types) is None
+    picked = download_settings.selection_for_download("S", True, "Ascension-Reborn", "Zero-G Server - Season 4", types)
+    assert picked["scenario"] == "Ascension-Reborn" and picked["save"] == "Zero-G Server - Season 4"
+    assert download_settings.selection_for_download("S", True, "..", "Zero-G Server - Season 4", types) is None
+    none_types = {key: False for key in download_settings.FILE_TYPE_KEYS}
+    assert download_settings.selection_for_download("S", True, "Ascension-Reborn", "Zero-G Server - Season 4", none_types) is None
+
+
+def test_picker_defaults_to_origin_then_preferred_pair(qapp, monkeypatch):
+    monkeypatch.setattr(settings_page, "AUTO_FETCH_CATALOG", True)
+    monkeypatch.setattr(settings_page, "get_active_profile", lambda: {"server_name": "Zero-G Forge Reborn"})
+
+    def fake_catalog(profile):
+        return {
+            "ok": True,
+            "current": {"scenario": "Default Multiplayer", "save": "Zero-G Server - Season 4"},
+            "originScenario": None,
+            "scenarios": ["Default Multiplayer", "Ascension-Reborn", "Tutorial"],
+            "saves": ["Zero-G Server", "Zero-G Server - Season 4"],
+        }
+
+    monkeypatch.setattr(settings_page, "fetch_file_catalog", fake_catalog)
+    cockpit, page = build_page(qapp)
+    cockpit.bridge_connected = True
+    page._refresh_catalog()
+    assert wait_until(qapp, lambda: page.picker_ready)
+    ## No saved choice and no origin: the known live pair, not Default Multiplayer.
+    assert page.cmb_scenario.currentText() == "Ascension-Reborn"
+    assert page.cmb_save.currentText() == "Zero-G Server - Season 4"
+    page.cmb_scenario.setCurrentText("Tutorial")
+    assert page.cmb_scenario.currentText() == "Tutorial"
+    assert page.cmb_save.currentText() == "Zero-G Server - Season 4"
+    cockpit.close()
+
+
+def test_picker_uses_detected_origin_over_preferred(qapp, monkeypatch):
+    monkeypatch.setattr(settings_page, "AUTO_FETCH_CATALOG", True)
+    monkeypatch.setattr(settings_page, "get_active_profile", lambda: {"server_name": "Zero-G Forge Reborn"})
+
+    def fake_catalog(profile):
+        return {
+            "ok": True,
+            "current": {"scenario": "Default Multiplayer", "save": "Zero-G Server - Season 4"},
+            "originScenario": "Tutorial",
+            "scenarios": ["Default Multiplayer", "Ascension-Reborn", "Tutorial"],
+            "saves": ["Zero-G Server", "Zero-G Server - Season 4"],
+        }
+
+    monkeypatch.setattr(settings_page, "fetch_file_catalog", fake_catalog)
+    cockpit, page = build_page(qapp)
+    cockpit.bridge_connected = True
+    page._refresh_catalog()
+    assert wait_until(qapp, lambda: page.picker_ready)
+    assert page.cmb_scenario.currentText() == "Tutorial"
+    assert page.cmb_save.currentText() == "Zero-G Server - Season 4"
+    cockpit.close()
+
+
+def test_picker_fails_closed_when_catalog_is_missing(qapp, monkeypatch):
+    monkeypatch.setattr(settings_page, "AUTO_FETCH_CATALOG", True)
+    monkeypatch.setattr(settings_page, "get_active_profile", lambda: {"server_name": "Zero-G Forge Reborn"})
+
+    def fake_catalog(profile):
+        raise file_client.ServerFilesError("refused", "The server refused the request: unknown_command.", "unknown_command")
+
+    monkeypatch.setattr(settings_page, "fetch_file_catalog", fake_catalog)
+    cockpit, page = build_page(qapp)
+    cockpit.bridge_connected = True
+    page._refresh_catalog()
+    assert wait_until(qapp, lambda: "1.6.4" in page.cmb_scenario.toolTip())
+    assert page.picker_ready is False
+    assert page.cmb_scenario.isEnabled() is False
+    assert page._current_selection() is None
+    cockpit.close()
+
+
+def test_download_button_passes_independent_selection(qapp, monkeypatch):
+    monkeypatch.setattr(settings_page, "AUTO_FETCH_CATALOG", True)
+    monkeypatch.setattr(settings_page, "get_active_profile", lambda: {"server_name": "Zero-G Forge Reborn"})
+
+    def fake_catalog(profile):
+        return {
+            "ok": True,
+            "current": {"scenario": "Default Multiplayer", "save": "Zero-G Server - Season 4"},
+            "originScenario": "Ascension-Reborn",
+            "scenarios": ["Default Multiplayer", "Ascension-Reborn", "Tutorial"],
+            "saves": ["Zero-G Server", "Zero-G Server - Season 4"],
+        }
+
+    monkeypatch.setattr(settings_page, "fetch_file_catalog", fake_catalog)
+    FakeWorker.fail_message = None
+    FakeWorker.last_selection = None
+    cockpit, page = build_page(qapp)
+    cockpit.bridge_connected = True
+    page._refresh_catalog()
+    assert wait_until(qapp, lambda: page.picker_ready)
+    page.create_download_worker = FakeWorker
+    page.cmb_scenario.setCurrentText("Tutorial")
+    page.cmb_save.setCurrentText("Zero-G Server")
+    page._refresh_download_state()
+    page.btn_download_files.click()
+    assert wait_until(qapp, lambda: page.download_worker is None)
+    picked = FakeWorker.last_selection
+    assert picked["scenario"] == "Tutorial" and picked["save"] == "Zero-G Server"
+    cockpit.close()
+
+
+@needs_dotnet
+def test_catalog_and_named_download_against_real_core(tmp_path, qapp):
+    scenario, save = build_server_tree(tmp_path / "srv")
+    other = scenario.parent / "Ascension-Reborn"
+    (other / "Content" / "Configuration").mkdir(parents=True)
+    (other / "Content" / "Configuration" / "Items.ecf").write_bytes(b"ascension\n")
+    (other / "gameoptions.yaml").write_bytes(b"other: scenario\n")
+    paren = scenario.parent / "Stranded at Nemesis (Survival Challenge)"
+    (paren / "Content" / "Configuration").mkdir(parents=True)
+    (paren / "Content" / "Configuration" / "Nemesis.ecf").write_bytes(b"nemesis\n")
+    (save / "gameoptions.yaml").write_bytes(b"CustomScenario: Ascension-Reborn\n")
+
+    process, port = start_fake_bridge(tmp_path, scenario, save)
+    try:
+        profile = make_profile(port)
+        with ServerFilesSession(profile) as session:
+            catalog = session.request("catalog")
+        assert catalog["ok"] is True
+        assert "Ascension-Reborn" in catalog["scenarios"]
+        assert "Stranded at Nemesis (Survival Challenge)" in catalog["scenarios"]
+        assert "Test-Scenario" in catalog["scenarios"]
+        assert catalog["current"]["scenario"] == "Test-Scenario"
+        assert catalog["current"]["save"] == "TestSave"
+        assert catalog["originScenario"] == "Ascension-Reborn"
+
+        first = run_worker(profile, {
+            "scenario": "Ascension-Reborn",
+            "save": "TestSave",
+            "types": {"ecf": True, "yaml": False, "csv": False, "images": False},
+        })
+        assert first["failed"] is None, first["failed"]
+        summary = first["ok"]
+        assert summary["scenario"] == "Ascension-Reborn"
+        folder = file_store.scenario_folder("Ascension-Reborn")
+        assert summary["folder"] == folder
+        assert open(os.path.join(folder, "scenario", "Content", "Configuration", "Items.ecf"), "rb").read() == b"ascension\n"
+        assert not any(name.endswith(".jpg") for _, _, names in os.walk(folder) for name in names)
+        assert not os.path.exists(os.path.join(folder, "scenario", "gameoptions.yaml"))
+
+        second = run_worker(profile, {
+            "scenario": "Stranded at Nemesis (Survival Challenge)",
+            "save": "TestSave",
+            "types": dict(download_settings.DEFAULT_TYPES),
+        })
+        assert second["failed"] is None, second["failed"]
+        nest = file_store.scenario_folder("Stranded at Nemesis (Survival Challenge)")
+        assert second["ok"]["folder"] == nest
+        assert open(os.path.join(nest, "scenario", "Content", "Configuration", "Nemesis.ecf"), "rb").read() == b"nemesis\n"
+    finally:
+        process.kill()
+        process.wait()
 
 # endregion

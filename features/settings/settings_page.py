@@ -3,16 +3,27 @@
 ## ZAH's own options. Each change is saved right away to data/app_settings.json.
 ## SERVER FILES: pulls the server's editable files (ECF, PDA, item images, save files) through ZeroGBridge,
 ## and the LIVE MODE switch for editing files straight on the server. The download button works (read-only,
-## enabled only while the bridge is connected); LIVE MODE is layout only for now (disabled).
+## enabled only while the bridge is connected). Core 1.6.4: a scenario/save picker and file-type ticks
+## sit above the download button. They fail closed to the old behaviour when the core is older or catalog fails.
 ## ==========================================
 
 # region Imports
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QWidget, QLabel, QCheckBox, QVBoxLayout, QPushButton, QProgressBar, QMessageBox
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtWidgets import (
+    QWidget, QLabel, QCheckBox, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar,
+    QMessageBox, QComboBox,
+)
 
+from features.bridge.server_settings import get_active_profile
 from features.settings.app_settings import load_app_settings, save_app_setting
+from features.server_files.download_settings import (
+    FILE_TYPE_KEYS, DEFAULT_TYPES, PREFERRED_SCENARIO, PREFERRED_SAVE,
+    first_available_name, load_server_download_settings, save_server_download_settings,
+    selection_for_download, types_from_saved,
+)
 from features.server_files.download_worker import ServerFileDownloadWorker
+from features.server_files.file_client import ServerFilesError, ServerFilesSession
 from features.server_files.file_store import format_last_pulled, now_iso
 
 # endregion
@@ -23,6 +34,57 @@ from features.server_files.file_store import format_last_pulled, now_iso
 ## Download threads that are still running. A thread must not be thrown away while it runs (Qt would abort),
 ## so this list keeps it alive even if the user leaves the Settings page mid-download. Each one removes itself when done.
 RUNNING_DOWNLOADS = []
+
+## Tests set this to False so the Settings page never opens a catalog thread against a real server.
+AUTO_FETCH_CATALOG = True
+
+# endregion
+
+
+# region Catalog Fetch
+
+## Tests replace this function so the Settings page never talks to a real server.
+def fetch_file_catalog(profile):
+    with ServerFilesSession(profile) as session:
+        return session.request("catalog")
+
+
+class CatalogWorker(QThread):
+
+    ## The files:catalog reply.
+    finished_ok = pyqtSignal(dict)
+
+    ## One plain reason the picker must stay off.
+    failed = pyqtSignal(str)
+
+    def __init__(self, profile_provider=None, parent=None):
+        super().__init__(parent)
+        self.profile_provider = profile_provider or get_active_profile
+
+    def run(self):
+        try:
+            profile = self.profile_provider()
+            if not isinstance(profile, dict):
+                raise ServerFilesError("config", "No active server is saved in ZAH.")
+            reply = fetch_file_catalog(profile)
+            if not isinstance(reply, dict) or reply.get("ok") is not True:
+                raise ServerFilesError("refused", "The server did not return a usable folder list.")
+            self.finished_ok.emit(reply)
+        except ServerFilesError as exc:
+            self.failed.emit(_catalog_fail_message(exc))
+        except Exception as exc:
+            print(f"[ERROR] CatalogWorker: {type(exc).__name__}: {exc}")
+            self.failed.emit("Could not list the server's scenarios and saves. The download will use the names in the server config.")
+
+
+def _catalog_fail_message(exc):
+    code = getattr(exc, "code", None)
+    kind = getattr(exc, "kind", None)
+    if kind == "unsupported" or code == "unknown_command":
+        return ("This needs bridge core 1.6.4 or later. "
+                "The download will use the scenario and save named in the server config.")
+    text = str(exc).strip() or "Could not list the server's scenarios and saves."
+    return f"{text} The download will use the scenario and save named in the server config."
 
 # endregion
 
@@ -43,6 +105,10 @@ class SettingsPage(QWidget):
         self.create_download_worker = ServerFileDownloadWorker
         ## True once this page is listening to the cockpit's bridge_status_changed signal.
         self.is_listening = False
+        ## Catalog thread while a folder list is being asked for, otherwise None.
+        self.catalog_worker = None
+        ## True when files:catalog succeeded and the combos may be used for the next download.
+        self.picker_ready = False
         self.setup_widgets()
 
     def setup_widgets(self):
@@ -91,6 +157,57 @@ class SettingsPage(QWidget):
         self.lbl_files_pulled = QLabel(f"LAST PULLED:  {format_last_pulled(saved_pulled) if saved_pulled else 'never'}")
         self.lbl_files_pulled.setObjectName("SettingsNote")
         layout.addWidget(self.lbl_files_pulled)
+
+        ## 1.6.4 picker: which scenario and save to pull, and which file types. Disabled until
+        ## files:catalog succeeds. Fail closed: the download then uses the names in the server config.
+        self.lbl_scenario = QLabel("SCENARIO")
+        self.lbl_scenario.setObjectName("SettingsNote")
+        layout.addWidget(self.lbl_scenario)
+        self.cmb_scenario = QComboBox()
+        self.cmb_scenario.setObjectName("SettingsFileCombo")
+        self.cmb_scenario.setFixedHeight(32)
+        self.cmb_scenario.setFixedWidth(360)
+        self.cmb_scenario.setEnabled(False)
+        self.cmb_scenario.setToolTip("Connect to the server first.")
+        self.cmb_scenario.currentTextChanged.connect(self._on_picker_changed)
+        layout.addWidget(self.cmb_scenario)
+
+        self.lbl_save = QLabel("SAVE")
+        self.lbl_save.setObjectName("SettingsNote")
+        layout.addWidget(self.lbl_save)
+        self.cmb_save = QComboBox()
+        self.cmb_save.setObjectName("SettingsFileCombo")
+        self.cmb_save.setFixedHeight(32)
+        self.cmb_save.setFixedWidth(360)
+        self.cmb_save.setEnabled(False)
+        self.cmb_save.setToolTip("Connect to the server first.")
+        self.cmb_save.currentTextChanged.connect(self._on_picker_changed)
+        layout.addWidget(self.cmb_save)
+
+        self.lbl_types = QLabel("FILE TYPES")
+        self.lbl_types.setObjectName("SettingsNote")
+        layout.addWidget(self.lbl_types)
+        types_row = QHBoxLayout()
+        types_row.setSpacing(16)
+        types_row.setContentsMargins(0, 0, 0, 0)
+        self.chk_types = {}
+        type_labels = {"ecf": ".ecf", "yaml": ".yaml / .yml", "csv": ".csv", "images": "images"}
+        for key in FILE_TYPE_KEYS:
+            box = QCheckBox(type_labels[key])
+            box.setObjectName("SettingsCheckBox")
+            box.setChecked(True)
+            box.setEnabled(False)
+            box.setToolTip("Connect to the server first.")
+            box.toggled.connect(self._on_picker_changed)
+            self.chk_types[key] = box
+            types_row.addWidget(box)
+        types_row.addStretch(1)
+        layout.addLayout(types_row)
+
+        self.lbl_catalog_status = QLabel("The folder list appears once the bridge is connected and the server has core 1.6.4 or later.")
+        self.lbl_catalog_status.setObjectName("SettingsNote")
+        self.lbl_catalog_status.setWordWrap(True)
+        layout.addWidget(self.lbl_catalog_status)
 
         ## Read-only: copies the active scenario's Configuration, PDA and Images folders plus the save files
         ## down through ZeroGBridge. Greyed out unless the bridge is connected (see _refresh_download_state).
@@ -159,6 +276,7 @@ class SettingsPage(QWidget):
         self._setup_listening()
         self._refresh_download_state()
         self._refresh_live_mode_state()
+        self._refresh_catalog()
 
     ## Connects to the cockpit's bridge_status_changed signal once, so the button follows the connection live.
     ## Qt drops the link by itself when this page is closed and deleted.
@@ -174,6 +292,7 @@ class SettingsPage(QWidget):
     def _on_bridge_status_changed(self, server_name, is_connected):
         self._refresh_download_state()
         self._refresh_live_mode_state()
+        self._refresh_catalog()
 
     ## LIVE MODE is usable only for users the role gate allows, with the bridge connected (fail closed).
     ## The tick itself lives on the cockpit (live_mode) and is never saved.
@@ -243,10 +362,154 @@ class SettingsPage(QWidget):
             print(f"[ERROR] SettingsPage: Failed to refresh the download button: {e}")
             self.btn_download_files.setEnabled(False)
 
+    ## Asks the connected server for its scenario and save folders. Fail closed when offline
+    ## or when the command is missing. Tests replace fetch_file_catalog so this never hits a live host.
+    def _refresh_catalog(self):
+        try:
+            connected = getattr(self.window(), "bridge_connected", None) is True
+            if not connected:
+                self._set_picker_unavailable("Connect to the server first.")
+                return
+            if not AUTO_FETCH_CATALOG:
+                self._set_picker_unavailable(
+                    "This needs bridge core 1.6.4 or later. "
+                    "The download will use the scenario and save named in the server config.")
+                return
+            if self.catalog_worker is not None and self.catalog_worker.isRunning():
+                return
+            self.picker_ready = False
+            self.lbl_catalog_status.setText("Asking the server for its scenario and save folders")
+            worker = CatalogWorker()
+            self.catalog_worker = worker
+            worker.finished_ok.connect(self._on_catalog_ready)
+            worker.failed.connect(self._on_catalog_failed)
+            worker.finished.connect(lambda w=worker: self._on_catalog_thread_ended(w))
+            worker.start()
+        except Exception as exc:
+            print(f"[ERROR] SettingsPage: Could not start the folder list: {exc}")
+            self._set_picker_unavailable("Could not list the server's scenarios and saves. The download will use the names in the server config.")
+
+    def _on_catalog_thread_ended(self, worker):
+        if self.catalog_worker is worker:
+            self.catalog_worker = None
+
+    def _on_catalog_failed(self, message):
+        self._set_picker_unavailable(message)
+
+    def _on_catalog_ready(self, reply):
+        try:
+            scenarios = [name for name in (reply.get("scenarios") or []) if isinstance(name, str) and name]
+            saves = [name for name in (reply.get("saves") or []) if isinstance(name, str) and name]
+            if not scenarios and not saves:
+                self._set_picker_unavailable(
+                    "The server did not report any scenario or save folders. "
+                    "The download will use the names in the server config.")
+                return
+            current = reply.get("current") if isinstance(reply.get("current"), dict) else {}
+            profile = get_active_profile()
+            server_name = profile.get("server_name") if isinstance(profile, dict) else ""
+            saved = load_server_download_settings(server_name)
+            ## The two lists are independent. Preference order: saved choice, detected origin,
+            ## the known live pair when those folders exist, then the names files:info reported.
+            origin = reply.get("originScenario") if isinstance(reply.get("originScenario"), str) else ""
+            self._fill_combo(self.cmb_scenario, scenarios,
+                             saved.get("scenario"), origin, PREFERRED_SCENARIO, current.get("scenario"))
+            self._fill_combo(self.cmb_save, saves,
+                             saved.get("save"), PREFERRED_SAVE, current.get("save"))
+            types = types_from_saved(saved.get("types"))
+            for key, box in self.chk_types.items():
+                box.blockSignals(True)
+                box.setChecked(types[key])
+                box.setEnabled(True)
+                box.setToolTip("Choose which file types to pull. This is remembered for this server.")
+                box.blockSignals(False)
+            tooltip = "Choose which scenario and save to download. This is remembered for this server."
+            self.cmb_scenario.setToolTip(tooltip)
+            self.cmb_save.setToolTip(tooltip)
+            self.cmb_scenario.setEnabled(self.cmb_scenario.count() > 0)
+            self.cmb_save.setEnabled(self.cmb_save.count() > 0)
+            self.picker_ready = self.cmb_scenario.count() > 0 and self.cmb_save.count() > 0
+            if self.picker_ready:
+                self.lbl_catalog_status.setText("Pick the scenario and save to download. The choice is kept for this server.")
+                self._save_picker_now()
+            else:
+                self.lbl_catalog_status.setText(
+                    "The server listed folders, but a scenario or a save is missing. "
+                    "The download will use the names in the server config.")
+        except Exception as exc:
+            print(f"[ERROR] SettingsPage: Could not apply the folder list: {exc}")
+            self._set_picker_unavailable("Could not list the server's scenarios and saves. The download will use the names in the server config.")
+
+    def _fill_combo(self, combo, names, *preferences):
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItems(names)
+        chosen = first_available_name(names, *preferences)
+        if chosen:
+            combo.setCurrentText(chosen)
+        combo.blockSignals(False)
+
+    def _set_picker_unavailable(self, message):
+        self.picker_ready = False
+        for combo in (self.cmb_scenario, self.cmb_save):
+            combo.blockSignals(True)
+            combo.setEnabled(False)
+            combo.setToolTip(message)
+            combo.blockSignals(False)
+        for box in self.chk_types.values():
+            box.blockSignals(True)
+            box.setEnabled(False)
+            box.setToolTip(message)
+            box.blockSignals(False)
+        self.lbl_catalog_status.setText(message)
+
+    def _active_server_name(self):
+        try:
+            profile = get_active_profile()
+            name = profile.get("server_name") if isinstance(profile, dict) else ""
+            return name if isinstance(name, str) else ""
+        except Exception:
+            return ""
+
+    def _current_types(self):
+        return {key: box.isChecked() for key, box in self.chk_types.items()}
+
+    def _current_selection(self):
+        return selection_for_download(
+            self._active_server_name(),
+            self.picker_ready,
+            self.cmb_scenario.currentText(),
+            self.cmb_save.currentText(),
+            self._current_types(),
+        )
+
+    def _on_picker_changed(self, *args):
+        self._save_picker_now()
+
+    def _save_picker_now(self):
+        if not self.picker_ready:
+            return
+        save_server_download_settings(
+            self._active_server_name(),
+            scenario=self.cmb_scenario.currentText(),
+            save=self.cmb_save.currentText(),
+            types=self._current_types(),
+        )
+
+    def _on_download_clicked_guard(self):
+        types = self._current_types()
+        if self.picker_ready and not any(types.values()):
+            self.lbl_download_status.setText("Pick at least one file type to download.")
+            self.lbl_download_status.setVisible(True)
+            return False
+        return True
+
     ## Starts the download thread. The button is switched off at once so it can't be started twice.
     def _on_download_clicked(self):
         try:
             if self.download_worker is not None:
+                return
+            if not self._on_download_clicked_guard():
                 return
             self.btn_download_files.setEnabled(False)
             self.btn_download_files.setText("DOWNLOADING")
@@ -256,7 +519,10 @@ class SettingsPage(QWidget):
             self.bar_download_progress.setRange(0, 0)
             self.bar_download_progress.setVisible(True)
 
-            self.download_worker = self.create_download_worker()
+            try:
+                self.download_worker = self.create_download_worker(selection=self._current_selection())
+            except TypeError:
+                self.download_worker = self.create_download_worker()
             RUNNING_DOWNLOADS.append(self.download_worker)
             ## The list entry is removed when the thread ends, on whatever page object is still alive.
             self.download_worker.finished.connect(lambda worker=self.download_worker: _forget_download(worker))

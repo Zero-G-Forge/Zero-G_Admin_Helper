@@ -2,6 +2,8 @@
 ## MODULE: features/server_files/download_worker.py
 ## DESCRIPTION: Background thread that copies the server's editable files to this PC through ZeroGBridge.
 ## READ-ONLY: it only sends files:info, files:list and files:get. It never changes anything on the server,
+## Core 1.6.4: an optional selection (scenario, save, file types) is sent as names on list/get. If that
+## selection is missing, the download uses the pair files:info reports (the previous behaviour).
 ## and it never deletes anything on this PC (old local copies stay; changed files are replaced).
 ## It runs in a QThread, so the window never freezes. Progress and the result come back as Qt signals.
 ## =====================================================================
@@ -17,6 +19,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 from features.bridge.server_settings import get_active_profile
 from features.server_files.file_client import ServerFilesError, ServerFilesSession, SUPPORTED_PROTOCOL
+from features.server_files.download_settings import allowed_extensions, is_plain_folder_name
 from features.server_files.file_store import (
     ROOT_NAMES, load_manifest, local_target_path, save_manifest, scenario_folder,
 )
@@ -55,10 +58,13 @@ class ServerFileDownloadWorker(QThread):
     ## One short, plain message for the user.
     failed = pyqtSignal(str)
 
-    def __init__(self, profile_provider=None, parent=None):
+    def __init__(self, profile_provider=None, parent=None, selection=None):
         super().__init__(parent)
         ## Tests hand in their own provider; the real app reads the active server profile.
         self.profile_provider = profile_provider or get_active_profile
+        ## Optional picker choice: {"scenario", "save", "types"}. None means the reported pair
+        ## and every allowed file type (fail closed, same as before the picker).
+        self.selection = selection if isinstance(selection, dict) else None
         self._stop_requested = False
 
     ## Asks the thread to stop at the next safe point (between two requests).
@@ -95,7 +101,7 @@ class ServerFileDownloadWorker(QThread):
             info = session.request("info")
             if info.get("protocol") != SUPPORTED_PROTOCOL:
                 raise ServerFilesError("unsupported", "This server's file commands are a different version than this ZAH expects.")
-            scenario_name = str(info.get("scenario") or "")
+            scenario_name, save_name, name_fields, extensions = self._resolve_selection(info)
             if not scenario_name:
                 raise ServerFilesError("refused", "The server has not reported its active scenario yet. Try again in a minute.")
             available_roots = [row.get("root") for row in (info.get("roots") or [])
@@ -106,19 +112,20 @@ class ServerFileDownloadWorker(QThread):
             folder = scenario_folder(scenario_name)
             manifest = load_manifest(folder)
             manifest["scenario"] = scenario_name
-            manifest["save"] = info.get("saveName")
-            print(f"[INFO] ServerFileDownload: Scenario '{scenario_name}', roots {available_roots}, local folder {folder}")
+            manifest["save"] = save_name
+            print(f"[INFO] ServerFileDownload: Scenario '{scenario_name}', save '{save_name}', roots {available_roots}, local folder {folder}")
 
             ## Step 2: list every file, and keep the ones that are new or changed.
-            wanted, skipped, listed_total = self._collect_wanted(session, available_roots, folder, manifest)
+            wanted, skipped, listed_total = self._collect_wanted(
+                session, available_roots, folder, manifest, name_fields, extensions)
             summary = {
-                "scenario": scenario_name, "save": info.get("saveName"), "folder": folder,
+                "scenario": scenario_name, "save": save_name, "folder": folder,
                 "listed": listed_total, "downloaded": 0, "skipped": skipped, "failed": [], "bytes": 0,
             }
 
             ## Step 3: copy them. The manifest is saved even if this step stops early, so a retry skips what already arrived.
             try:
-                self._download_files(session, folder, manifest, wanted, summary)
+                self._download_files(session, folder, manifest, wanted, summary, name_fields)
             finally:
                 save_manifest(folder, manifest)
 
@@ -127,7 +134,7 @@ class ServerFileDownloadWorker(QThread):
         return summary
 
     ## Lists all files of the available roots. Returns (items to fetch, count unchanged, count listed).
-    def _collect_wanted(self, session, roots, folder, manifest):
+    def _collect_wanted(self, session, roots, folder, manifest, name_fields, extensions):
         wanted = []
         skipped = 0
         listed_total = 0
@@ -136,12 +143,17 @@ class ServerFileDownloadWorker(QThread):
             while offset is not None:
                 self._check_stop()
                 self.progress.emit(0, 0, f"Listing {root} files ({listed_total} so far)")
-                reply = session.request("list", {"root": root, "offset": offset, "limit": LIST_PAGE_SIZE})
+                payload = {"root": root, "offset": offset, "limit": LIST_PAGE_SIZE}
+                payload.update(name_fields.get(root) or {})
+                reply = session.request("list", payload)
+                self._confirm_named_root(root, name_fields, reply)
                 for entry in reply.get("files") or []:
                     path = entry.get("path")
                     size = entry.get("size")
                     mtime = entry.get("mtime")
                     if not isinstance(path, str) or not isinstance(size, int) or isinstance(size, bool):
+                        continue
+                    if extensions is not None and os.path.splitext(path)[1].lower() not in extensions:
                         continue
                     listed_total += 1
                     key = f"{root}/{path}"
@@ -160,7 +172,8 @@ class ServerFileDownloadWorker(QThread):
         return wanted, skipped, listed_total
 
     ## Copies the wanted files, one root at a time, in batches.
-    def _download_files(self, session, folder, manifest, wanted, summary):
+    def _download_files(self, session, folder, manifest, wanted, summary, name_fields=None):
+        name_fields = name_fields or {}
         total = len(wanted) + summary["skipped"]
         done = summary["skipped"]
         self.progress.emit(done, total, f"Downloading {done} of {total} files")
@@ -172,10 +185,13 @@ class ServerFileDownloadWorker(QThread):
             while queue:
                 self._check_stop()
                 batch = [queue.popleft() for _ in range(min(BATCH_ITEMS, len(queue)))]
-                reply = session.request("get", {
+                get_payload = {
                     "root": root,
                     "items": [{"path": entry["item"]["path"], "offset": entry["offset"]} for entry in batch],
-                })
+                }
+                get_payload.update(name_fields.get(root) or {})
+                reply = session.request("get", get_payload)
+                self._confirm_named_root(root, name_fields, reply)
                 results = {row.get("path"): row for row in (reply.get("files") or []) if isinstance(row, dict)}
                 requeue = []
                 moved = False
@@ -275,6 +291,47 @@ class ServerFileDownloadWorker(QThread):
                 os.remove(path)
         except OSError:
             pass
+
+    ## Turns the optional picker selection into a scenario name, a save name, extra list/get
+    ## fields, and the set of extensions to keep (None means every allowed type).
+    def _resolve_selection(self, info):
+        scenario_name = str(info.get("scenario") or "")
+        save_name = info.get("saveName") if isinstance(info.get("saveName"), str) else ""
+        name_fields = {}
+        extensions = None
+        chosen = self.selection if isinstance(self.selection, dict) else None
+        if not chosen:
+            return scenario_name, save_name, name_fields, extensions
+
+        picked_scenario = chosen.get("scenario")
+        picked_save = chosen.get("save")
+        if picked_scenario:
+            if not is_plain_folder_name(picked_scenario):
+                raise ServerFilesError("refused", "The chosen scenario name is not a plain folder name.")
+            scenario_name = picked_scenario.strip()
+            name_fields["scenario"] = {"scenario": scenario_name}
+        if picked_save:
+            if not is_plain_folder_name(picked_save):
+                raise ServerFilesError("refused", "The chosen save name is not a plain folder name.")
+            save_name = picked_save.strip()
+            name_fields["save"] = {"save": save_name}
+
+        extensions = allowed_extensions(chosen.get("types"))
+        if not extensions:
+            raise ServerFilesError("refused", "Pick at least one file type to download.")
+        return scenario_name, save_name, name_fields, extensions
+
+    ## When a named folder was requested, the reply's name must match. An older core ignores
+    ## the name, so a mismatch means we stop rather than silently pulling the wrong folder.
+    def _confirm_named_root(self, root, name_fields, reply):
+        requested = (name_fields.get(root) or {}).get("scenario" if root == "scenario" else "save")
+        if not requested:
+            return
+        reported = reply.get("name")
+        if reported != requested:
+            raise ServerFilesError(
+                "refused",
+                "The server did not use the chosen folder. This needs bridge core 1.6.4 or later.")
 
     def _check_stop(self):
         if self._stop_requested:

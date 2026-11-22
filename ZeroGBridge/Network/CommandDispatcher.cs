@@ -77,6 +77,7 @@ namespace ZeroGBridge
                 if (ServerFileWrites.IsCoreUploadLine(lowerCmd)) return ServerFileWrites.HandleCoreUpload(cleanCmd);
 
                 // 1.6.3: read-only chat history (Network/ChatLog.cs). ZAH polls it, so it skips the trace line too.
+                // 1.6.4: files:catalog and optional scenario/save names on files:list and files:get live in ServerFiles.cs.
                 if (ChatLog.IsChatLine(lowerCmd)) return ChatLog.Handle(cleanCmd);
 
                 // Live server console trace

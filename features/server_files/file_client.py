@@ -2,6 +2,7 @@
 ## MODULE: features/server_files/file_client.py
 ## DESCRIPTION: Talks to ZeroGBridge's read-only files: commands (files:info, files:list, files:get).
 ## (Core 1.6.2: the same session also sends files:put and coreupload:put for write_worker.py.)
+## (Core 1.6.4: the same session also sends files:catalog, and list/get may include a scenario or save name.)
 ## It opens its own short session (so it never mixes with the dashboard's telemetry socket), logs in,
 ## and sends one command at a time with the required pause between commands.
 ## Every wait has a timeout. The bridge password (input_pass) is only written to the socket,

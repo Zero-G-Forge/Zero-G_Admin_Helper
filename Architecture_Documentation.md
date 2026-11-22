@@ -26,6 +26,7 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 - (Nov 22, 2026: every such button is now either wired through the ZAH Safety Flow, with preview, typed CONFIRM, a 15 s countdown, an audit line and a role check, or disabled with the real reason it cannot work. See **Live Pages and the Safety Flow**.)
 - Secrets (auth token, passwords, database URL, developer key, session tokens) are never printed, logged, or committed. Local secrets live under `data/`, which is git-ignored.
 - New bridge commands need explicit approval before they are written. The read-only `files:` commands (`files:info`, `files:list`, `files:get`) were approved and added in core 1.6.1. They can read, never write.
+- Core 1.6.4 adds the read-only `files:catalog` command, and optional `scenario` or `save` folder names on `files:list` and `files:get`, so ZAH can list every scenario and save folder and download from a chosen pair. `files:put` still uses only the live yaml/game pair and ignores those extra names. `protocol` stays 1.
 - Core 1.6.2 adds the first two **write** commands, approved by Ray on Nov 22, 2026 ("make the changes on your own as long as the server itself doesn't need to be restarted"): `files:put` (replace one existing editable file, backup first) and `coreupload:put` (place a new core in `Updates/`). Both are core-only, so they install with a hot reload and never need a restart. See **Server write commands** below.
 - The server files download is **read-only** on both sides: the bridge only opens files with read access, and ZAH never deletes anything on this PC.
 
@@ -351,6 +352,7 @@ The Settings page also has a **SERVER FILES** section:
 
 - Status lines: `LOCAL COPY` and `LAST PULLED`. Both start from the two saved keys above.
 - Button: `DOWNLOAD SERVER FILES (READ-ONLY)`. See **Server files download** below. It is enabled only while `MainCockpit.bridge_connected` is true. The page listens to `bridge_status_changed` (connected in `showEvent`), so the button follows the connection live. With no news from the cockpit it stays disabled (fail closed).
+- Two dropdowns, Scenario and Save, plus checkboxes for file types (`.ecf`, `.yaml` / `.yml`, `.csv`, images). The lists come from the read-only `files:catalog` command when the page opens with a live connection (core 1.6.4). The two lists are independent: any scenario can be chosen with any save. A saved choice for the current server is used when it is still in the list; otherwise the page prefers the save's origin scenario when the catalog reports one, then `Ascension-Reborn` and `Zero-G Server - Season 4` when those names appear, then the live yaml/game pair, then the first name. If the catalog is missing or fails, the dropdowns stay empty and the download uses the live pair from `files:info` (fail closed). The choice is stored per server in `data/download_settings.json` (git-ignored).
 - While a download runs: the button reads `DOWNLOADING` and is disabled, a thin progress bar (`SettingsProgressBar`) and a status line show `Downloading 412 of 906 files`.
 - Checkbox: `LIVE MODE: edit files directly on the server`. Layout only: always off and disabled, tooltip `Coming in a later step.`
 - Note: every live save will ask three times (changes preview, online-players warning, then typing the file name), and the bridge will back up the old file first.
@@ -361,19 +363,20 @@ Flow, run by `ServerFileDownloadWorker` (a `QThread`, so the window never freeze
 
 1. Open a **separate** short bridge session with the active server profile (`ServerFilesSession`). It is not the dashboard's telemetry socket, so replies never get mixed up.
 2. `files:info`. The reply must have `protocol` 1 and a `scenario` name. An old bridge answers with its generic `RESPONSE` or an `ERROR` line, and ZAH stops with: `This server's ZeroGBridge does not have the file commands yet. Ask the owner to update the bridge.` Nothing is written locally in that case.
-3. `files:list` for each available root (`scenario`, `save`), page by page.
-4. Compare with the local manifest. A file is skipped when its size and modified time match the manifest and the local file still has that size.
-5. `files:get` in batches of 40 items. Files that do not fit the reply come back `deferred` and are asked for again. A big file arrives in chunks; ZAH asks for the next chunk with the next `offset`.
-6. Every chunk is appended to `<name>.part`. At `eof`, the byte count must equal the reported size, then the file is moved into place with `os.replace`. A file that changes on the server mid-copy is restarted (at most 2 times).
-7. The manifest is saved, even after a failure, so a retry only fetches what is missing.
+3. When a chosen pair was passed in, `files:list` and `files:get` include the chosen `scenario` or `save` folder name. The reply must echo the same `name`. A mismatch (an older core that ignored the extra key) stops the download with: `The server did not use the chosen folder. This needs bridge core 1.6.4 or later.` Nothing is written. Without a chosen pair, the commands use the live yaml/game roots, as before.
+4. `files:list` for each available root (`scenario`, `save`), page by page. Only files whose extension matches the ticked types are kept. The type filter is applied in ZAH, not on the bridge.
+5. Compare with the local manifest. A file is skipped when its size and modified time match the manifest and the local file still has that size.
+6. `files:get` in batches of 40 items. Files that do not fit the reply come back `deferred` and are asked for again. A big file arrives in chunks; ZAH asks for the next chunk with the next `offset`.
+7. Every chunk is appended to `<name>.part`. At `eof`, the byte count must equal the reported size, then the file is moved into place with `os.replace`. A file that changes on the server mid-copy is restarted (at most 2 times).
+8. The manifest is saved, even after a failure, so a retry only fetches what is missing. It records the chosen scenario and save names.
 
 Local folder (under `data/server_files/`, which is git-ignored):
 
 | Path | Content |
 | --- | --- |
-| `data/server_files/<scenario>/scenario/<server path>` | Files from the active scenario, same relative paths as on the server |
-| `data/server_files/<scenario>/save/<server path>` | Files from the current save game |
-| `data/server_files/<scenario>/_manifest.json` | `files` map of `"<root>/<path>"` to `{size, mtime}` |
+| `data/server_files/<scenario>/scenario/<server path>` | Files from the chosen scenario (or the live one when the picker was not used), same relative paths as on the server |
+| `data/server_files/<scenario>/save/<server path>` | Files from the chosen save game (or the live one when the picker was not used) |
+| `data/server_files/<scenario>/_manifest.json` | Chosen scenario and save names, plus a `files` map of `"<root>/<path>"` to `{size, mtime}` |
 
 Local safety rules (`file_store.local_target_path`): the scenario name is cleaned into a safe folder name (`safe_folder_name`). A server path is refused when it is empty, absolute, has a drive letter or `:`, has `..`, `.` or an empty part, has control characters, or would land outside the download folder. Only ZAH's own `.part` files are ever removed. Old local copies of files that no longer exist on the server are left alone.
 
@@ -389,6 +392,8 @@ Message table:
 | No server profile saved | `Download failed: No active server is saved in ZAH.` |
 | Scenario or save folder not known yet | `Download failed: The server has not reported its active scenario yet. Try again in a minute.` |
 | Some files refused | `Finished, but the server would not send N file(s). LAST PULLED was not updated. Details are in the terminal.` |
+| Chosen folder name ignored by an older core | `Download failed: The server did not use the chosen folder. This needs bridge core 1.6.4 or later.` |
+| Catalog missing or failed (core older than 1.6.4) | The dropdowns stay empty. The download still uses the live pair from `files:info`. The status line says: `This needs bridge core 1.6.4 or later.` plus the reason the list could not be loaded. |
 
 The bridge password is only written to the socket. It is never printed, logged, or included in any message.
 
@@ -401,7 +406,7 @@ Empyrion loads `ZeroGBridge.Loader.ZeroGBridgeLoader`, which implements **API v2
 - It owns the TCP listener and authentication (`BridgeListener`, `AuthConfig`).
 - It hosts `CoreHost`, which loads the reloadable core (`ZeroGBridge.Core.dll`) in its own AppDomain.
 - Game-state work is marshalled onto the **game thread** (`GameThread`, `GameGateway`), never executed on the network thread.
-- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.3** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, and the 1.6.3 read-only chat history `chat:recent`). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
+- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.4** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, the 1.6.3 read-only chat history `chat:recent`, and the 1.6.4 read-only scenario/save catalog plus optional named `files:list` / `files:get`). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
 
 The auth token is read from `ZeroGBridge.json` only and is never written into log lines.
 
@@ -441,9 +446,10 @@ Handled in `ZeroGBridge/Network/CommandDispatcher.cs` and `ApiCommands.cs` after
 | `loadpf:` | `loadplayfield:` | Load a playfield | yes |
 | `api:<RequestName>` | short names from the catalog | Eleon request, optional JSON params | depends on the request |
 | `con:<line>` | `cmd:`, `exec:` | Dedicated console command | depends on the line |
-| `files:info` | | Read-only: which roots exist, scenario and save names, limits | no |
-| `files:list:<json>` | | Read-only: paths, sizes and times of the editable files in a root | no |
-| `files:get:<json>` | | Read-only: file bytes as base64, in chunks | no |
+| `files:info` | | Read-only: which roots exist, live scenario and save names, limits | no |
+| `files:catalog` | | 1.6.4: read-only list of every scenario and save folder, plus the live pair and the save's origin scenario when it can be read | no |
+| `files:list:<json>` | | Read-only: paths, sizes and times of the editable files in a root. Optional `scenario` or `save` name (1.6.4) picks a folder from the catalog | no |
+| `files:get:<json>` | | Read-only: file bytes as base64, in chunks. Optional `scenario` or `save` name (1.6.4) picks a folder from the catalog | no |
 | `files:put:<json>` | | 1.6.2: replace one existing editable file, backup first, in chunks | yes |
 | `coreupload:status` | | 1.6.2: what core files wait in `Updates/` (size, sha256) | no |
 | `coreupload:put:<json>` | | 1.6.2: place a new `ZeroGBridge.Core.dll` / `.pdb` in `Updates/`, in chunks | yes (loads only on `hot:reload`) |
@@ -507,6 +513,8 @@ Factions and messages:
 - `Request_ShowDialog_SinglePlayer`
 - `Request_ConsoleCommand`
 
+`Request_InGameMessage_*` shows a notice on the player's HUD (top right). It does not appear in the dedicated server console (that path is `con:say`, which Chat SEND on GLOBAL already uses). The game usually sends no `Event_Ok`. Core 1.6.4 still waits the usual 500 ms in case `Event_Error` arrives, and that is still a failure. When the request was accepted and no event comes back, the reply is `status: "ok"` with the text `sent (the game sends no confirmation for messages)`. Every other `api:` request keeps the strict timeout check.
+
 ### Loader `hot:` commands
 
 Handled by the loader, not the core, so they still work while a core is missing or reloading. The ZeroGBridge Portal exposes Reload and Rollback to the **developer** role only.
@@ -528,13 +536,17 @@ Requests (one line each, JSON after the second colon):
 
 ```text
 files:info
+files:catalog
 files:list:{"root":"scenario","offset":0,"limit":1000,"req_id":"a1"}
+files:list:{"root":"scenario","scenario":"Ascension-Reborn","offset":0,"limit":1000,"req_id":"a1"}
 files:get:{"root":"scenario","items":[{"path":"Content/Configuration/Items.ecf","offset":0}],"req_id":"a2"}
+files:get:{"root":"save","save":"Zero-G Server - Season 4","items":[{"path":"gameoptions.yaml","offset":0}],"req_id":"a3"}
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `root` | `scenario` (the active scenario folder) or `save` (the current save game folder) |
+| `root` | `scenario` or `save` |
+| `scenario` / `save` (list and get, 1.6.4) | Optional plain folder name from the catalog. Spaces, hyphens, parentheses and underscores are allowed. Separators, `..`, `.`, control characters and reserved punctuation are refused. The name must match a catalog entry exactly (ordinal). When omitted, the live yaml/game root is used. `files:put` ignores these keys and always writes to the live pair |
 | `offset`, `limit` (list) | Paging. `limit` is 1 to 2000, default 1000 |
 | `items` (get) | 1 to 50 objects, each with `path` and an optional `offset` (byte position, default 0) |
 | `req_id` | Optional. A string or number, echoed back as a string |
@@ -544,10 +556,13 @@ Replies:
 | Command | Success reply fields |
 | --- | --- |
 | `files:info` | `ok`, `protocol` (1), `readOnly`, `source`, `scenario`, `saveName`, `roots` (per root: `root`, `available`, `name`, `topFolders`, `allowedFolders`), `limits`, `extensions` |
-| `files:list` | `ok`, `root`, `total`, `offset`, `count`, `next` (number, or null on the last page), `files` (each `{path, size, mtime}`, sorted by path, `mtime` is ISO 8601 UTC) |
-| `files:get` | `ok`, `root`, `files`. Each entry is `{path, size, mtime, offset, length, eof, data}` (base64), or `{path, deferred: true}`, or `{path, error}` |
+| `files:catalog` | `ok`, `current` (`scenario`, `save`), `originScenario` (string or null), `originSource` (which save file and key were used, or null), `scenarios` (folder name list), `saves` (folder name list) |
+| `files:list` | `ok`, `root`, `name` (the folder that was listed), `total`, `offset`, `count`, `next` (number, or null on the last page), `files` (each `{path, size, mtime}`, sorted by path, `mtime` is ISO 8601 UTC) |
+| `files:get` | `ok`, `root`, `name` (the folder that was read), `files`. Each entry is `{path, size, mtime, offset, length, eof, data}` (base64), or `{path, deferred: true}`, or `{path, error}` |
 
-Failure reply: `{"type":"FILES","cmd":"<name>","ok":false,"error":"<code>","message":"<text>"}` with codes `bad_request`, `unknown_root`, `root_unavailable`, `too_many_items`, `unknown_command`, `exception`. A per-item `error` is one of `bad_path`, `not_allowed`, `not_found`, `too_large`, `read_failed`.
+Failure reply: `{"type":"FILES","cmd":"<name>","ok":false,"error":"<code>","message":"<text>"}` with codes `bad_request`, `unknown_root`, `unknown_folder`, `root_unavailable`, `bad_path`, `too_many_items`, `unknown_command`, `exception`. A per-item `error` is one of `bad_path`, `not_allowed`, `not_found`, `too_large`, `read_failed`.
+
+Catalog parents: the parent of the live scenario root (normally `Content/Scenarios`) and, for saves, the parent of the live save root. If that parent is missing, saves try `Saves/Games` first, then `Saves` only when `Games` does not exist, so `Cache`, `Blueprints` and `Games` itself are not listed as if they were saves. `originScenario` is read only from the current save's `gameoptions.yaml` / `.yml` or `game.yaml` / `.yml`, keys `CustomScenario:`, `ScenarioName:`, or `Scenario:`. The value is used only when it is also in the scenario catalog. Other keys (including `CustomPlayerTab` and free text in `GalaxyConfig.ecf`) are ignored.
 
 Limits: one `files:get` reply carries at most **192 KB** of raw bytes (about 256 KB of text). Items past that budget come back `deferred`. A single file over the budget arrives in pieces. A file over **16 MB** is refused. A list scan stops at 50,000 files per root and 12 folder levels. The first list page (`offset` 0) always rescans the folders; later pages reuse that scan for up to 60 seconds so paging stays consistent.
 
@@ -916,7 +931,7 @@ public static class ServerFiles
     public const int ReplyBudgetBytes = 192 * 1024;
     public const int MaxItemsPerGet = 50;
     public static bool IsFilesLine(string lower);
-    public static string Handle(string line);                 // files:info, files:list, files:get
+    public static string Handle(string line);                 // files:info, files:list, files:get, files:catalog
     public static void RefreshRoots(IModApi api);             // game thread, throttled
     public static string NormalizeRelativePath(string rootName, string requested, out string error);
     public static string ResolveUnderRoot(string rootFull, string normalizedRelative, out string error);
@@ -1040,7 +1055,7 @@ Page wiring:
 | Dashboard | PLAYERS, ONLINE PLAYERS | `plys` (every 15 s while open) | no |
 | Dashboard | UPTIME | `api:Request_Dedi_Stats` (`data.uptime`, seconds) | no |
 | Dashboard | ACTIVE ALERTS, NEEDS ATTENTION, SETTINGS badge | `plys` fields `cheat` and `cheater` | no |
-| Dashboard | ANNOUNCE | `api:Request_InGameMessage_AllPlayers {"msg":"..."}` (HUD message to everyone) | yes |
+| Dashboard | ANNOUNCE | `api:Request_InGameMessage_AllPlayers {"msg":"..."}` (HUD message to every online player; not shown in the dedicated server console) | yes |
 | Dashboard | SAVE | none: Empyrion has no save-only command; `saveandexit` stops the server | stays disabled |
 | Dashboard | BACKUP | none: a consistent backup needs the server stopped | stays disabled |
 | Chat | GLOBAL / FACTION / PRIVATE lists | `chat:recent:{"since":N}` (every 5 s while open), names from `plys` | no |
@@ -1096,11 +1111,12 @@ These items have UI placeholders, agreed behaviour, or both. They are **not** im
 
 ### SERVER FILES download: what is left
 
-Done: the read-only `files:` bridge commands (core 1.6.1) and the working Settings download button. See **Server files download** and **Server file commands** above.
+Done: the read-only `files:` bridge commands (core 1.6.1), the working Settings download button, and (core 1.6.4) the scenario/save picker plus `files:catalog`. See **Server files download** and **Server file commands** above.
 
 Still to do:
 
 - Done: the live server runs core 1.6.2 (it has `files:`), so the old "Ray deploys the 1.6.1 core" step is finished.
+- Done (Nov 22, 2026): Settings can pick any scenario folder under `Content/Scenarios` and any save folder under `Saves/Games`, independently of the live yaml/game pair. The default starting names are `Ascension-Reborn` and `Zero-G Server - Season 4` when those folders are in the catalog.
 - Check the real scenario's folder layout with `files:info` (`topFolders`) and adjust the `AllowedFolders` table in `ServerFiles.cs` if the real folders differ. The save game folders in particular are guesses until seen on the live server.
 - Done (Nov 22, 2026): Items, ECF Editor, and PDA Editor read from `data/server_files/<scenario>/`, **never** from local base-game Content files.
 - Done (Nov 22, 2026): CANCEL DOWNLOAD on the Settings page calls the worker's `request_stop`; the worker stops between two requests and reports `Download stopped.` Half-finished `.part` files are removed.

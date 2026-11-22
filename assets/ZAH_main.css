@@ -1011,6 +1011,29 @@ QProgressBar#SettingsProgressBar::chunk {
     border-radius: 5px;
 }
 
+/* Scenario and save pickers on the Settings download section: same dark box as the ECF file combo */
+QComboBox#SettingsFileCombo {
+    background-color: rgba(5, 14, 24, 180);
+    border: 1px solid rgba(40, 170, 215, 90);
+    border-radius: 6px;
+    color: #dcebf5;
+    font-size: 14px;
+    padding: 4px 10px;
+}
+
+QComboBox#SettingsFileCombo::drop-down {
+    border: none;
+    width: 24px;
+}
+
+QComboBox#SettingsFileCombo QAbstractItemView {
+    background-color: #08121e;
+    border: 1px solid rgba(40, 170, 215, 90);
+    color: #dcebf5;
+    selection-background-color: rgba(18, 90, 125, 170);
+    selection-color: #ffffff;
+}
+
 /* endregion */
 
 /* region: Multi-Server Page */
