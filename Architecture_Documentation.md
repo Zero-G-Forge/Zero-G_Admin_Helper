@@ -145,17 +145,17 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `backups` | BACKUPS | `features.backups.backups_page` | `BackupsPage` | Layout; PREVIEW and RESTORE locked with the reason (no bridge backup command; a restore needs the server stopped) |
 | `bp_editor` | BP EDITOR | `features.bp_editor.bp_editor_page` | `LibraryPage` (blueprints tab) | Layout; blueprint data is not loaded yet |
 | `items` | ITEMS | `features.items.items_page` | `LibraryPage` (items tab) | Reads items from the downloaded server files on opening (`load_server_files`), with item pictures; empty state when nothing is downloaded |
-| `servers` | SERVERS | `features.multi_server.multi_server_page` | `MultiServerPage` | Layout; shown only with two or more connected servers |
+| `servers` | SERVERS | `features.multi_server.multi_server_page` | `MultiServerPage` | Live cards for every saved server (read-only poll), cross-server alerts, BROADCAST and BROADCAST TO ALL SERVERS (Safety Flow), OPEN DASHBOARD; shown when two or more saved servers answer |
 
 Supporting modules (not nav pages):
 
 | Module | Role |
 | --- | --- |
-| `features/dashboard/main_cockpit.py` | Main window shell: header, nav, content stack, status bar, bridge pipe, logout |
+| `features/dashboard/main_cockpit.py` | Main window shell: header, nav, content stack, status bar, bridge pipe, auto-reconnect, keepalive, server monitor, logout |
 | `features/loading/loading_screen.py` | Boot dialog and login gate |
 | `features/bridge/command_pipe.py` | Background thread that logs in and sends queued commands |
 | `features/bridge/bridge_connection.py` | Socket helpers and line protocol |
-| `features/bridge/server_settings.py` | Reads the active profile from `data/server_config.json` |
+| `features/bridge/server_settings.py` | Reads the active profile from `data/server_config.json`; `set_active_index` switches the active server (only `active_index` changes) |
 | `features/shared/ecf_parser.py` | Read-only ECF parse, Ref merge, and CSV name lookup |
 | `features/shared/server_actions.py` | Read-only bridge reads, the ZAH Safety Flow, the action role table, and the audit log |
 | `features/shared/loadouts.py` | Loadout templates in `data/loadout_templates.json` |
@@ -172,6 +172,7 @@ Supporting modules (not nav pages):
 | `features/shared/editor_actions.py` | Shared VALIDATE, CHANGES PREVIEW, SAVE, and UPLOAD TO SERVER actions |
 | `features/server_files/upload_flow.py` | The three upload confirmations, the role gate helpers, and the online-player count |
 | `features/server_files/write_worker.py` | `files:put`, `coreupload:put`, and single-file `files:get` steps, run in `ServerWriteWorker` |
+| `features/multi_server/server_monitor.py` | `ServerMonitor`: read-only poll of every saved server every 30 s (`hot:status`, `plys`, `api:Request_Dedi_Stats`) |
 | `features/chat/chat_store.py` | Chat history in memory (from `chat:recent`) and watch words in `data/chat_watch_words.json`; shared by Chat and Alerts |
 
 ## Roles
@@ -599,6 +600,14 @@ Core 1.6.3, `ZeroGBridge/Network/ChatLog.cs`. Core-only (hot reload, no restart)
 - Sending chat does not use this command. It uses the existing `con:say`, `api:Request_InGameMessage_Faction` and `api:Request_InGameMessage_SinglePlayer`.
 - Harness only: `harness:chat|<channel>|<senderId>|<text>` adds a line in the test harness serve mode.
 
+### Bridge auto-reconnect and multi-server
+
+- **Auto-reconnect** (`MainCockpit`): when a connection that was up drops on its own, the cockpit tries again after 5, 10, 20, 40, then every 60 seconds. The status bar says `ZEROGBRIDGE RECONNECTING IN Ns`. A disconnect asked for by the user (ZeroGBridge page, server switch, logout, closing ZAH) sets `bridge_user_stopped` and is never retried. A successful login resets the count.
+- **Keepalive**: every 30 s while connected, the cockpit queues one read-only `plys` when the pipe is idle. A dead connection then shows up as a drop within about 30 s. Keepalive replies are not logged.
+- **Server monitor**: while the main bridge is connected, `ServerMonitor` reads every saved server in `data/server_config.json` every 30 s on its own short connections: `hot:status` (core release), `plys` (players, cheat flags), and `api:Request_Dedi_Stats` (fps, memory, uptime). All read-only. The SERVERS nav button shows when two or more answer.
+- **OPEN DASHBOARD** calls `switch_server`: `set_active_index` writes only `active_index` in `data/server_config.json` (a local file on the PC, not a server change), then the cockpit disconnects and connects to that server.
+- **BROADCAST TO ALL SERVERS**: one Safety Flow, then `api:Request_InGameMessage_AllPlayers` to each answering server in turn (`run_server_action(..., profiles=[...])`). Each server gets its own audit line; one failing does not stop the others. A server on an older core without that request answers `ERROR`, which is shown as failed.
+
 ## Class and Method Signatures
 
 ### Entry, shell, and loader
@@ -670,6 +679,7 @@ def send_bridge_command(bridge_socket, command_text)
 def read_bridge_line(bridge_socket, max_bytes=65536)
 def close_bridge_socket(bridge_socket)
 def get_active_profile()
+def set_active_index(server_index)              # True when saved; .part file then os.replace
 
 class CommandPipe(QThread):
     connection_changed = pyqtSignal(str, bool)
@@ -680,6 +690,29 @@ class CommandPipe(QThread):
     def enqueue_command(self, command_str)
     def stop(self)
     def run(self)
+
+# features/dashboard/main_cockpit.py (Auto-Reconnect and Server Monitor region)
+RECONNECT_DELAYS_SEC = [5, 10, 20, 40, 60]       # the last value repeats
+KEEPALIVE_SEC = 30
+def _after_status_change(self, is_connected)
+def _schedule_reconnect(self)
+def _cancel_reconnect(self)
+def _try_reconnect(self)
+def _send_keepalive(self)                       # queues one read-only plys
+def _start_server_monitor(self)
+def _on_servers_updated(self, results)          # SERVERS nav shows at 2+ answering servers
+def switch_server(self, server_index)           # OPEN DASHBOARD
+
+# features/multi_server/server_monitor.py
+POLL_SEC = 30
+def poll_server(profile) -> dict                # name, profile, online, core, players_online, players_total, fps, mem, uptime, flagged
+def poll_all() -> list
+class ServerMonitor(QObject):
+    servers_updated = pyqtSignal(list)
+    def start(self)
+    def stop(self)
+    def poll_now(self)
+    def online_count(self)
 ```
 
 Profile fields used from `data/server_config.json` include the display name, the host address, and the bridge port. The auth token is read from the same profile and is never printed. `active_index` selects the current profile. A blank bridge port uses the built-in default from `server_settings.py`.
@@ -1008,6 +1041,12 @@ Page wiring:
 | Alerts | COMMAND PREVIEW, PREVIEW BAN | `con:ban <entityId> <1h\|1d\|7d\|30d\|1y>` | yes |
 | Backups | SNAPSHOTS, BACKUP SCHEDULE, DISK USAGE | none: the bridge has no snapshot or backup listing (`backup` answers `not_available`) | panels say why |
 | Backups | PREVIEW, RESTORE SELECTED | none: restoring a save needs the server stopped, which is a restart | stays disabled |
+| Servers | Cards (status, players, RAM, TICK RATE, core, uptime) | `ServerMonitor`: `hot:status`, `plys`, `api:Request_Dedi_Stats` per saved server, every 30 s | no |
+| Servers | CPU ring | none: the game does not report CPU use | shows `--` |
+| Servers | CROSS-SERVER ALERTS | the same poll (a server not answering, cheat flags) | no |
+| Servers | OPEN DASHBOARD | none on the server: changes `active_index` on this PC and reconnects | no |
+| Servers | BROADCAST (one server) | `api:Request_InGameMessage_AllPlayers` to that server | yes |
+| Servers | BROADCAST TO ALL SERVERS | `api:Request_InGameMessage_AllPlayers` to every answering server | yes |
 
 ## Planned / Not Yet Wired
 
@@ -1065,6 +1104,6 @@ Done (Nov 22, 2026): both editors fill their file dropdown from the downloaded s
 
 ### Other agreed follow-ups
 
-- Multi-server connections and bridge auto-reconnect.
-- Wiring play, chat, faction, structure, playfield, alert, and backup actions that still have disabled buttons.
+- Done (Nov 22, 2026): multi-server connections and bridge auto-reconnect (see **Bridge auto-reconnect and multi-server** below).
+- Done (Nov 22, 2026): players, chat, factions, structures, playfields, alerts, and backups are wired or locked with a reason (see **Live Pages and the Safety Flow**).
 - Optional restyle of Bans & Audit and Users, only if requested.

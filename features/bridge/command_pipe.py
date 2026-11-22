@@ -124,6 +124,7 @@ class CommandPipe(QThread):
 
                 ## No reply counts as a lost connection for now: the dot goes red and the loop ends.
                 ## Automatic reconnecting is a later lesson.
+                ## (Nov 22, 2026: MainCockpit now reconnects after such a drop; see its Auto-Reconnect region.)
                 if reply_text is None:
                     print("[WARNING] CommandPipe: No reply, treating connection as lost")
                     self.connection_changed.emit(self.server_name, False)

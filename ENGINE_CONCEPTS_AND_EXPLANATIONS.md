@@ -513,6 +513,20 @@ The game reports how a player looks now, not how they looked a minute ago. Showi
 
 A save folder is many files that the game keeps writing while it runs. Copying it in the middle can catch some files old and some new, and putting an old copy back while the game runs would be overwritten or break the save. Both need the server stopped first, and stopping it is a restart, which ZAH does not do. So the BACKUPS page explains this instead of offering buttons that cannot work.
 
+## Staying Connected
+
+### Why a drop is retried, but a disconnect is not
+
+If the line goes dead on its own (the server's network hiccups, the bridge reloads), the admin still wants to be connected, so ZAH tries again: first after 5 seconds, then waiting longer each time up to once a minute. Pressing DISCONNECT, switching servers or closing ZAH is a clear "stop", so those are never undone.
+
+### Why ZAH asks "plys" every 30 seconds
+
+The connection only notices it is dead when it tries to send something. A small read-only question every 30 seconds is enough to find out, without changing anything on the server.
+
+### Watching several servers at once
+
+Each saved server is asked the same three read-only questions on its own short connection. Nothing is kept open, so a slow or dead server cannot block the main one. A message to all servers passes the Safety Flow once, then goes to each server in turn, and each one gets its own line in the audit log.
+
 ## Background Threads for Network Calls
 
 ### The window thread must stay free

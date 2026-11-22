@@ -303,13 +303,13 @@ def ask_safety_flow(parent, title, command_preview, explanation=""):
 # region Server Action
 
 def run_server_action(widget, action_key, title, command, on_done=None, explanation="", want_types=WRITE_REPLY_TYPES,
-                      profile=None, preview=None, gap_sec=0.5):
+                      profile=None, preview=None, gap_sec=0.5, profiles=None):
     """Role check, Safety Flow, send in the background, audit line, then on_done(ok, reply_or_message).
     Returns False when it stopped before sending (no role, no bridge, cancelled)."""
     try:
         if not command:
             return False
-        reason = block_reason(widget, action_key) if profile is None else ("" if user_may(widget, action_key) else "no role")
+        reason = block_reason(widget, action_key) if profile is None and not profiles else ("" if user_may(widget, action_key) else "no role")
         if reason:
             print(f"[WARN] ServerActions: {action_key} refused before sending: {reason}")
             return False
@@ -331,6 +331,32 @@ def run_server_action(widget, action_key, title, command, on_done=None, explanat
             write_audit(widget, action_key, command, False, message)
             if on_done:
                 on_done(False, message)
+
+        ## profiles: the same command goes to several saved servers (BROADCAST TO ALL SERVERS), one after another.
+        ## Each server gets its own audit line; one server failing does not stop the others.
+        if profiles:
+            targets = list(profiles)
+
+            def send_each():
+                results = []
+                for one_profile in targets:
+                    name = str(one_profile.get("server_name", "?"))
+                    try:
+                        one_reply = SEND_FUNCTION(command, want_types, one_profile)
+                    except Exception as send_error:
+                        one_reply = {"type": "ERROR", "message": str(send_error)}
+                    results.append((name, one_reply))
+                return results
+
+            def finished_each(results):
+                for name, one_reply in results:
+                    write_audit(widget, action_key, command, reply_ok(one_reply), f"{name}: {reply_text(one_reply)}")
+                if on_done:
+                    on_done(all(reply_ok(one_reply) for name, one_reply in results), results)
+
+            from features.zgb_portal.live_client import run_async
+            run_async(send_each, finished_each, lambda kind, message: failed(message))
+            return True
 
         ## A list of commands is sent one after another, gap_sec apart; the first refusal stops the rest.
         if isinstance(command, (list, tuple)):

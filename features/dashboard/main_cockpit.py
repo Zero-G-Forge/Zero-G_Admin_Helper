@@ -52,6 +52,19 @@ except ImportError as e:
 
     load_app_settings = None
 
+## Guarded import: if server_monitor is missing, the SERVERS page just stays hidden.
+try:
+    from features.multi_server.server_monitor import ServerMonitor
+except ImportError as e:
+    print(f"[ERROR] MainCockpit: Could not load server_monitor: {e}")
+    ServerMonitor = None
+
+## Seconds between reconnect tries after the bridge drops on its own. The last value repeats.
+RECONNECT_DELAYS_SEC = [5, 10, 20, 40, 60]
+
+## Seconds between keepalive reads (plys) while connected, so a dead connection is noticed.
+KEEPALIVE_SEC = 30
+
 ## Guarded import: if clickable_label is missing, the bridge field is a plain label (not clickable).
 try:
     from features.shared.clickable_label import ClickableLabel
@@ -929,6 +942,9 @@ class MainCockpit(QMainWindow):
 
             ## Tell any listening page about the change.
             self.bridge_status_changed.emit(self.bridge_server_name, self.bridge_connected)
+
+            ## Auto-reconnect, keepalive and the multi-server poll follow the connection.
+            self._after_status_change(bool(is_connected))
         except Exception as e:
             print(f"[ERROR] MainCockpit: Failed to update server status: {e}")
 
@@ -1035,6 +1051,8 @@ class MainCockpit(QMainWindow):
             if command_pipe is not None:
                 command_pipe.deleteLater()
 
+            ## A connect asked for by the user (or auto-connect) means a later drop may be retried.
+            self.bridge_user_stopped = False
             self.command_pipe = CommandPipe(parent=self)
 
             ## connect() links a signal to a method. Qt delivers it on the window thread,
@@ -1058,6 +1076,10 @@ class MainCockpit(QMainWindow):
             if command_pipe is None:
                 print("[INFO] MainCockpit: No bridge connection to close")
                 return False
+
+            ## A disconnect asked for by the user is never retried by auto-reconnect.
+            self.bridge_user_stopped = True
+            self._cancel_reconnect()
 
             ## stop() waits (up to 3 s) for the thread to close its socket and finish.
             command_pipe.stop()
@@ -1110,7 +1132,124 @@ class MainCockpit(QMainWindow):
 
     def _on_bridge_reply(self, command_str, reply_text):
         """Receives each bridge reply. Pages will use these later; for now it only logs."""
+
+        ## Keepalive replies come every 30 s, so they are not logged.
+        if command_str == "plys" and getattr(self, "keepalive_pending", False):
+            self.keepalive_pending = False
+            return
         print(f"[INFO] MainCockpit: Reply received for {command_str.split(':')[0]}")
+
+    # endregion
+
+    # region Auto-Reconnect and Server Monitor
+
+    def _after_status_change(self, is_connected):
+        """Runs after every bridge status change: resets or schedules reconnects, keepalive, and the server poll."""
+        try:
+            if not hasattr(self, "reconnect_timer"):
+                self.reconnect_timer = QTimer(self)
+                self.reconnect_timer.setSingleShot(True)
+                self.reconnect_timer.timeout.connect(self._try_reconnect)
+                self.keepalive_timer = QTimer(self)
+                self.keepalive_timer.setInterval(KEEPALIVE_SEC * 1000)
+                self.keepalive_timer.timeout.connect(self._send_keepalive)
+                self.reconnect_attempts = 0
+                self.was_connected = False
+            if is_connected:
+                self.was_connected = True
+                self.reconnect_attempts = 0
+                self.reconnect_timer.stop()
+                self.keepalive_timer.start()
+                self._start_server_monitor()
+                return
+            self.keepalive_timer.stop()
+
+            ## Only a connection that was up and dropped on its own is retried.
+            if self.was_connected and not getattr(self, "bridge_user_stopped", False):
+                self._schedule_reconnect()
+            elif getattr(self, "bridge_user_stopped", False):
+                self.was_connected = False
+                monitor = getattr(self, "server_monitor", None)
+                if monitor is not None:
+                    monitor.stop()
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to handle the status change: {e}")
+
+    def _schedule_reconnect(self):
+        try:
+            if self.reconnect_timer.isActive():
+                return
+            delay = RECONNECT_DELAYS_SEC[min(self.reconnect_attempts, len(RECONNECT_DELAYS_SEC) - 1)]
+            self.reconnect_attempts += 1
+            self.reconnect_timer.start(delay * 1000)
+            lbl = getattr(self, "lbl_bridge_status", None)
+            if lbl is not None:
+                lbl.setText(f"ZEROGBRIDGE RECONNECTING IN {delay}s")
+            print(f"[WARN] MainCockpit: Bridge dropped, reconnect try {self.reconnect_attempts} in {delay} s")
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Failed to schedule a reconnect: {e}")
+
+    def _cancel_reconnect(self):
+        timer = getattr(self, "reconnect_timer", None)
+        if timer is not None:
+            timer.stop()
+        self.reconnect_attempts = 0
+        self.was_connected = False
+
+    def _try_reconnect(self):
+        try:
+            if getattr(self, "bridge_user_stopped", False):
+                return
+            print("[INFO] MainCockpit: Reconnecting to the bridge")
+
+            ## connect_bridge clears bridge_user_stopped, which is right: this is still the user's wanted connection.
+            if not self.connect_bridge():
+                self._schedule_reconnect()
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Reconnect failed: {e}")
+            self._schedule_reconnect()
+
+    def _send_keepalive(self):
+        """Queues one read-only plys, so a dead connection shows up as a drop within 30 s."""
+        try:
+            command_pipe = getattr(self, "command_pipe", None)
+            if command_pipe is not None and command_pipe.isRunning() and command_pipe.command_queue.empty():
+                self.keepalive_pending = True
+                command_pipe.enqueue_command("plys")
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Keepalive failed: {e}")
+
+    def _start_server_monitor(self):
+        try:
+            if ServerMonitor is None:
+                return
+            if getattr(self, "server_monitor", None) is None:
+                self.server_monitor = ServerMonitor(self)
+                self.server_monitor.servers_updated.connect(self._on_servers_updated)
+            self.server_monitor.start()
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Could not start the server monitor: {e}")
+
+    def _on_servers_updated(self, results):
+        """SERVERS shows in the nav once 2 or more saved servers answer."""
+        try:
+            self.update_multi_server_nav(sum(1 for result in results if result.get("online")))
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Could not use the server poll: {e}")
+
+    def switch_server(self, server_index):
+        """Makes another saved server the active one and reconnects to it (OPEN DASHBOARD on the SERVERS page)."""
+        try:
+            from features.bridge.server_settings import set_active_index
+            if not set_active_index(server_index):
+                return False
+            self.disconnect_bridge()
+            started = self.connect_bridge()
+            self._on_nav_clicked("dashboard")
+            return started
+        except Exception as e:
+            print(f"[ERROR] MainCockpit: Could not switch server: {e}")
+            return False
 
     # endregion
 
@@ -1193,6 +1332,12 @@ class MainCockpit(QMainWindow):
 
             ## Saved to a local name and checked, so Pylance (and Python) know it exists.
             command_pipe = getattr(self, "command_pipe", None)
+
+            ## Closing ZAH is a user stop, so no reconnect is tried while it shuts down.
+            self.bridge_user_stopped = True
+            self._cancel_reconnect()
+            if getattr(self, "server_monitor", None) is not None:
+                self.server_monitor.stop()
             if command_pipe is not None:
                 command_pipe.stop()
         except Exception as e:

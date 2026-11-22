@@ -9,6 +9,7 @@
 ## json reads the settings file; data_path builds a safe path into the data/ folder
 ## on both Linux and Windows.
 import json
+import os
 from features.paths import data_path
 
 # endregion
@@ -70,5 +71,32 @@ def get_active_profile():
     except Exception as e:
         print(f"[ERROR] ServerSettings: Could not read {SERVER_CONFIG_FILE}: {e}")
         return None
+
+# endregion
+
+
+# region Active Server
+
+## Makes another saved server the active one. Only active_index changes; the rest of the file
+## (tokens included) is written back as it was, through a .part file so a crash cannot leave half a file.
+def set_active_index(server_index):
+    try:
+        config_file = data_path(SERVER_CONFIG_FILE)
+        with open(config_file, "r", encoding="utf-8") as file_handle:
+            server_store = json.load(file_handle)
+        server_list = server_store.get("servers", [])
+        if not isinstance(server_index, int) or not 0 <= server_index < len(server_list):
+            print(f"[WARNING] ServerSettings: No saved server number {server_index}")
+            return False
+        server_store["active_index"] = server_index
+        part_file = config_file + ".part"
+        with open(part_file, "w", encoding="utf-8") as file_handle:
+            json.dump(server_store, file_handle, indent=4)
+        os.replace(part_file, config_file)
+        print(f"[INFO] ServerSettings: Active server is now {server_list[server_index].get('server_name', '?')}")
+        return True
+    except Exception as e:
+        print(f"[ERROR] ServerSettings: Could not change the active server: {type(e).__name__}")
+        return False
 
 # endregion

@@ -555,3 +555,121 @@ def test_backups_page_stays_locked_with_reasons():
     qapp.processEvents()
 
 # endregion
+
+
+# region Multi-Server and Auto-Reconnect
+
+def _two_servers():
+    return [{"server_name": "Alpha", "input_ip": "127.0.0.1", "bridge_port": "1"},
+            {"server_name": "Beta", "input_ip": "127.0.0.2", "bridge_port": "2"}]
+
+
+def test_server_monitor_polls_each_saved_server(monkeypatch, tmp_path):
+    from features.multi_server import server_monitor
+    monkeypatch.setattr(server_monitor, "LIST_PROFILES", _two_servers)
+
+    def status(profile):
+        if profile["server_name"] == "Beta":
+            raise ConnectionError("down")
+        return {"core": {"version": {"release": "1.6.3"}}, "loader": {"release": "1.5.0"}}
+    monkeypatch.setattr(server_monitor, "STATUS_FUNCTION", status)
+    install(monkeypatch, tmp_path, {"plys": {"type": "PLAYER_CACHE", "player_list": [
+        {"name": "A", "status": "Online", "cheat": "On"}, {"name": "B", "status": "Offline"}]},
+        "api:Request_Dedi_Stats": {"type": "API_RESULT", "status": "ok", "data": {"fps": 30, "mem": 2048, "uptime": 3600}}})
+    results = server_monitor.poll_all()
+    assert results[0]["online"] and results[0]["core"] == "1.6.3" and results[0]["players_online"] == 1
+    assert results[0]["flagged"] == ["A"] and results[0]["fps"] == 30
+    assert not results[1]["online"] and results[1]["players_online"] is None
+
+
+def test_multi_server_page_cards_and_broadcasts(monkeypatch, tmp_path):
+    from features.multi_server import multi_server_page
+    bridge = install(monkeypatch, tmp_path, {"api:Request_InGameMessage_AllPlayers": {"type": "API_RESULT", "status": "ok"}})
+    qapp = get_qapp()
+    page = multi_server_page.create_page()
+    cockpit = host(page, role="admin")
+    profiles = _two_servers()
+    results = [{"name": "Alpha", "profile": profiles[0], "online": True, "core": "1.6.3", "players_online": 2, "players_total": 9,
+                "fps": 30, "mem": 2048, "uptime": 90061, "flagged": ["Cheaty"]},
+               {"name": "Beta", "profile": profiles[1], "online": True, "core": "1.5.1", "players_online": 0, "players_total": 4,
+                "fps": None, "mem": None, "uptime": None, "flagged": []}]
+    page.show_results(results)
+    alpha = page.server_cards["Alpha"]
+    assert alpha.lbl_players.text() == "PLAYERS  2 / 9" and alpha.info_labels[0].text() == "CORE\n1.6.3"
+    assert alpha.rings["TICK RATE"].ring_value == 50 and alpha.rings["CPU"].ring_text == "--"
+    assert page.alerts_rows_layout.count() == 1
+    page.txt_broadcast.setText("Restart soon")
+    assert page.btn_broadcast_send.isEnabled()
+    sent_profiles = []
+    real_send = server_actions.SEND_FUNCTION
+    monkeypatch.setattr(server_actions, "SEND_FUNCTION", lambda c, w, p=None: sent_profiles.append(p["server_name"]) or real_send(c, w, p))
+    page._on_broadcast_all()
+    settle(qapp)
+    assert sent_profiles == ["Alpha", "Beta"] and len(bridge.asked) == 1
+    audit_lines = server_actions.read_audit(10)
+    assert len([line for line in audit_lines if line.get("action") == "multi_broadcast"]) == 2
+    monkeypatch.setattr(multi_server_page.QInputDialog, "getText", staticmethod(lambda *a, **k: ("Beta only", True)))
+    page._on_broadcast_one("Beta")
+    settle(qapp)
+    assert sent_profiles[-1] == "Beta"
+    cockpit.close()
+
+
+def test_multi_server_page_moderator_cannot_broadcast(monkeypatch, tmp_path):
+    from features.multi_server import multi_server_page
+    install(monkeypatch, tmp_path, {})
+    qapp = get_qapp()
+    page = multi_server_page.create_page()
+    cockpit = host(page, role="moderator")
+    page.show_results([{"name": "Alpha", "profile": _two_servers()[0], "online": True, "flagged": []}])
+    page.txt_broadcast.setText("x")
+    assert not page.btn_broadcast_send.isEnabled() and not page.server_cards["Alpha"].buttons["BROADCAST"].isEnabled()
+    assert page.server_cards["Alpha"].buttons["OPEN DASHBOARD"].isEnabled()
+    cockpit.close()
+
+
+def test_cockpit_reconnects_after_a_drop_but_not_after_a_user_stop(monkeypatch):
+    from features.dashboard import main_cockpit
+    monkeypatch.setattr(main_cockpit, "ServerMonitor", None)
+    monkeypatch.setattr(main_cockpit, "load_app_settings", lambda: {"bridge_auto_connect": False})
+    qapp = get_qapp()
+    cockpit = main_cockpit.MainCockpit()
+    tries = []
+    monkeypatch.setattr(cockpit, "connect_bridge", lambda: tries.append(1) or True)
+    cockpit.update_server_status("Alpha", True)
+    assert cockpit.keepalive_timer.isActive() and not cockpit.reconnect_timer.isActive()
+    cockpit.update_server_status("Alpha", False)
+    assert cockpit.reconnect_timer.isActive() and cockpit.reconnect_attempts == 1
+    assert "RECONNECTING IN 5s" in cockpit.lbl_bridge_status.text()
+
+    ## The real timer stops itself when it fires; the test fires it by hand.
+    cockpit.reconnect_timer.stop()
+    cockpit._try_reconnect()
+    assert tries == [1]
+    cockpit.update_server_status("Alpha", False)
+    assert cockpit.reconnect_attempts == 2 and cockpit.reconnect_timer.remainingTime() > 5000
+
+    ## A user disconnect stops the retries.
+    class FakePipe:
+        def stop(self):
+            pass
+    cockpit.command_pipe = FakePipe()
+    cockpit.disconnect_bridge()
+    assert not cockpit.reconnect_timer.isActive() and cockpit.bridge_user_stopped
+    cockpit.update_server_status("Alpha", False)
+    assert not cockpit.reconnect_timer.isActive()
+    cockpit.close()
+
+
+def test_set_active_index_keeps_the_rest(monkeypatch, tmp_path):
+    import json
+    from features.bridge import server_settings
+    config = tmp_path / "server_config.json"
+    config.write_text(json.dumps({"active_index": 0, "servers": [{"server_name": "A", "input_pass": "x"}, {"server_name": "B", "input_pass": "y"}]}))
+    monkeypatch.setattr(server_settings, "data_path", lambda name: str(tmp_path / name))
+    assert server_settings.set_active_index(1)
+    saved = json.loads(config.read_text())
+    assert saved["active_index"] == 1 and saved["servers"][1]["input_pass"] == "y"
+    assert not server_settings.set_active_index(5)
+
+# endregion
