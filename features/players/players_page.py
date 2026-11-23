@@ -13,6 +13,8 @@
 ## MESSAGE (api:Request_InGameMessage_SinglePlayer), WARP (api:Request_Entity_Teleport / Request_Entity_ChangePlayfield), KICK (con:kick),
 ## BAN (con:ban), SAVE & APPLY (api:Request_Player_SetInventory) and the loadouts (api:Request_Player_AddItem)
 ## go through the ZAH Safety Flow in features/shared/server_actions.py. GOD MODE stays off (see GOD_MODE_TIP).
+## GIVE PACK (Nov 23, 2026) hands a custom item pack, built with BUILD ITEM TEMPLATE, to the picked player
+## through the same player_loadout path as STARTER, EXPLORER and BUILDER.
 ## ==========================================
 
 # region Imports
@@ -20,11 +22,12 @@
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton,
                              QTableWidget, QHeaderView, QAbstractItemView, QProgressBar, QTableWidgetItem,
-                             QInputDialog, QDialog, QFormLayout, QLineEdit, QDoubleSpinBox, QDialogButtonBox)
+                             QInputDialog, QDialog, QFormLayout, QLineEdit, QDoubleSpinBox, QDialogButtonBox,
+                             QComboBox)
 
 ## Read-only bridge reads and the Safety Flow for every server-changing button.
 from features.shared import server_actions
-from features.shared.loadouts import load_templates
+from features.shared.loadouts import load_templates, list_template_names, TEMPLATE_NAMES
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
@@ -318,6 +321,20 @@ class PlayersPage(QWidget):
         ## The stretch keeps the title at the top and the buttons at the bottom of the card.
         loadout_layout.addStretch()
         loadout_layout.addLayout(loadout_row)
+        pack_row = QHBoxLayout()
+        pack_row.setSpacing(8)
+        self.cmb_custom_pack = QComboBox()
+        self.cmb_custom_pack.setObjectName("EcfFileCombo")
+        self.cmb_custom_pack.setPlaceholderText("No custom packs")
+        self.cmb_custom_pack.setEnabled(False)
+        self.btn_give_pack = QPushButton("GIVE PACK")
+        self.btn_give_pack.setObjectName("DashActionButton")
+        self.btn_give_pack.setMinimumHeight(40)
+        self.btn_give_pack.setEnabled(False)
+        self.btn_give_pack.setToolTip("Coming in a later step.")
+        pack_row.addWidget(self.cmb_custom_pack, stretch=3)
+        pack_row.addWidget(self.btn_give_pack, stretch=2)
+        loadout_layout.addLayout(pack_row)
         page_grid.addWidget(loadout_card, 1, 2)
 
         # endregion
@@ -372,6 +389,8 @@ class PlayersPage(QWidget):
             self.btn_inventory_save.clicked.connect(self._on_inventory_save)
             for btn_template, template_name in zip(self.loadout_buttons, LOADOUT_TEMPLATES):
                 btn_template.clicked.connect(lambda checked=False, name=template_name: self._on_loadout_clicked(name))
+            self.btn_give_pack.clicked.connect(self._on_give_pack_clicked)
+            self.cmb_custom_pack.currentIndexChanged.connect(lambda index: self._refresh_buttons())
             self.refresh_timer = QTimer(self)
             self.refresh_timer.setInterval(REFRESH_SEC * 1000)
             self.refresh_timer.timeout.connect(self.refresh_players)
@@ -619,6 +638,30 @@ class PlayersPage(QWidget):
                 btn_template.setEnabled(reason == "")
                 btn_template.setToolTip(reason or ", ".join(f"{row['count']}x {row.get('name', row['id'])}"
                                                             for row in templates[template_name]))
+            custom_names = [name for name in list_template_names(templates) if name not in TEMPLATE_NAMES]
+            picked_pack = self.cmb_custom_pack.currentData()
+            self.cmb_custom_pack.blockSignals(True)
+            self.cmb_custom_pack.clear()
+            for name in custom_names:
+                self.cmb_custom_pack.addItem(name, name)
+                if name == picked_pack:
+                    self.cmb_custom_pack.setCurrentIndex(self.cmb_custom_pack.count() - 1)
+            if self.cmb_custom_pack.currentIndex() < 0 and self.cmb_custom_pack.count() > 0:
+                self.cmb_custom_pack.setCurrentIndex(0)
+            self.cmb_custom_pack.blockSignals(False)
+            self.cmb_custom_pack.setEnabled(self.cmb_custom_pack.count() > 0)
+            pack_name = self.cmb_custom_pack.currentData()
+            pack_reason = "No custom packs yet. Build one on the Library page (BUILD ITEM TEMPLATE)."
+            if pack_name:
+                pack_reason = "Pick a player first." if not has_player else server_actions.block_reason(self, "player_loadout")
+                if not pack_reason and not templates.get(pack_name):
+                    pack_reason = "This pack is empty. Add items on the Library page (BUILD ITEM TEMPLATE)."
+            self.btn_give_pack.setEnabled(pack_reason == "")
+            if pack_name and not pack_reason:
+                self.btn_give_pack.setToolTip(", ".join(f"{row['count']}x {row.get('name', row['id'])}"
+                                                         for row in templates[pack_name]))
+            else:
+                self.btn_give_pack.setToolTip(pack_reason)
         except Exception as e:
             print(f"[ERROR] PlayersPage: Could not refresh buttons: {e}")
 
@@ -702,6 +745,11 @@ class PlayersPage(QWidget):
                                              explanation=f"Replaces the toolbelt and bag of {self._player_label()}.")
         except Exception as e:
             print(f"[ERROR] PlayersPage: Inventory save failed: {e}")
+
+    def _on_give_pack_clicked(self):
+        pack_name = self.cmb_custom_pack.currentData()
+        if pack_name:
+            self._on_loadout_clicked(pack_name)
 
     def _on_loadout_clicked(self, template_name):
         try:

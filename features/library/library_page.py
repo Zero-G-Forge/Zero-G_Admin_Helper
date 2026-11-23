@@ -15,6 +15,9 @@
 ## Wired (Nov 22, 2026): GIVE ITEM sends api:Request_Player_AddItem through the Safety Flow (admin and up), to
 ## an online player from plys. ADD TO TEMPLATE saves the picked item and quantity on this PC (loadouts.py).
 ## The old ADD TO PENDING EDITS button is now labelled GIVE ITEM (there is no separate pending-edit queue).
+## BUILD ITEM TEMPLATE (Nov 23, 2026) opens a window with the same item grid as this page
+## (search, category buttons, FILTER, Choose a Category) to name and fill a pack. Packs are
+## saved on this PC next to STARTER, EXPLORER and BUILDER, including any custom names.
 ## ==========================================
 
 # region Imports
@@ -23,7 +26,7 @@ from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,
                              QPushButton, QButtonGroup, QLineEdit, QSpinBox, QComboBox, QInputDialog, QMenu,
-                             QSizePolicy)
+                             QSizePolicy, QDialog)
 
 ## Read-only bridge reads, the Safety Flow, and loadout templates saved on this PC.
 from features.shared import server_actions, loadouts
@@ -36,6 +39,8 @@ from features.library.item_library import load_items
 from features.library.blueprint_library import load_blueprints
 from features.library.item_tiles import TileFlowArea, make_fit_pixmap
 from features.library.item_stats_dialog import ItemStatsDialog
+from features.library.item_browser import ItemBrowser
+from features.library.item_pack_dialog import ItemPackDialog
 
 ## Where the downloaded server files are, and the item pictures inside them.
 from features.server_files.local_files import (NO_FILES_TEXT, ITEMS_FILE, NAMES_FILE, current_scenario_folder,
@@ -93,11 +98,6 @@ class LibraryPage(QWidget):
         self.setObjectName("LibraryPage")
         self.active_tab = start_tab if start_tab in TAB_FILTERS else "items"
         self.tab_buttons = {}
-        self.filter_buttons = []
-        self.filter_actions = {}
-        self.btn_multi_filter = None
-        self.filter_menu = None
-        self._syncing_filters = False
 
         ## Loaded items and blueprints, and the one picked in the grid (None until a tile is clicked).
         self.items = []
@@ -114,6 +114,42 @@ class LibraryPage(QWidget):
         self.load_server_files()
         self._on_tab_clicked(self.active_tab)
         self._wire_give_and_templates()
+
+    @property
+    def txt_search(self):
+        return self.item_browser.txt_search
+
+    @property
+    def filter_row(self):
+        return self.item_browser.filter_row
+
+    @property
+    def filter_group(self):
+        return self.item_browser.filter_group
+
+    @property
+    def filter_buttons(self):
+        return self.item_browser.filter_buttons
+
+    @property
+    def filter_actions(self):
+        return self.item_browser.filter_actions
+
+    @property
+    def btn_multi_filter(self):
+        return self.item_browser.btn_multi_filter
+
+    @property
+    def filter_menu(self):
+        return self.item_browser.filter_menu
+
+    @property
+    def tile_area(self):
+        return self.item_browser.tile_area
+
+    @property
+    def lbl_grid_empty(self):
+        return self.item_browser.lbl_grid_empty
 
     def setup_widgets(self):
 
@@ -146,40 +182,19 @@ class LibraryPage(QWidget):
             tab_row.addWidget(btn_tab)
         library_layout.addLayout(tab_row)
 
-        ## Search box, same look as the ECF Editor's trader search.
-        self.txt_search = QLineEdit()
-        self.txt_search.setObjectName("EcfSearchBox")
-        self.txt_search.setPlaceholderText("Search")
-        self.txt_search.setClearButtonEnabled(True)
-        self.txt_search.setMaximumWidth(300)
-        library_layout.addWidget(self.txt_search)
-
-        ## Typing in the search box narrows the grid straight away.
-        self.txt_search.textChanged.connect(self._apply_filters)
-
-        ## Filter buttons. They are rebuilt by _on_tab_clicked, since each tab has its own set.
-        self.filter_row = QHBoxLayout()
-        self.filter_row.setSpacing(8)
-        self.filter_group = QButtonGroup(self)
-        self.filter_group.setExclusive(False)
-        library_layout.addLayout(self.filter_row)
-
-        ## Tile grid: each item or blueprint will be a hex tile with its picture, name and ID.
-        self.grid_box = QFrame()
-        self.grid_box.setObjectName("DashInnerBox")
-        grid_box_layout = QVBoxLayout(self.grid_box)
-        grid_box_layout.setContentsMargins(12, 12, 12, 12)
-
-        ## TileFlowArea scrolls and fits as many tile columns as the width allows.
-        self.tile_area = TileFlowArea()
-        self.tile_area.tile_picked.connect(self._on_tile_picked)
-        grid_box_layout.addWidget(self.tile_area, stretch=1)
-        self.lbl_grid_empty = QLabel("")
-        self.lbl_grid_empty.setObjectName("DashEmptyLabel")
-        self.lbl_grid_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_grid_empty.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        grid_box_layout.addWidget(self.lbl_grid_empty, stretch=1)
-        library_layout.addWidget(self.grid_box, stretch=1)
+        ## Search box, category buttons, FILTER menu and the tile grid live in ItemBrowser,
+        ## shared with the BUILD ITEM TEMPLATE window. Typing in the search box still
+        ## narrows the grid straight away, and the filters are rebuilt by _on_tab_clicked.
+        self.item_browser = ItemBrowser(log_name="LibraryPage", parent=self)
+        self.item_browser.set_empty_texts(
+            TAB_EMPTY_TEXT.get(self.active_tab, ""),
+            PICK_CATEGORY_TEXT.get(self.active_tab, ""),
+            NO_MATCH_TEXT.get(self.active_tab, ""),
+        )
+        self.item_browser.tile_picked.connect(self._on_tile_picked)
+        self.item_browser.txt_search.textChanged.disconnect()
+        self.item_browser.txt_search.textChanged.connect(self._apply_filters)
+        library_layout.addWidget(self.item_browser, stretch=1)
         page_grid.addWidget(library_card, 0, 0, 3, 1)
 
         # endregion
@@ -271,6 +286,12 @@ class LibraryPage(QWidget):
         self.btn_add_template.setEnabled(False)
         self.btn_add_template.setToolTip(LATER_TIP)
         templates_layout.addWidget(self.btn_add_template)
+        self.btn_build_template = QPushButton("BUILD ITEM TEMPLATE")
+        self.btn_build_template.setObjectName("DashActionButton")
+        self.btn_build_template.setFixedHeight(38)
+        self.btn_build_template.setEnabled(False)
+        self.btn_build_template.setToolTip(LATER_TIP)
+        templates_layout.addWidget(self.btn_build_template)
         page_grid.addWidget(templates_card, 2, 1)
 
         # endregion
@@ -306,95 +327,23 @@ class LibraryPage(QWidget):
 
     def _rebuild_filter_row(self, tab_key):
         """Rebuilds the category buttons and the FILTER checkbox menu for the active tab."""
-        for btn_old in self.filter_buttons:
-            self.filter_group.removeButton(btn_old)
-            self.filter_row.removeWidget(btn_old)
-
-            ## Hide and unparent now; deleteLater alone leaves the old buttons visible
-            ## in their last position until the event loop runs.
-            btn_old.hide()
-            btn_old.setParent(None)
-            btn_old.deleteLater()
-        self.filter_buttons = []
-        if self.btn_multi_filter is not None:
-            self.filter_row.removeWidget(self.btn_multi_filter)
-            self.btn_multi_filter.hide()
-            self.btn_multi_filter.setParent(None)
-            self.btn_multi_filter.deleteLater()
-            self.btn_multi_filter = None
-        if self.filter_menu is not None:
-            self.filter_menu.deleteLater()
-            self.filter_menu = None
-        self.filter_actions = {}
-        while self.filter_row.count() > 0:
-            self.filter_row.takeAt(0)
-        for filter_text in TAB_FILTERS.get(tab_key, []):
-            btn_filter = QPushButton(filter_text)
-            btn_filter.setObjectName("StructFilterButton")
-            btn_filter.setCheckable(True)
-            btn_filter.setFixedHeight(30)
-            btn_filter.setCursor(Qt.CursorShape.PointingHandCursor)
-
-            ## A plain click shows only this category; more than one is chosen in FILTER.
-            btn_filter.clicked.connect(lambda _checked, btn=btn_filter: self._on_category_clicked(btn))
-            self.filter_group.addButton(btn_filter)
-            self.filter_buttons.append(btn_filter)
-            self.filter_row.addWidget(btn_filter)
-        self.filter_row.addStretch()
-        self.filter_menu = QMenu(self)
-        self.filter_menu.setObjectName("LibraryFilterMenu")
-        for filter_text in TAB_FILTERS.get(tab_key, []):
-            action = self.filter_menu.addAction(filter_text)
-            action.setCheckable(True)
-            action.toggled.connect(self._on_filter_menu_toggled)
-            self.filter_actions[filter_text] = action
-        self.btn_multi_filter = QPushButton("FILTER")
-        self.btn_multi_filter.setObjectName("StructFilterButton")
-        self.btn_multi_filter.setFixedHeight(30)
-        self.btn_multi_filter.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_multi_filter.setToolTip("Pick more than one category.")
-        self.btn_multi_filter.clicked.connect(self._show_filter_menu)
-        self.filter_row.addWidget(self.btn_multi_filter)
+        self.item_browser.rebuild_filters(TAB_FILTERS.get(tab_key, []))
 
     def _on_category_clicked(self, btn):
         """A plain category click is a single choice: only that button stays on."""
-        if self._syncing_filters:
-            return
-        self._syncing_filters = True
-        try:
-            for other in self.filter_buttons:
-                other.setChecked(other is btn)
-            for text, action in self.filter_actions.items():
-                action.setChecked(text == btn.text())
-        finally:
-            self._syncing_filters = False
-        self._apply_filters()
+        self.item_browser._on_category_clicked(btn)
 
     def _on_filter_menu_toggled(self, *args):
         """Applies the FILTER checkboxes. Category buttons only light when exactly one is checked."""
-        if self._syncing_filters:
-            return
-        self._syncing_filters = True
-        try:
-            lit = {text for text, action in self.filter_actions.items() if action.isChecked()}
-            for btn in self.filter_buttons:
-                btn.setChecked(len(lit) == 1 and btn.text() in lit)
-        finally:
-            self._syncing_filters = False
-        self._apply_filters()
+        self.item_browser._on_filter_menu_toggled(*args)
 
     def _show_filter_menu(self):
         """Opens the FILTER checkbox menu under the FILTER button."""
-        if self.filter_menu is None or self.btn_multi_filter is None:
-            return
-        pos = self.btn_multi_filter.mapToGlobal(QPoint(0, self.btn_multi_filter.height()))
-        self.filter_menu.popup(pos)
+        self.item_browser._show_filter_menu()
 
     def _selected_groups(self):
         """The categories currently checked in FILTER (kept in sync with a single category click)."""
-        if self.filter_actions:
-            return {text for text, action in self.filter_actions.items() if action.isChecked()}
-        return {btn.text() for btn in self.filter_buttons if btn.isChecked()}
+        return self.item_browser.selected_groups()
 
     # endregion
 
@@ -455,32 +404,14 @@ class LibraryPage(QWidget):
 
     def _apply_filters(self, *args):
         """Shows only tiles that match the selected categories and the search text. Nothing shows until a category is picked."""
-        try:
-            search_text = self.txt_search.text().strip().lower()
-            lit_filters = self._selected_groups()
-            shown_tiles = []
-            if lit_filters:
-                for tile in self.tile_area.tiles:
-                    item = tile.item
-                    if item.get("filter_group") not in lit_filters:
-                        continue
-                    if search_text and search_text not in (item["display_name"] + " " + item["name"] + " " + item["id"]).lower():
-                        continue
-                    shown_tiles.append(tile)
-            self.tile_area.show_only(shown_tiles)
-            self.tile_area.setVisible(bool(shown_tiles))
-            self.lbl_grid_empty.setVisible(not shown_tiles)
-            loaded = self.blueprints if self.active_tab == "blueprints" else self.items
-            if not loaded:
-                self.lbl_grid_empty.setText(TAB_EMPTY_TEXT.get(self.active_tab, ""))
-            elif not lit_filters:
-                self.lbl_grid_empty.setText(PICK_CATEGORY_TEXT.get(self.active_tab, ""))
-            elif not shown_tiles:
-                self.lbl_grid_empty.setText(NO_MATCH_TEXT.get(self.active_tab, ""))
-            else:
-                self.lbl_grid_empty.setText(TAB_EMPTY_TEXT.get(self.active_tab, ""))
-        except Exception as e:
-            print(f"[ERROR] LibraryPage: Failed to filter items: {e}")
+        loaded = self.blueprints if self.active_tab == "blueprints" else self.items
+        self.item_browser._loaded = bool(loaded)
+        self.item_browser.set_empty_texts(
+            TAB_EMPTY_TEXT.get(self.active_tab, ""),
+            PICK_CATEGORY_TEXT.get(self.active_tab, ""),
+            NO_MATCH_TEXT.get(self.active_tab, ""),
+        )
+        self.item_browser.apply_filters()
 
     def _on_tile_picked(self, item):
         """Fills the detail card with the picked item and turns on VIEW ALL STATS."""
@@ -520,6 +451,7 @@ class LibraryPage(QWidget):
         try:
             self.btn_add_pending.clicked.connect(self._on_give_clicked)
             self.btn_add_template.clicked.connect(self._on_add_template_clicked)
+            self.btn_build_template.clicked.connect(self._on_build_template_clicked)
             self.cmb_player.currentIndexChanged.connect(lambda index: self._refresh_give_buttons())
             self._show_templates()
             self._refresh_give_buttons()
@@ -571,6 +503,11 @@ class LibraryPage(QWidget):
             self.btn_add_pending.setToolTip(reason or warning or "Adds this item to that player (Safety Flow).")
             self.btn_add_template.setEnabled(item_ok)
             self.btn_add_template.setToolTip("Adds this item and quantity to a template on this PC." if item_ok else "Pick an item first.")
+            items_loaded = any(str(item.get("id", "")).isdigit() for item in self.items)
+            self.btn_build_template.setEnabled(items_loaded)
+            self.btn_build_template.setToolTip(
+                "Build or edit a named item pack on this PC." if items_loaded
+                else "Load items from the downloaded server files first.")
         except Exception as e:
             print(f"[ERROR] LibraryPage: Could not refresh GIVE ITEM buttons: {e}")
 
@@ -590,20 +527,33 @@ class LibraryPage(QWidget):
 
     def _show_templates(self):
         templates = loadouts.load_templates()
-        self.lbl_templates_empty.setText("\n".join(f"{name}   {len(templates[name])} item(s)" for name in loadouts.TEMPLATE_NAMES))
+        names = loadouts.list_template_names(templates)
+        self.lbl_templates_empty.setText("\n".join(f"{name}   {len(templates[name])} item(s)" for name in names))
 
     def _on_add_template_clicked(self):
         try:
             if self.picked_item is None or not self.btn_add_template.isEnabled():
                 return
-            name, accepted = QInputDialog.getItem(self, "Add to template", "Template:", loadouts.TEMPLATE_NAMES, 0, False)
-            if not accepted or name not in loadouts.TEMPLATE_NAMES:
+            names = loadouts.list_template_names()
+            name, accepted = QInputDialog.getItem(self, "Add to template", "Template:", names, 0, False)
+            if not accepted or name not in names:
                 return
             loadouts.add_to_template(name, int(self.picked_item["id"]), self.picked_item["display_name"], self.spn_quantity.value())
             self._show_templates()
             print(f"[SUCCESS] LibraryPage: Added {self.picked_item['display_name']} to {name}")
         except Exception as e:
             print(f"[ERROR] LibraryPage: Add to template failed: {e}")
+
+    def _on_build_template_clicked(self):
+        try:
+            if not self.btn_build_template.isEnabled():
+                return
+            giveable = [item for item in self.items if not item_give_reason(item, self.block_index)]
+            dialog = ItemPackDialog(giveable, parent=self)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                self._show_templates()
+        except Exception as e:
+            print(f"[ERROR] LibraryPage: Build item template failed: {e}")
 
     # endregion
 

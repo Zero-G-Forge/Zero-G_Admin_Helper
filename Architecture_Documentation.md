@@ -136,7 +136,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | --- | --- | --- | --- | --- |
 | `dashboard` | DASHBOARD | `features.dashboard.dashboard_page` | `DashboardPage` | Live players, uptime, cheat-flag alerts, bridge events; ANNOUNCE through the Safety Flow; SAVE and BACKUP not possible while the server runs |
 | `chat` | CHAT | `features.chat.chat_page` | `ChatPage` | Live chat from `chat:recent` (core 1.6.3); SEND and WARN through the Safety Flow; watch words; MUTE and DISCORD not possible |
-| `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Live list, detail and inventory (read-only); PING for online players from `api:Request_Player_Info` (offline shows `--`); column-header A-Z / Z-A sort with GameMaster/Admin (`permission` 3+) pinned at the top; MESSAGE, WARP, KICK, BAN, SAVE & APPLY and loadouts through the Safety Flow; GOD MODE not possible from the server |
+| `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Live list, detail and inventory (read-only); PING for online players from `api:Request_Player_Info` (offline shows `--`); column-header A-Z / Z-A sort with GameMaster/Admin (`permission` 3+) pinned at the top; MESSAGE, WARP, KICK, BAN, SAVE & APPLY, loadouts, and GIVE PACK for custom item packs through the Safety Flow; GOD MODE not possible from the server |
 | `factions` | FACTIONS | `features.factions.factions_page` | `FactionsPage` | Read-only: factions, members, and alliances from the bridge; SET RELATION and RENAME not possible |
 | `structures` | STRUCTURES | `features.structures.structures_page` | `StructuresPage` | Live list from `gents` with type filters; TELEPORT TO and DESTROY through the Safety Flow; SET FACTION not possible |
 | `playfields` | PLAYFIELDS | `features.playfields.playfields_page` | `PlayfieldsPage` | Live summary and loaded-playfield cards; UNLOAD, RESTART PLAYFIELD, and WIPE on ticked cards (owner, Safety Flow); no star map (no coordinates) |
@@ -151,7 +151,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | `pda_editor` | PDA EDITOR | `features.pda_editor.pda_editor_page` | `PdaEditorPage` | Lists and opens the downloaded PDA `.yaml` / `.csv` files, chapters with English names; DOWNLOAD FOLDER as in the ECF Editor; empty state when nothing is downloaded |
 | `backups` | BACKUPS | `features.backups.backups_page` | `BackupsPage` | Layout; PREVIEW and RESTORE locked with the reason (no bridge backup command; a restore needs the server stopped) |
 | `bp_editor` | BP EDITOR | `features.bp_editor.bp_editor_page` | `LibraryPage` (blueprints tab) | Layout; blueprint data is not loaded yet |
-| `items` | ITEMS | `features.items.items_page` | `LibraryPage` (items tab) | Reads items from the downloaded server files on opening (`load_server_files`), with item pictures; GIVE ITEM to an online player (Safety Flow); ADD TO TEMPLATE on this PC; empty state when nothing is downloaded |
+| `items` | ITEMS | `features.items.items_page` | `LibraryPage` (items tab) | Reads items from the downloaded server files on opening (`load_server_files`), with item pictures; GIVE ITEM to an online player (Safety Flow); ADD TO TEMPLATE and BUILD ITEM TEMPLATE (custom item packs) on this PC; empty state when nothing is downloaded |
 | `servers` | SERVERS | `features.multi_server.multi_server_page` | `MultiServerPage` | Live cards for every saved server (read-only poll), cross-server alerts, BROADCAST and BROADCAST TO ALL SERVERS (Safety Flow), OPEN DASHBOARD; shown when two or more saved servers answer |
 
 Supporting modules (not nav pages):
@@ -165,10 +165,12 @@ Supporting modules (not nav pages):
 | `features/bridge/server_settings.py` | Reads the active profile from `data/server_config.json`; `set_active_index` switches the active server (only `active_index` changes) |
 | `features/shared/ecf_parser.py` | Read-only ECF parse, Ref merge, and CSV name lookup |
 | `features/shared/server_actions.py` | Read-only bridge reads, the ZAH Safety Flow, the action role table, and the audit log |
-| `features/shared/loadouts.py` | Loadout templates in `data/loadout_templates.json` |
+| `features/shared/loadouts.py` | Loadout templates and custom item packs in `data/loadout_templates.json` |
 | `features/library/item_library.py` | Builds the item list from `ItemsConfig.ecf` and `Localization.csv` |
 | `features/library/item_tiles.py` | Hex tiles and the wrapping tile flow area |
 | `features/library/item_stats_dialog.py` | Full stats window for one item |
+| `features/library/item_browser.py` | Shared search, category buttons, FILTER menu, and picture tile grid |
+| `features/library/item_pack_dialog.py` | BUILD ITEM TEMPLATE window for naming and filling a custom item pack |
 | `features/zgb_portal/` | Portal window used from the ZeroGBridge page |
 | `features/server_files/file_client.py` | Own short bridge session and the `files:` request helper (`ServerFilesSession`) |
 | `features/server_files/download_worker.py` | `ServerFileDownloadWorker` thread: list, compare, download, verify |
@@ -1070,6 +1072,7 @@ Page wiring:
 | Players | SAVE & APPLY | `api:Request_Player_SetInventory` (counts edited in the table; 0 removes a stack) | yes |
 | Players | RESET | none (puts the read counts back) | no |
 | Players | STARTER / EXPLORER / BUILDER | one `api:Request_Player_AddItem` per template item | yes |
+| Players | GIVE PACK | one `api:Request_Player_AddItem` per item in a custom pack (same `player_loadout` path) | yes |
 | Players | GOD MODE | none: the game's `godmode` only works in a player's own console | stays disabled |
 | Dashboard | PLAYERS, ONLINE PLAYERS | `plys` (every 15 s while open) | no |
 | Dashboard | UPTIME | `api:Request_Dedi_Stats` (`data.uptime`, seconds) | no |
@@ -1118,7 +1121,8 @@ Page wiring:
 | Servers | BROADCAST TO ALL SERVERS | `api:Request_InGameMessage_AllPlayers` to every answering server | yes |
 | Items (Library) | PLAYER list | `plys` (online players with an entity id), read when the page shows | no |
 | Items (Library) | GIVE ITEM (was ADD TO PENDING EDITS) | `api:Request_Player_AddItem {"id":N,"item":{"id":X,"count":Q}}` | yes, and the button stays off when that ID is a core or ForceMaxCount block in the same scenario's `BlocksConfig.ecf` (for example ID 1402 is `CoreNoCPU`, not `AlienCookie`) |
-| Items (Library) | ADD TO TEMPLATE | none: adds the item and quantity to STARTER / EXPLORER / BUILDER in `data/loadout_templates.json` | no |
+| Items (Library) | ADD TO TEMPLATE | none: adds the item and quantity to STARTER / EXPLORER / BUILDER, or to a custom pack, in `data/loadout_templates.json` | no |
+| Items (Library) | BUILD ITEM TEMPLATE | none: opens the item-pack window (same Library grid) and saves a named pack in `data/loadout_templates.json` on this PC | no |
 | BP Editor (Library) | BLUEPRINTS tab | none: reads downloaded `Prefabs/**/*.epb` (same `LibraryPage`) | no |
 | ECF / PDA Editor | DOWNLOAD FOLDER FROM SERVER (READ-ONLY) | the `files:` download (`ServerFileDownloadWorker`), then `load_server_files` | no |
 | Settings | CANCEL DOWNLOAD | none on the server: `request_stop` on the download thread | no |

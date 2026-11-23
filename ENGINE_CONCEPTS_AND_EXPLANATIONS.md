@@ -588,6 +588,10 @@ The first drawing had a queue of pending edits that would be sent later. ZAH has
 
 ADD TO TEMPLATE only writes to a small file on the admin's PC. Nothing reaches the server until a template button on the Players page is used, and that goes through the Safety Flow too.
 
+### Custom item packs
+
+BUILD ITEM TEMPLATE is for a named kit of items handed out together, next to STARTER, EXPLORER and BUILDER. The window reuses the Library item viewer: the search box, the category buttons, the FILTER checkbox menu, the Choose a Category empty state, and the picture tile grid. Only items that GIVE ITEM would allow are listed. A pack name is trimmed and stored in capital letters, and it has to be 1 to 32 characters. The file is still `data/loadout_templates.json` on this PC. On the Players page, GIVE PACK sends a custom pack through the same minor `player_loadout` path as the three default buttons: one `Request_Player_AddItem` per item, with the role check and an audit line, and without CONFIRM or the delay.
+
 ## Stopping a Download Politely
 
 CANCEL DOWNLOAD does not pull the plug in the middle of a file. It raises a flag, and the download thread looks at that flag between two requests. Files that already arrived stay, the half-finished `.part` file is thrown away, and LAST PULLED is not changed, because the copy is not complete.

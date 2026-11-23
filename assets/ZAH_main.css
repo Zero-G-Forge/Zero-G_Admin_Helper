@@ -987,6 +987,11 @@ QDialog#ItemStatsDialog {
     background-color: #08121e;
 }
 
+/* Build Item Template window: same dark background as the item stats window */
+QDialog#ItemPackDialog {
+    background-color: #08121e;
+}
+
 /* Stats list: transparent like the dashboard tables */
 QTreeWidget#ItemStatsTree {
     background-color: transparent;
