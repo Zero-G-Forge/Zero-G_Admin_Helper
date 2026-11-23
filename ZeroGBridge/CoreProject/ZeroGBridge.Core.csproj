@@ -33,7 +33,8 @@
     <!-- 1.6.8: plys re-resolves faction tags from the live faction list; unknown FactionRole is shown as a pair of dashes -->
     <!-- 1.6.9: plys refreshes current faction membership and ranks from a read-only copy of global.db -->
     <!-- 1.6.10: prefer the live files:info save for global.db, and add read-only factiondiag -->
-    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.10</ReleaseVersion>
+    <!-- 1.6.11: drop leftover cache membership and read offline ranks from Players ply files -->
+    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.11</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
     <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>

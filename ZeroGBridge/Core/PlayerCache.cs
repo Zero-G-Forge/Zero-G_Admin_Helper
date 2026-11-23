@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Globalization;
+using System.Text;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using Newtonsoft.Json;
@@ -999,6 +1000,7 @@ namespace ZeroGBridge
                         LEFT JOIN Playfields pf ON e.pfid = pf.pfid
                         LEFT JOIN PlayerStatistics ps ON l.entityid = ps.entityid;";
 
+                    var seenSteamIds = new HashSet<string>(StringComparer.Ordinal);
                     using (var cmd = new SqliteCommand(query, connection))
                     using (var reader = cmd.ExecuteReader())
                     {
@@ -1018,6 +1020,7 @@ namespace ZeroGBridge
 
                             if (!string.IsNullOrEmpty(steamId) && steamId.Length == 17)
                             {
+                                seenSteamIds.Add(steamId);
                                 string coords = (px != 0f || py != 0f || pz != 0f) ? $"{px:F0}, {py:F0}, {pz:F0}" : "-";
                                 int hours = (int)(playtimeSec / 3600.0);
                                 string playtimeStr = $"{hours}h";
@@ -1054,6 +1057,13 @@ namespace ZeroGBridge
 
                     int factioned = ApplyFactionAndRoleFromDb(connection);
                     ZgbLog.Write($"[ZGB] -INFO- Current faction membership/ranks applied for {factioned} player(s).");
+
+                    int cleared = ClearStaleFactionMembership(connection, seenSteamIds);
+                    ZgbLog.Write($"[ZGB] -INFO- Cleared stale faction membership on {cleared} cached player(s) not in the current save roster.");
+
+                    string saveRoot = Path.GetDirectoryName(resolvedDb);
+                    int plyRoles = ApplyFactionRoleFromPlyFiles(saveRoot);
+                    ZgbLog.Write($"[ZGB] -INFO- Club ranks from player ply files: {plyRoles}.");
                 }
 
                 _lastDbStamp = stamp;
@@ -1443,6 +1453,231 @@ namespace ZeroGBridge
         /// facid or role values by player name. Steam ids and other secrets are omitted.
         /// Uses the same share-read copy as SafeScanDatabase.
         /// </summary>
+        /// <summary>
+        /// Players who are only in the on-disk cache (not in this save's LoginLogoff)
+        /// must not keep a leftover club id. If their entity still exists, use that
+        /// Entities.facid; otherwise they are unaligned.
+        /// </summary>
+        private int ClearStaleFactionMembership(SqliteConnection connection, HashSet<string> seenSteamIds)
+        {
+            if (seenSteamIds == null) seenSteamIds = new HashSet<string>(StringComparer.Ordinal);
+            var leftover = new List<PlayerRecord>();
+            var byEntity = new Dictionary<int, PlayerRecord>();
+            foreach (var record in _allPlayers.Values)
+            {
+                if (record == null || record.status == "Online") continue;
+                if (!string.IsNullOrEmpty(record.steamId) && seenSteamIds.Contains(record.steamId)) continue;
+                leftover.Add(record);
+                int eid;
+                if (int.TryParse(record.entityId, NumberStyles.Integer, CultureInfo.InvariantCulture, out eid) && eid > 0 && !byEntity.ContainsKey(eid))
+                {
+                    byEntity[eid] = record;
+                }
+            }
+            if (leftover.Count == 0) return 0;
+
+            var found = new HashSet<PlayerRecord>();
+            if (byEntity.Count > 0)
+            {
+                string ids = string.Join(",", byEntity.Keys.Select(k => k.ToString(CultureInfo.InvariantCulture)));
+                string sql = "SELECT entityid, COALESCE(facid, 0), COALESCE(isremoved, 0) FROM Entities WHERE entityid IN (" + ids + ");";
+                using (var cmd = new SqliteCommand(sql, connection))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        int eid = Convert.ToInt32(reader.GetValue(0));
+                        if (!byEntity.TryGetValue(eid, out var record)) continue;
+                        int facid = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetValue(1));
+                        int removed = reader.IsDBNull(2) ? 0 : Convert.ToInt32(reader.GetValue(2));
+                        if (removed != 0) facid = 0;
+                        record.factionId = facid;
+                        record.faction = ResolveFactionAbbrev(facid);
+                        if (!record.roleKnown)
+                        {
+                            record.role = "--";
+                        }
+                        found.Add(record);
+                    }
+                }
+            }
+
+            int cleared = 0;
+            foreach (var record in leftover)
+            {
+                if (found.Contains(record)) continue;
+                if (record.factionId != 0 || (record.faction != null && record.faction != "--"))
+                {
+                    record.factionId = 0;
+                    record.faction = "--";
+                    record.role = "--";
+                    record.roleKnown = false;
+                    cleared++;
+                }
+            }
+            return cleared + found.Count;
+        }
+
+        /// <summary>
+        /// global.db PlayerData has no rank column and there is no Factions table, so
+        /// offline club ranks are read from the save's Players *.ply files when those
+        /// files expose a faction role field. Only faction id and role are read.
+        /// </summary>
+        private int ApplyFactionRoleFromPlyFiles(string saveRoot)
+        {
+            if (string.IsNullOrEmpty(saveRoot) || !Directory.Exists(saveRoot)) return 0;
+            int applied = 0;
+            try
+            {
+                var files = new List<string>();
+                string playersDir = Path.Combine(saveRoot, "Players");
+                if (Directory.Exists(playersDir))
+                {
+                    files.AddRange(Directory.GetFiles(playersDir, "*.ply"));
+                }
+                files.AddRange(Directory.GetFiles(saveRoot, "*.ply"));
+                var byName = new Dictionary<string, PlayerRecord>(StringComparer.OrdinalIgnoreCase);
+                var byEntity = new Dictionary<string, PlayerRecord>(StringComparer.OrdinalIgnoreCase);
+                foreach (var record in _allPlayers.Values)
+                {
+                    if (record == null || record.status == "Online") continue;
+                    if (!string.IsNullOrEmpty(record.name) && !byName.ContainsKey(record.name))
+                        byName[record.name] = record;
+                    if (!string.IsNullOrEmpty(record.entityId) && record.entityId != "--" && !byEntity.ContainsKey(record.entityId))
+                        byEntity[record.entityId] = record;
+                }
+                foreach (var path in files)
+                {
+                    PlyFactionInfo info;
+                    if (!TryReadPlyFaction(path, out info)) continue;
+                    PlayerRecord record = null;
+                    if (!string.IsNullOrEmpty(info.Name) && byName.TryGetValue(info.Name, out record)) { }
+                    else if (!string.IsNullOrEmpty(info.EntityId) && byEntity.TryGetValue(info.EntityId, out record)) { }
+                    if (record == null || record.status == "Online") continue;
+                    if (info.FactionId.HasValue)
+                    {
+                        record.factionId = info.FactionId.Value;
+                        record.faction = ResolveFactionAbbrev(record.factionId);
+                    }
+                    if (!string.IsNullOrEmpty(info.Role))
+                    {
+                        record.role = info.Role;
+                        record.roleKnown = true;
+                        applied++;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ZgbLog.Write($"[ZGB] -WARN- Player ply role read skipped: {ex.Message}");
+            }
+            return applied;
+        }
+
+        private struct PlyFactionInfo
+        {
+            public string Name;
+            public string EntityId;
+            public int? FactionId;
+            public string Role;
+        }
+
+        private static bool TryReadPlyFaction(string path, out PlyFactionInfo info)
+        {
+            info = new PlyFactionInfo();
+            try
+            {
+                byte[] bytes;
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    if (stream.Length <= 0 || stream.Length > 8 * 1024 * 1024) return false;
+                    bytes = new byte[stream.Length];
+                    int read = 0;
+                    while (read < bytes.Length)
+                    {
+                        int n = stream.Read(bytes, read, bytes.Length - read);
+                        if (n <= 0) break;
+                        read += n;
+                    }
+                    if (read != bytes.Length) return false;
+                }
+                string text = Encoding.UTF8.GetString(bytes);
+                bool mostlyText = text.Count(ch => ch == '\0' || char.IsControl(ch) && ch != '\r' && ch != '\n' && ch != '\t') < text.Length / 10;
+                if (mostlyText)
+                {
+                    info = ParsePlyText(text);
+                    return info.FactionId.HasValue || !string.IsNullOrEmpty(info.Role) || !string.IsNullOrEmpty(info.Name);
+                }
+                info = ParsePlyStrings(bytes);
+                return info.FactionId.HasValue || !string.IsNullOrEmpty(info.Role) || !string.IsNullOrEmpty(info.Name);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static PlyFactionInfo ParsePlyText(string text)
+        {
+            var info = new PlyFactionInfo();
+            foreach (var rawLine in text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith("#")) continue;
+                int sep = line.IndexOf('=');
+                if (sep < 0) sep = line.IndexOf(':');
+                if (sep <= 0) continue;
+                string key = line.Substring(0, sep).Trim().Trim('"').ToLowerInvariant();
+                string value = line.Substring(sep + 1).Trim().Trim(',', ';', '"', '\'');
+                ApplyPlyField(ref info, key, value);
+            }
+            return info;
+        }
+
+        private static PlyFactionInfo ParsePlyStrings(byte[] bytes)
+        {
+            var info = new PlyFactionInfo();
+            var sb = new System.Text.StringBuilder();
+            var strings = new List<string>();
+            foreach (byte b in bytes)
+            {
+                if (b >= 32 && b < 127)
+                {
+                    sb.Append((char)b);
+                }
+                else
+                {
+                    if (sb.Length >= 3) strings.Add(sb.ToString());
+                    sb.Length = 0;
+                }
+            }
+            if (sb.Length >= 3) strings.Add(sb.ToString());
+            for (int i = 0; i < strings.Count; i++)
+            {
+                string key = strings[i].Trim().ToLowerInvariant();
+                string value = (i + 1 < strings.Count) ? strings[i + 1] : "";
+                ApplyPlyField(ref info, key, value);
+            }
+            return info;
+        }
+
+        private static void ApplyPlyField(ref PlyFactionInfo info, string key, string value)
+        {
+            if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(value)) return;
+            if (key == "playername" || key == "name" || key == "player") info.Name = value;
+            else if (key == "entityid" || key == "entity" || key == "eid") info.EntityId = value;
+            else if (key == "factionid" || key == "facid" || key == "faction")
+            {
+                int n;
+                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out n)) info.FactionId = n;
+            }
+            else if (key == "factionrole" || key == "facrole" || key == "faction_role" || key == "role")
+            {
+                string role = RoleNameFromValue(value);
+                if (!string.IsNullOrEmpty(role)) info.Role = role;
+            }
+        }
+
         public string FactionDiagJson()
         {
             try
