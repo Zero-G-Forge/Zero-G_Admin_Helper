@@ -10,8 +10,11 @@
 ## Wired (Nov 22, 2026): the list comes from plys, the detail from api:Request_Player_Info, the inventory from
 ## api:Request_Player_GetInventory (all read-only, refreshed every 15 s while the page is open).
 ## Ping for ONLINE players is filled from Request_Player_Info (PlayerInfo.ping), in ms; OFFLINE players show "--".
+## The list defaults to online players only. SHOW ALL PLAYERS lists everyone in the plys cache
+## (all players registered on the server); SHOW ONLINE ONLY returns to the default. Offline ping is "--".
 ## Clicking a PLAYER LIST column header sorts that column A-Z, then Z-A; in-game GameMaster/Admin
-## (PlayerInfo.permission >= 3) stay at the top. The sort and the selection are kept across refreshes.
+## (PlayerInfo.permission >= 3) stay at the top in both views. The sort, the filter, and the selection
+## are kept across refreshes.
 ## MESSAGE (api:Request_InGameMessage_SinglePlayer), WARP (api:Request_Entity_Teleport / Request_Entity_ChangePlayfield), KICK (con:kick),
 ## BAN (con:ban), SAVE & APPLY (api:Request_Player_SetInventory) and the loadouts (api:Request_Player_AddItem)
 ## go through the ZAH Safety Flow in features/shared/server_actions.py. GOD MODE stays off (see GOD_MODE_TIP).
@@ -132,6 +135,19 @@ def column_sort_key(player, column, descending):
     return text
 
 
+def is_online(player):
+    """True when plys marks this row as Online."""
+    return str((player or {}).get("status") or "") == "Online"
+
+
+def visible_player_rows(rows, show_all):
+    """Online players only, or the full registered list when show_all is True."""
+    players = [row for row in rows if isinstance(row, dict)]
+    if show_all:
+        return players
+    return [row for row in players if is_online(row)]
+
+
 def sort_player_rows(rows, column, descending):
     """Staff first, then everyone else, each group sorted by the same column and direction."""
     players = [row for row in rows if isinstance(row, dict)]
@@ -168,6 +184,8 @@ class PlayersPage(QWidget):
         self.inventory_original = None
         self._sort_column = None
         self._sort_descending = False
+        self._show_all_players = False
+        self._shown_players = []
         self._info_by_id = {}
         self.setup_widgets()
         self._wire_live_data()
@@ -183,7 +201,20 @@ class PlayersPage(QWidget):
         # region Player List
 
         ## Rows get filled once the bridge sends the player list. Clicking a row will fill PLAYER DETAIL.
-        list_card, list_layout = make_card("PLAYER LIST")
+        ## SHOW ALL PLAYERS sits in the title row; the list itself starts as online only.
+        list_card, list_layout = make_card("")
+        list_header = QHBoxLayout()
+        lbl_list_title = QLabel("PLAYER LIST")
+        lbl_list_title.setObjectName("DashCardTitle")
+        spread_letters(lbl_list_title, 1.5)
+        list_header.addWidget(lbl_list_title)
+        list_header.addStretch()
+        self.btn_list_filter = QPushButton("SHOW ALL PLAYERS")
+        self.btn_list_filter.setObjectName("StructFilterButton")
+        self.btn_list_filter.setMinimumHeight(28)
+        self.btn_list_filter.setToolTip("Show every player registered on the server.")
+        list_header.addWidget(self.btn_list_filter)
+        list_layout.addLayout(list_header)
         self.tbl_players = QTableWidget(0, len(PLAYER_COLUMNS))
         self.tbl_players.setObjectName("DashTable")
         self.tbl_players.setHorizontalHeaderLabels(PLAYER_COLUMNS)
@@ -395,6 +426,7 @@ class PlayersPage(QWidget):
                 btn_template.clicked.connect(lambda checked=False, name=template_name: self._on_loadout_clicked(name))
             self.btn_give_pack.clicked.connect(self._on_give_pack_clicked)
             self.cmb_custom_pack.currentIndexChanged.connect(lambda index: self._refresh_buttons())
+            self.btn_list_filter.clicked.connect(self._on_list_filter_clicked)
             self.refresh_timer = QTimer(self)
             self.refresh_timer.setInterval(REFRESH_SEC * 1000)
             self.refresh_timer.timeout.connect(self.refresh_players)
@@ -433,8 +465,7 @@ class PlayersPage(QWidget):
         try:
             rows = reply.get("player_list") if isinstance(reply, dict) else None
             self.fill_players(rows if isinstance(rows, list) else [])
-            online = sum(1 for player in self.players if str(player.get("status") or "") == "Online")
-            print(f"[INFO] PlayersPage: {online} online player(s)")
+            self._log_player_counts()
             self._request_online_info()
         except Exception as e:
             print(f"[ERROR] PlayersPage: Could not show players: {e}")
@@ -483,6 +514,32 @@ class PlayersPage(QWidget):
         except Exception as e:
             print(f"[ERROR] PlayersPage: Could not apply player ping: {e}")
 
+    def _log_player_counts(self):
+        """Writes the online count, and the registered total when the list is showing everyone."""
+        online = sum(1 for player in self.players if is_online(player))
+        if self._show_all_players:
+            print(f"[INFO] PlayersPage: {online} online player(s), {len(self.players)} registered")
+        else:
+            print(f"[INFO] PlayersPage: {online} online player(s)")
+
+    def _sync_list_filter_button(self):
+        """Keeps the title-row button in step with the current list filter."""
+        if self._show_all_players:
+            self.btn_list_filter.setText("SHOW ONLINE ONLY")
+            self.btn_list_filter.setToolTip("Show only players who are online.")
+        else:
+            self.btn_list_filter.setText("SHOW ALL PLAYERS")
+            self.btn_list_filter.setToolTip("Show every player registered on the server.")
+
+    def _on_list_filter_clicked(self):
+        try:
+            self._show_all_players = not self._show_all_players
+            self._sync_list_filter_button()
+            self.fill_players(self.players)
+            self._log_player_counts()
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Could not switch the player list: {e}")
+
     def _on_header_clicked(self, column):
         try:
             if column < 0 or column >= len(PLAYER_COLUMNS):
@@ -500,11 +557,14 @@ class PlayersPage(QWidget):
         """Fills PLAYER LIST, keeping the picked player picked and the current column sort."""
         picked_id = (self.selected_player or {}).get("entityId")
         merged = [self._merge_live_info(row) for row in rows if isinstance(row, dict)]
-        self.players = sort_player_rows(merged, self._sort_column, self._sort_descending)
+        self.players = merged
+        shown = sort_player_rows(visible_player_rows(merged, self._show_all_players),
+                                 self._sort_column, self._sort_descending)
+        self._shown_players = shown
         self.tbl_players.blockSignals(True)
-        self.tbl_players.setRowCount(len(self.players))
+        self.tbl_players.setRowCount(len(shown))
         picked_row = -1
-        for row_number, player in enumerate(self.players):
+        for row_number, player in enumerate(shown):
             cells = [player.get("name", "--"), player.get("status", "--"), player.get("faction", "--"),
                      player.get("playfield", "--"), format_ping(player)]
             for column, cell in enumerate(cells):
@@ -518,18 +578,24 @@ class PlayersPage(QWidget):
         if picked_row >= 0:
             self.tbl_players.selectRow(picked_row)
         self.tbl_players.blockSignals(False)
-        self.lbl_players_empty.setText("" if self.players else "No players known yet.")
-        self.lbl_players_empty.setVisible(not self.players)
+        if not merged:
+            empty_text = "No players known yet."
+        elif not shown:
+            empty_text = "No players are online."
+        else:
+            empty_text = ""
+        self.lbl_players_empty.setText(empty_text)
+        self.lbl_players_empty.setVisible(not shown)
 
     def _on_player_picked(self):
         """Shows the picked row, then reads its detail and inventory (read-only)."""
         try:
             row = self.tbl_players.currentRow()
-            if row < 0 or row >= len(self.players):
+            if row < 0 or row >= len(self._shown_players):
                 self.selected_player = None
                 self._refresh_buttons()
                 return
-            self.selected_player = self.players[row]
+            self.selected_player = self._shown_players[row]
             player = self.selected_player
             self.lbl_player_name.setText(str(player.get("name", "--")).upper())
             self.lbl_player_status.setText(str(player.get("status", "--")).upper())

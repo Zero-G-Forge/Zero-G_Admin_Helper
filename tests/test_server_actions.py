@@ -220,7 +220,7 @@ def players_page(qapp, monkeypatch, tmp_path, role="admin", safety_answer=True):
 
 def test_players_list_detail_and_inventory(qapp, monkeypatch, tmp_path):
     page, bridge = players_page(qapp, monkeypatch, tmp_path)
-    assert page.tbl_players.item(0, 0).text() == "Amy" and page.tbl_players.item(1, 0).text() == "Zed"
+    assert page.tbl_players.rowCount() == 1 and page.tbl_players.item(0, 0).text() == "Amy"
     assert page.lbl_player_name.text() == "AMY" and page.stat_bars["HEALTH"].value() == 50
     assert page.stat_bars["OXYGEN"].value() == 25 and page.stat_bars["FOOD"].value() == 0
     assert page.tbl_inventory.rowCount() == 2
@@ -321,14 +321,16 @@ def test_offline_bridge_reads_nothing(qapp, monkeypatch, tmp_path):
 def test_online_ping_offline_dash_and_log_count(qapp, monkeypatch, tmp_path, capsys):
     page, bridge = players_page(qapp, monkeypatch, tmp_path)
     assert page.tbl_players.item(0, 4).text() == "40 ms"
-    assert page.tbl_players.item(1, 4).text() == "--"
     capsys.readouterr()
     page._on_players_read(PLAYERS)
     settle(qapp)
     logged = capsys.readouterr().out
     assert "[INFO] PlayersPage: 1 online player(s)" in logged
     assert "player(s) shown" not in logged
-    assert page.tbl_players.rowCount() == 2
+    assert "registered" not in logged
+    assert page.tbl_players.rowCount() == 1
+    assert page.tbl_players.item(0, 0).text() == "Amy"
+    assert page.tbl_players.item(0, 4).text() == "40 ms"
 
 
 def test_column_sort_keeps_staff_on_top_and_keeps_selection(qapp, monkeypatch, tmp_path):
@@ -358,6 +360,8 @@ def test_column_sort_keeps_staff_on_top_and_keeps_selection(qapp, monkeypatch, t
     page.selected_player = {"entityId": "2"}
     page._sort_column = None
     page._sort_descending = False
+    page._show_all_players = True
+    page._sync_list_filter_button()
     page.fill_players(rows)
     settle(qapp)
     page._on_header_clicked(player_col)
@@ -374,6 +378,82 @@ def test_column_sort_keeps_staff_on_top_and_keeps_selection(qapp, monkeypatch, t
     settle(qapp)
     assert [page.tbl_players.item(row, 0).text() for row in range(4)] == ["Cal", "Bea", "Zed", "Amy"]
     assert page.tbl_players.item(page.tbl_players.currentRow(), 0).text() == "Amy"
+
+
+def _names_in_table(page):
+    return [page.tbl_players.item(row, 0).text() for row in range(page.tbl_players.rowCount())]
+
+
+def test_player_list_defaults_to_online_only_and_toggles(qapp, monkeypatch, tmp_path, capsys):
+    from features.players import players_page as players_mod
+    page, bridge = players_page(qapp, monkeypatch, tmp_path)
+    assert page.btn_list_filter.text() == "SHOW ALL PLAYERS"
+    assert _names_in_table(page) == ["Amy"]
+    assert page.tbl_players.item(0, 4).text() == "40 ms"
+
+    capsys.readouterr()
+    page.btn_list_filter.click()
+    settle(qapp)
+    assert page.btn_list_filter.text() == "SHOW ONLINE ONLY"
+    assert _names_in_table(page) == ["Amy", "Zed"]
+    assert page.tbl_players.item(1, 1).text() == "Offline"
+    assert page.tbl_players.item(1, 4).text() == "--"
+    assert "[INFO] PlayersPage: 1 online player(s), 2 registered" in capsys.readouterr().out
+
+    rows = [
+        {"name": "Zed", "entityId": "1", "status": "Offline", "faction": "AAA", "playfield": "Akua", "ping": 0},
+        {"name": "Amy", "entityId": "2", "status": "Online", "faction": "BBB", "playfield": "Omicron", "ping": 40},
+        {"name": "Cal", "entityId": "3", "status": "Online", "faction": "CCC", "playfield": "Akua", "ping": 10, "permission": 9},
+        {"name": "Bea", "entityId": "4", "status": "Online", "faction": "AAA", "playfield": "Nesoi", "ping": 200, "permission": 3},
+        {"name": "Oak", "entityId": "5", "status": "Offline", "faction": "AAA", "playfield": "Akua", "ping": 0, "permission": 9},
+    ]
+    page.fill_players(rows)
+    settle(qapp)
+    assert _names_in_table(page) == ["Bea", "Cal", "Oak", "Amy", "Zed"]
+
+    page.btn_list_filter.click()
+    settle(qapp)
+    assert page.btn_list_filter.text() == "SHOW ALL PLAYERS"
+    assert _names_in_table(page) == ["Bea", "Cal", "Amy"]
+
+    player_col = players_mod.PLAYER_COLUMNS.index("PLAYER")
+    page._on_header_clicked(player_col)
+    settle(qapp)
+    assert _names_in_table(page) == ["Bea", "Cal", "Amy"]
+    page.fill_players(rows)
+    settle(qapp)
+    assert not page._show_all_players
+    assert _names_in_table(page) == ["Bea", "Cal", "Amy"]
+
+    page.btn_list_filter.click()
+    settle(qapp)
+    page._on_header_clicked(player_col)
+    settle(qapp)
+    assert _names_in_table(page) == ["Oak", "Cal", "Bea", "Zed", "Amy"]
+    page.fill_players(rows)
+    settle(qapp)
+    assert page._show_all_players
+    assert _names_in_table(page) == ["Oak", "Cal", "Bea", "Zed", "Amy"]
+
+
+def test_staff_pin_holds_after_live_permission_and_refresh(qapp, monkeypatch, tmp_path):
+    from features.players import players_page as players_mod
+    page, bridge = players_page(qapp, monkeypatch, tmp_path)
+    rows = [
+        {"name": "Amy", "entityId": "2", "status": "Online", "faction": "BBB", "playfield": "Omicron", "ping": 40},
+        {"name": "Cal", "entityId": "3", "status": "Online", "faction": "CCC", "playfield": "Akua", "ping": 10},
+    ]
+    page.fill_players(rows)
+    settle(qapp)
+    assert _names_in_table(page) == ["Amy", "Cal"]
+    page._on_online_info_read("3", {"status": "ok", "data": {"permission": 9, "ping": 10}})
+    settle(qapp)
+    assert _names_in_table(page) == ["Cal", "Amy"]
+    page.fill_players(rows)
+    settle(qapp)
+    assert _names_in_table(page) == ["Cal", "Amy"]
+    assert players_mod.is_staff(page._shown_players[0])
+
 
 # endregion
 
