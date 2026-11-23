@@ -748,6 +748,33 @@ namespace ZeroGBridge
                 ZgbLog.Write($"[ZGB] -WARN- Configured GlobalDbPath not found: \"{raw}\"");
             }
 
+            // Prefer the live save folder already resolved for files:info (GameName from
+            // the started dedicated yaml, then GetPathFor). This is the same save the
+            // game and admin tools are using.
+            try
+            {
+                var api = ModMain.ModApiInstance;
+                if (api != null)
+                {
+                    ServerFiles.RefreshRoots(api, false);
+                }
+                string saveRoot = ServerFiles.CurrentSaveRoot;
+                if (!string.IsNullOrEmpty(saveRoot))
+                {
+                    string liveDb = Path.Combine(saveRoot, "global.db");
+                    tried.Add(liveDb);
+                    if (File.Exists(liveDb))
+                    {
+                        ZgbLog.Write($"[ZGB] -SUCCESS- Located database at: {liveDb} (live save \"{ServerFiles.CurrentSaveName}\")");
+                        return liveDb;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                ZgbLog.Write($"[ZGB] -WARN- Live save global.db lookup failed: {ex.Message}");
+            }
+
             if (cfg != null && !string.IsNullOrWhiteSpace(cfg.SaveGameName))
             {
                 string name = cfg.SaveGameName.Trim();
@@ -1409,6 +1436,203 @@ namespace ZeroGBridge
                 if (!(char.IsLetterOrDigit(ch) || ch == '_')) return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// Read-only snapshot of the global.db path, table/column names, and current
+        /// facid or role values by player name. Steam ids and other secrets are omitted.
+        /// Uses the same share-read copy as SafeScanDatabase.
+        /// </summary>
+        public string FactionDiagJson()
+        {
+            try
+            {
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                _lastDbStamp = "";
+                SafeScanDatabase(baseDir);
+                _lastDbScanUtc = DateTime.UtcNow;
+                return BuildFactionDiag(baseDir);
+            }
+            catch (Exception ex)
+            {
+                return JsonConvert.SerializeObject(new
+                {
+                    type = "FACTION_DIAG",
+                    ok = false,
+                    message = ex.GetType().Name + ": " + ex.Message
+                });
+            }
+        }
+
+        private string BuildFactionDiag(string baseDir)
+        {
+            string tempDb = null;
+            try
+            {
+                string currentDir = Directory.GetCurrentDirectory();
+                string resolvedDb = ResolveGlobalDbPath(baseDir, currentDir);
+                if (string.IsNullOrEmpty(resolvedDb))
+                {
+                    return JsonConvert.SerializeObject(new { type = "FACTION_DIAG", ok = false, message = "global.db was not found" });
+                }
+
+                string saveName = Path.GetFileName(Path.GetDirectoryName(resolvedDb));
+                string tempDir = Path.Combine(currentDir, "Logs", "ZeroGBridge");
+                if (!Directory.Exists(tempDir)) Directory.CreateDirectory(tempDir);
+                tempDb = Path.Combine(tempDir, "temp_factiondiag.db");
+                if (File.Exists(tempDb))
+                {
+                    try { File.Delete(tempDb); } catch { }
+                }
+                using (var sourceStream = new FileStream(resolvedDb, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var destStream = new FileStream(tempDb, FileMode.Create, FileAccess.Write, FileShare.None))
+                {
+                    sourceStream.CopyTo(destStream);
+                }
+
+                string connString = $"Data Source={tempDb};Version=3;Journal Mode=Memory;Pooling=False;";
+                using (var connection = new SqliteConnection(connString))
+                {
+                    connection.Open();
+                    var tables = GetTables(connection);
+                    var entityCols = GetColumns(connection, "Entities");
+                    var playerCols = GetColumns(connection, "PlayerData");
+                    var tableCols = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var table in tables)
+                    {
+                        string lower = table.ToLowerInvariant();
+                        if (lower.Contains("faction") || lower.Contains("facmem") || lower == "playerdata" || lower == "entities")
+                        {
+                            tableCols[table] = GetColumns(connection, table);
+                        }
+                    }
+
+                    string pdFacCol = PickColumn(playerCols, new[] { "facid", "factionid" }, new string[0], null);
+                    string pdRoleCol = PickColumn(playerCols, new[] { "facrole", "factionrole", "faction_role", "facrights", "factionrights", "role" }, new string[0], null);
+                    var extraPd = new List<string>();
+                    foreach (var col in playerCols)
+                    {
+                        string lc = col.ToLowerInvariant();
+                        if (!SafeIdent(col)) continue;
+                        if (lc.Contains("steam") || lc.Contains("token") || lc.Contains("pass")) continue;
+                        if (lc.Contains("fac") || lc.Contains("role") || lc.Contains("owner") || lc.Contains("founder") || lc.Contains("rank") || lc.Contains("right"))
+                        {
+                            if (!extraPd.Any(x => string.Equals(x, col, StringComparison.OrdinalIgnoreCase)))
+                                extraPd.Add(col);
+                        }
+                    }
+
+                    var selectExtras = new List<string>();
+                    foreach (var col in extraPd)
+                    {
+                        selectExtras.Add("pd.\"" + col + "\"");
+                    }
+                    string extraSql = selectExtras.Count > 0 ? ", " + string.Join(", ", selectExtras) : "";
+                    string sql = @"
+                        SELECT l.playername, l.entityid, COALESCE(e.facid, 0)" + extraSql + @"
+                        FROM LoginLogoff l
+                        INNER JOIN (
+                            SELECT playerid, MAX(lid) AS max_lid FROM LoginLogoff
+                            WHERE playerid LIKE '7656%' GROUP BY playerid
+                        ) latest ON l.playerid = latest.playerid AND l.lid = latest.max_lid
+                        LEFT JOIN Entities e ON l.entityid = e.entityid
+                        LEFT JOIN PlayerData pd ON l.entityid = pd.entityid;";
+
+                    var players = new List<object>();
+                    using (var cmd = new SqliteCommand(sql, connection))
+                    using (var reader = cmd.ExecuteReader())
+                    {
+                        while (reader.Read())
+                        {
+                            string name = reader.IsDBNull(0) ? "" : Convert.ToString(reader.GetValue(0));
+                            object entityId = reader.IsDBNull(1) ? null : reader.GetValue(1);
+                            int entitiesFac = reader.IsDBNull(2) ? 0 : Convert.ToInt32(reader.GetValue(2));
+                            var extra = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                            for (int i = 0; i < extraPd.Count; i++)
+                            {
+                                int idx = 3 + i;
+                                if (idx >= reader.FieldCount || reader.IsDBNull(idx)) continue;
+                                object raw = reader.GetValue(idx);
+                                string textVal = Convert.ToString(raw);
+                                if (!string.IsNullOrEmpty(textVal) && textVal.StartsWith("7656") && textVal.Length >= 17) continue;
+                                extra[extraPd[i]] = raw is string ? textVal : raw;
+                            }
+                            players.Add(new
+                            {
+                                name,
+                                entityId,
+                                entitiesFacid = entitiesFac,
+                                playerData = extra
+                            });
+                        }
+                    }
+
+                    var factionRows = new List<object>();
+                    string facTable = tables.FirstOrDefault(t =>
+                        string.Equals(t, "Factions", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(t, "Faction", StringComparison.OrdinalIgnoreCase));
+                    if (!string.IsNullOrEmpty(facTable) && SafeIdent(facTable))
+                    {
+                        var facCols = GetColumns(connection, facTable);
+                        var keep = new List<string>();
+                        foreach (var col in facCols)
+                        {
+                            if (!SafeIdent(col)) continue;
+                            string lc = col.ToLowerInvariant();
+                            if (lc.Contains("steam") || lc.Contains("token") || lc.Contains("pass")) continue;
+                            if (lc == "facid" || lc == "factionid" || lc == "id" || lc == "name" || lc == "abbrev"
+                                || lc.Contains("owner") || lc.Contains("founder") || lc.Contains("leader")
+                                || lc.Contains("origin") || lc.Contains("fac"))
+                            {
+                                keep.Add(col);
+                            }
+                        }
+                        if (keep.Count > 0)
+                        {
+                            string fsql = "SELECT " + string.Join(", ", keep.Select(c => "\"" + c + "\"")) + " FROM \"" + facTable + "\";";
+                            using (var cmd = new SqliteCommand(fsql, connection))
+                            using (var reader = cmd.ExecuteReader())
+                            {
+                                while (reader.Read())
+                                {
+                                    var row = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                                    for (int i = 0; i < keep.Count; i++)
+                                    {
+                                        if (reader.IsDBNull(i)) continue;
+                                        row[keep[i]] = reader.GetValue(i);
+                                    }
+                                    factionRows.Add(row);
+                                }
+                            }
+                        }
+                    }
+
+                    return JsonConvert.SerializeObject(new
+                    {
+                        type = "FACTION_DIAG",
+                        ok = true,
+                        save = saveName,
+                        liveSave = ServerFiles.CurrentSaveName,
+                        tables,
+                        entitiesColumns = entityCols,
+                        playerDataColumns = playerCols,
+                        tableColumns = tableCols,
+                        playerDataFacColumn = pdFacCol,
+                        playerDataRoleColumn = pdRoleCol,
+                        playerCount = players.Count,
+                        players,
+                        factionsTable = facTable,
+                        factions = factionRows
+                    });
+                }
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(tempDb) && File.Exists(tempDb))
+                {
+                    try { File.Delete(tempDb); } catch { }
+                }
+            }
         }
 
         private static List<string> GetTables(SqliteConnection connection)

@@ -113,6 +113,18 @@ namespace ZeroGBridge
         public static string ServerDirectoryOverride;
         public static string[] CommandLineOverride;
 
+        /// <summary>Full path of the live save folder used by files:info, or null.</summary>
+        public static string CurrentSaveRoot
+        {
+            get { lock (RootLock) return _saveRoot; }
+        }
+
+        /// <summary>Folder name of the live save used by files:info, or null.</summary>
+        public static string CurrentSaveName
+        {
+            get { lock (RootLock) return _saveName; }
+        }
+
         // Scan results reused for a few seconds: root name -> (time, files).
         private static readonly Dictionary<string, KeyValuePair<DateTime, List<FileEntry>>> ListCache =
             new Dictionary<string, KeyValuePair<DateTime, List<FileEntry>>>(StringComparer.Ordinal);

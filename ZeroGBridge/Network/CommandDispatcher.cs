@@ -109,6 +109,14 @@ namespace ZeroGBridge
                     return jsonResponse;
                 }
 
+                // 1.6.10: read-only global.db faction schema and current facid/role values (no steam ids).
+                if (lowerCmd == "factiondiag")
+                {
+                    return _playerCache != null
+                        ? _playerCache.FactionDiagJson()
+                        : JsonConvert.SerializeObject(new { type = "FACTION_DIAG", ok = false, message = "Player cache is not ready." });
+                }
+
                 // 2. Handle manual player injection (Diagnostic / Testing)
                 if (lowerCmd.StartsWith("add_player:"))
                 {
