@@ -5,6 +5,9 @@
 ## and the LIVE MODE switch for editing files straight on the server. The download button works (read-only,
 ## enabled only while the bridge is connected). Core 1.6.4: a scenario/save picker and file-type ticks
 ## sit above the download button. They fail closed to the old behaviour when the core is older or catalog fails.
+## The download itself is owned by features.server_files.download_manager (Nov 23, 2026), so it keeps running
+## when the Settings page is closed and rebuilt on nav. showEvent reconnects the button, CANCEL, progress bar
+## and status line to the live or finished state, including LAST PULLED if the copy finished while away.
 ## ==========================================
 
 # region Imports
@@ -23,6 +26,7 @@ from features.server_files.download_settings import (
     selection_for_download, types_from_saved,
 )
 from features.server_files.download_worker import ServerFileDownloadWorker
+from features.server_files import download_manager
 from features.server_files.file_client import ServerFilesError, ServerFilesSession
 from features.server_files.file_store import format_last_pulled, now_iso
 
@@ -31,9 +35,26 @@ from features.server_files.file_store import format_last_pulled, now_iso
 
 # region Running Downloads
 
-## Download threads that are still running. A thread must not be thrown away while it runs (Qt would abort),
-## so this list keeps it alive even if the user leaves the Settings page mid-download. Each one removes itself when done.
-RUNNING_DOWNLOADS = []
+## Download threads that are still running. The live list now lives in download_manager, because this
+## module is reload()ed each time Settings is opened, which would empty a list kept here. The name is
+## kept so older imports still resolve; it always reflects the manager's current workers.
+class _RunningDownloads:
+    def __iter__(self):
+        return iter(download_manager.running_workers())
+
+    def __contains__(self, worker):
+        return worker in download_manager.running_workers()
+
+    def append(self, worker):
+        return None
+
+    def remove(self, worker):
+        return None
+
+    def __len__(self):
+        return len(download_manager.running_workers())
+
+RUNNING_DOWNLOADS = _RunningDownloads()
 
 ## Tests set this to False so the Settings page never opens a catalog thread against a real server.
 AUTO_FETCH_CATALOG = True
@@ -99,10 +120,10 @@ class SettingsPage(QWidget):
         super().__init__(parent)
         ## Name that ZAH_main.css can use to style the page.
         self.setObjectName("SettingsPage")
-        ## The download thread while one is running, otherwise None.
-        self.download_worker = None
         ## Builds the download thread. A test can swap this for a fake one.
         self.create_download_worker = ServerFileDownloadWorker
+        ## True once this page is connected to the shared download manager's signals.
+        self._download_signals_bound = False
         ## True once this page is listening to the cockpit's bridge_status_changed signal.
         self.is_listening = False
         ## Catalog thread while a folder list is being asked for, otherwise None.
@@ -110,6 +131,11 @@ class SettingsPage(QWidget):
         ## True when files:catalog succeeded and the combos may be used for the next download.
         self.picker_ready = False
         self.setup_widgets()
+
+    @property
+    def download_worker(self):
+        ## The shared worker while a download is running, otherwise None.
+        return download_manager.current_worker()
 
     def setup_widgets(self):
         ## Top-to-bottom stack, pushed to the top of the page.
@@ -274,7 +300,8 @@ class SettingsPage(QWidget):
     def showEvent(self, event):
         super().showEvent(event)
         self._setup_listening()
-        self._refresh_download_state()
+        self._bind_download_signals()
+        self._sync_download_ui()
         self._refresh_live_mode_state()
         self._refresh_catalog()
 
@@ -290,7 +317,7 @@ class SettingsPage(QWidget):
         self.is_listening = True
 
     def _on_bridge_status_changed(self, server_name, is_connected):
-        self._refresh_download_state()
+        self._sync_download_ui()
         self._refresh_live_mode_state()
         self._refresh_catalog()
 
@@ -346,9 +373,53 @@ class SettingsPage(QWidget):
 
     ## Turns the download button on only when the cockpit says the bridge is connected, and never during a download.
     ## Fails closed: if the cockpit has no news (or isn't found), the button stays off.
+    def _bind_download_signals(self):
+        ## Connect once to the manager, which outlives this page. Qt drops the links when the page is deleted.
+        if self._download_signals_bound:
+            return
+        manager = download_manager.get_manager()
+        manager.progress.connect(self._on_download_progress)
+        manager.finished_ok.connect(self._on_download_finished)
+        manager.failed.connect(self._on_download_failed)
+        manager.thread_ended.connect(self._on_download_thread_ended)
+        self._download_signals_bound = True
+
+    def _sync_download_ui(self):
+        ## Paints the live download, or the result if it finished while this page was away.
+        try:
+            saved = load_app_settings()
+            saved_folder = saved["server_files_local_folder"]
+            self.lbl_files_folder.setText(f"LOCAL COPY:  {saved_folder or 'none yet'}")
+            saved_pulled = saved["server_files_last_pulled"]
+            self.lbl_files_pulled.setText(
+                f"LAST PULLED:  {format_last_pulled(saved_pulled) if saved_pulled else 'never'}")
+            manager = download_manager.get_manager()
+            if download_manager.is_running():
+                self.btn_download_files.setEnabled(False)
+                self.btn_download_files.setText("DOWNLOADING")
+                self.btn_cancel_download.setVisible(True)
+                self.btn_cancel_download.setEnabled(not manager.stopping)
+                self.bar_download_progress.setVisible(True)
+                if manager.last_progress_values:
+                    self._on_download_progress(*manager.last_progress_values)
+                status = manager.last_status_text or "Connecting to the server"
+                self.lbl_download_status.setText(status)
+                self.lbl_download_status.setVisible(True)
+                return
+            self.btn_download_files.setText("DOWNLOAD SERVER FILES (READ-ONLY)")
+            self.btn_cancel_download.setVisible(False)
+            self.bar_download_progress.setVisible(False)
+            if manager.last_status_text:
+                self.lbl_download_status.setText(manager.last_status_text)
+                self.lbl_download_status.setVisible(True)
+            self._refresh_download_state()
+        except Exception as e:
+            print(f"[ERROR] SettingsPage: Failed to sync the download display: {e}")
+            self._refresh_download_state()
+
     def _refresh_download_state(self):
         try:
-            if self.download_worker is not None:
+            if download_manager.is_running():
                 self.btn_download_files.setEnabled(False)
                 return
             is_connected = getattr(self.window(), "bridge_connected", None)
@@ -507,7 +578,7 @@ class SettingsPage(QWidget):
     ## Starts the download thread. The button is switched off at once so it can't be started twice.
     def _on_download_clicked(self):
         try:
-            if self.download_worker is not None:
+            if download_manager.is_running() or self.download_worker is not None:
                 return
             if not self._on_download_clicked_guard():
                 return
@@ -518,20 +589,10 @@ class SettingsPage(QWidget):
             ## Range 0 to 0 makes the bar show a moving "busy" stripe until real numbers arrive.
             self.bar_download_progress.setRange(0, 0)
             self.bar_download_progress.setVisible(True)
-
-            try:
-                self.download_worker = self.create_download_worker(selection=self._current_selection())
-            except TypeError:
-                self.download_worker = self.create_download_worker()
-            RUNNING_DOWNLOADS.append(self.download_worker)
-            ## The list entry is removed when the thread ends, on whatever page object is still alive.
-            self.download_worker.finished.connect(lambda worker=self.download_worker: _forget_download(worker))
-            self.download_worker.progress.connect(self._on_download_progress)
-            self.download_worker.finished_ok.connect(self._on_download_finished)
-            self.download_worker.failed.connect(self._on_download_failed)
-            ## finished fires after run() ends, success or not: the cleanup point.
-            self.download_worker.finished.connect(self._on_download_thread_ended)
-            self.download_worker.start()
+            self._bind_download_signals()
+            if not download_manager.start(self.create_download_worker, self._current_selection()):
+                self._sync_download_ui()
+                return
             self.btn_cancel_download.setEnabled(True)
             self.btn_cancel_download.setVisible(True)
         except Exception as e:
@@ -576,9 +637,7 @@ class SettingsPage(QWidget):
     ## Asks the running download to stop. The worker ends with "Download stopped." through failed.
     def _on_cancel_download_clicked(self):
         try:
-            worker = self.download_worker
-            if worker is not None and hasattr(worker, "request_stop"):
-                worker.request_stop()
+            if download_manager.request_stop():
                 self.btn_cancel_download.setEnabled(False)
                 self.lbl_download_status.setText("Stopping after the current file")
         except Exception as e:
@@ -586,7 +645,6 @@ class SettingsPage(QWidget):
 
     ## Always runs last: puts the button and bar back so another download can start.
     def _on_download_thread_ended(self):
-        self.download_worker = None
         self.btn_cancel_download.setVisible(False)
         self.bar_download_progress.setVisible(False)
         self.btn_download_files.setText("DOWNLOAD SERVER FILES (READ-ONLY)")
@@ -611,7 +669,8 @@ class SettingsPage(QWidget):
 
 # region Download Bookkeeping
 
-## Drops a finished thread from RUNNING_DOWNLOADS.
+## Drops a finished thread from RUNNING_DOWNLOADS. Kept so older callers still have the name;
+## the manager now removes the worker itself when the thread ends.
 def _forget_download(worker):
     if worker in RUNNING_DOWNLOADS:
         RUNNING_DOWNLOADS.remove(worker)

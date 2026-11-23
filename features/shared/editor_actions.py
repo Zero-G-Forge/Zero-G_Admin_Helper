@@ -10,7 +10,7 @@
 ## confirmations (upload_flow.py). Only users the role gate allows get the button; the bridge backs up the
 ## server's old file first, and refuses when the server copy changed since it was downloaded.
 ## DOWNLOAD FOLDER FROM SERVER (READ-ONLY) runs the same read-only download as Settings (Nov 22, 2026),
-## then refills the file list. Only one download runs at a time across ZAH.
+## then refills the file list. Only one download runs at a time across ZAH, through download_manager.
 ## ==========================================
 
 # region Imports
@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import QMessageBox
 
 ## The same read-only download thread the Settings page uses.
 from features.server_files.download_worker import ServerFileDownloadWorker
+from features.server_files import download_manager
 
 from features.server_files import edit_store, upload_flow
 from features.server_files.write_worker import ServerWriteWorker, fetch_file, put_file, start_write_worker
@@ -101,8 +102,7 @@ class EditorActions:
 
     def _download_busy(self):
         try:
-            from features.settings.settings_page import RUNNING_DOWNLOADS
-            return any(worker.isRunning() for worker in RUNNING_DOWNLOADS) or getattr(self, "download_worker", None) is not None
+            return download_manager.is_running() or getattr(self, "download_worker", None) is not None
         except Exception:
             return getattr(self, "download_worker", None) is not None
 
@@ -125,18 +125,17 @@ class EditorActions:
         try:
             if self._download_busy():
                 return
-            from features.settings.settings_page import RUNNING_DOWNLOADS
             self.btn_download.setEnabled(False)
             self.btn_download_text = self.btn_download.text()
             self.btn_download.setText("DOWNLOADING")
-            self.download_worker = self.create_download_worker()
-            RUNNING_DOWNLOADS.append(self.download_worker)
-            self.download_worker.finished.connect(lambda worker=self.download_worker: RUNNING_DOWNLOADS.remove(worker) if worker in RUNNING_DOWNLOADS else None)
+            if not download_manager.start(self.create_download_worker):
+                self._refresh_download_button()
+                return
+            self.download_worker = download_manager.current_worker()
             self.download_worker.progress.connect(self._on_download_folder_progress)
             self.download_worker.finished_ok.connect(self._on_download_folder_finished)
             self.download_worker.failed.connect(lambda message: print(f"[ERROR] EditorActions: Download failed: {message}"))
             self.download_worker.finished.connect(self._on_download_folder_ended)
-            self.download_worker.start()
         except Exception as e:
             print(f"[ERROR] EditorActions: Could not start the download: {e}")
             self._on_download_folder_ended()

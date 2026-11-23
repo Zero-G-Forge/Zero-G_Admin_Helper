@@ -594,7 +594,7 @@ BUILD ITEM TEMPLATE is for a named kit of items handed out together, next to STA
 
 ## Stopping a Download Politely
 
-CANCEL DOWNLOAD does not pull the plug in the middle of a file. It raises a flag, and the download thread looks at that flag between two requests. Files that already arrived stay, the half-finished `.part` file is thrown away, and LAST PULLED is not changed, because the copy is not complete.
+CANCEL DOWNLOAD does not pull the plug in the middle of a file. It raises a flag, and the download thread looks at that flag between two requests. Files that already arrived stay, the half-finished `.part` file is thrown away, and LAST PULLED is not changed, because the copy is not complete. The same cancel still works after you leave Settings and come back, because the flag is on the shared worker, not on the page that was closed.
 
 ## Giving Someone Live File Editing
 
@@ -630,7 +630,7 @@ Switching nav pages **deletes** the old page widget. If a `QThread` is a child o
 
 The fix is to parent those short network threads to the **application** (`QCoreApplication.instance()`), which lives until ZAH closes, and to call `deleteLater` when the thread emits `finished`. `CommandPipe` is parented to `MainCockpit` for the same reason: the cockpit outlives any one page.
 
-`ServerFileDownloadWorker` has a variation of the same rule. It can run for minutes, and the user may click to another page meanwhile. The Settings page keeps every running download in a module-level list (`RUNNING_DOWNLOADS`), so the thread is never thrown away mid-run, and each thread removes itself from the list when it finishes. The page's own signals disconnect by themselves when the page is deleted, so a finished download that nobody is watching ends quietly.
+`ServerFileDownloadWorker` has a variation of the same rule. It can run for minutes, and the user may click to another page meanwhile. The cockpit deletes the Settings page on every nav change, and the page loader `reload()`s the Settings module, which would empty a list kept in that module. The worker is therefore owned by `features.server_files.download_manager`, a module that is not reloaded. The manager also records LAST PULLED when the copy finishes, even if Settings is not on the screen. When Settings is opened again it reconnects to the manager and shows the live progress, or the finished state if the copy already ended.
 
 `processEvents()` is used only in small spots (for example, to let a "Checking login" label redraw before a short wait). It is not a substitute for a real background thread on longer calls.
 

@@ -174,6 +174,7 @@ Supporting modules (not nav pages):
 | `features/zgb_portal/` | Portal window used from the ZeroGBridge page |
 | `features/server_files/file_client.py` | Own short bridge session and the `files:` request helper (`ServerFilesSession`) |
 | `features/server_files/download_worker.py` | `ServerFileDownloadWorker` thread: list, compare, download, verify |
+| `features/server_files/download_manager.py` | Owns the one read-only download so it keeps running after Settings is closed |
 | `features/server_files/file_store.py` | Local folder layout, safe local paths, manifest, time text |
 | `features/server_files/local_files.py` | Finds the downloaded scenario folder, files in it (save copy wins), and item pictures |
 | `features/server_files/edit_store.py` | Edited copies, backups, line endings, and upload base hashes |
@@ -1145,7 +1146,8 @@ Still to do:
 - Done (Nov 22, 2026): the Library BLUEPRINTS tab reads `.epb` files from `Prefabs/` in that same download (save copy first). A `POI` category button sits next to `BA` / `CV` / `SV` / `HV`. Both lists stay empty until a category is clicked, showing a centered `Choose a Category` label in the list plate; more than one category is chosen only through the `FILTER` checkbox menu.
 - Done (Nov 22, 2026): core 1.6.6 adds `.epb` to `AllowedExtensions`, and Settings has a `Blueprints (.epb)` file-type checkbox (on by default, remembered per server like the others). A named `files:list` of `Ascension-Reborn` on Reborn now returns 7,009 `.epb` files under `Prefabs`. The next Settings download with that type ticked will fill the Library BLUEPRINTS tab.
 - Done (Nov 22, 2026): CANCEL DOWNLOAD on the Settings page calls the worker's `request_stop`; the worker stops between two requests and reports `Download stopped.` Half-finished `.part` files are removed.
-- Done (Nov 22, 2026): the editors' DOWNLOAD FOLDER button runs the same read-only download. Only one download runs at a time across ZAH (`settings_page.RUNNING_DOWNLOADS`).
+- Done (Nov 22, 2026): the editors' DOWNLOAD FOLDER button runs the same read-only download. Only one download runs at a time across ZAH (`download_manager`).
+- Done (Nov 23, 2026): the Settings download keeps running when you leave the Settings page. The cockpit deletes and rebuilds the page on every nav click, and the page loader `reload()`s the Settings module, so a list kept in `settings_page.py` would be emptied. `download_manager` (a module that is not reloaded) owns the worker. Coming back to Settings reconnects CANCEL, the progress bar, and the `Downloading N of M files` line to the live state, or shows the finished state and LAST PULLED if the copy finished while away. CANCEL still works after returning.
 
 ### Item images
 

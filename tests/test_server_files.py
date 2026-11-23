@@ -6,6 +6,7 @@
 ##     skipped when dotnet or the built test DLL is missing)
 ##   - an old bridge (fail-closed message), and an unreachable server
 ##   - the Settings page button states, offscreen
+##   - the download keeps running after Settings is closed and rebuilt, and CANCEL still works
 ## Run from the app root:  QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests -q
 ## Nothing here touches data/ or any real server: settings and downloads go to a temporary folder,
 ## and the "server" is a local process with a made-up test token.
@@ -32,6 +33,9 @@ from features.server_files import download_settings, file_client, file_store
 from features.server_files.download_worker import ServerFileDownloadWorker
 from features.server_files.file_client import ServerFilesSession
 from features.settings import app_settings, settings_page
+from features.server_files import download_manager
+import importlib
+import threading
 
 # endregion
 
@@ -57,6 +61,9 @@ def isolated_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(file_client, "COMMAND_GAP_SEC", 0.0)
     ## Existing page tests must not open a catalog thread against a real server.
     monkeypatch.setattr(settings_page, "AUTO_FETCH_CATALOG", False)
+    download_manager.reset()
+    yield
+    download_manager.reset()
 
 
 def free_port():
@@ -432,6 +439,113 @@ def test_cancel_stops_a_running_download(qapp):
     assert "Download stopped." in page.lbl_download_status.text()
     assert page.btn_cancel_download.isHidden() and page.btn_download_files.isEnabled()
     cockpit.close()
+
+
+def test_download_keeps_running_after_the_page_is_closed(qapp):
+    cockpit, page = build_page(qapp)
+    page.create_download_worker = SlowWorker
+    cockpit.bridge_connected = True
+    cockpit.bridge_status_changed.emit("Test", True)
+    page.btn_download_files.click()
+    worker = page.download_worker
+    assert worker is not None and worker.isRunning()
+    page.hide()
+    page.deleteLater()
+    cockpit.close()
+    qapp.processEvents()
+    assert download_manager.is_running()
+    cockpit2, page2 = build_page(qapp)
+    cockpit2.bridge_connected = True
+    qapp.processEvents()
+    assert page2.btn_download_files.text() == "DOWNLOADING"
+    assert page2.btn_download_files.isEnabled() is False
+    assert page2.btn_cancel_download.isVisible() and page2.btn_cancel_download.isEnabled()
+    assert page2.bar_download_progress.isVisible()
+    assert page2.download_worker is worker
+    page2.btn_cancel_download.click()
+    assert wait_until(qapp, lambda: page2.download_worker is None)
+    assert "Download stopped." in page2.lbl_download_status.text()
+    assert page2.btn_cancel_download.isHidden() and page2.btn_download_files.isEnabled()
+    cockpit2.close()
+
+
+class HoldWorker(QThread):
+    ## Starts, reports progress, then waits until release is set, then finishes successfully.
+    progress = pyqtSignal(int, int, str)
+    finished_ok = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+    release = None
+    outcome = {"downloaded": 3, "skipped": 2, "failed": [], "folder": "/tmp/zah_fake_folder"}
+
+    def __init__(self, parent=None, selection=None, **kwargs):
+        super().__init__(parent)
+        self.selection = selection
+
+    def run(self):
+        self.progress.emit(2, 5, "Downloading 2 of 5 files")
+        if HoldWorker.release is not None:
+            HoldWorker.release.wait(5)
+        self.finished_ok.emit(dict(HoldWorker.outcome))
+
+
+def test_finished_download_shows_last_pulled_on_a_new_page(qapp):
+    HoldWorker.release = threading.Event()
+    cockpit, page = build_page(qapp)
+    page.create_download_worker = HoldWorker
+    cockpit.bridge_connected = True
+    cockpit.bridge_status_changed.emit("Test", True)
+    page.btn_download_files.click()
+    assert wait_until(qapp, lambda: "Downloading 2 of 5 files" in page.lbl_download_status.text())
+    page.hide()
+    page.deleteLater()
+    cockpit.close()
+    qapp.processEvents()
+    assert download_manager.is_running()
+    HoldWorker.release.set()
+    assert wait_until(qapp, lambda: not download_manager.is_running() and download_manager.current_worker() is None)
+    cockpit2, page2 = build_page(qapp)
+    cockpit2.bridge_connected = True
+    cockpit2.bridge_status_changed.emit("Test", True)
+    qapp.processEvents()
+    assert "Done. 3 new or changed, 2 already up to date." in page2.lbl_download_status.text()
+    assert page2.lbl_files_folder.text() == "LOCAL COPY:  /tmp/zah_fake_folder"
+    assert page2.lbl_files_pulled.text() != "LAST PULLED:  never"
+    assert page2.btn_cancel_download.isHidden()
+    assert page2.bar_download_progress.isHidden()
+    assert page2.btn_download_files.isEnabled()
+    cockpit2.close()
+    HoldWorker.release = None
+
+
+def test_second_download_does_not_start_while_one_is_running(qapp):
+    cockpit, page = build_page(qapp)
+    page.create_download_worker = SlowWorker
+    cockpit.bridge_connected = True
+    cockpit.bridge_status_changed.emit("Test", True)
+    page.btn_download_files.click()
+    first = page.download_worker
+    assert first is not None
+    page.btn_download_files.click()
+    assert page.download_worker is first
+    assert len(download_manager.running_workers()) == 1
+    first.request_stop()
+    assert wait_until(qapp, lambda: page.download_worker is None)
+    cockpit.close()
+
+
+def test_reload_of_settings_module_does_not_drop_a_running_download(qapp):
+    cockpit, page = build_page(qapp)
+    page.create_download_worker = SlowWorker
+    cockpit.bridge_connected = True
+    cockpit.bridge_status_changed.emit("Test", True)
+    page.btn_download_files.click()
+    assert download_manager.is_running()
+    importlib.reload(settings_page)
+    assert download_manager.is_running()
+    download_manager.request_stop()
+    assert wait_until(qapp, lambda: not download_manager.is_running())
+    cockpit.close()
+
 
 
 def test_editor_download_folder_runs_the_read_only_download(qapp, tmp_path):
