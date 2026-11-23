@@ -296,7 +296,7 @@ The dashboard's connection is a radio that keeps broadcasting status lines. A do
 
 ### Why you pick the scenario and save yourself
 
-The live config can name a different scenario than the one the save was actually started from. On the live server, `game+dedicated.yaml` reported `Default Multiplayer`, while the game being played is `Ascension-Reborn` with the save `Zero-G Server - Season 4`. The old download followed the config names, so it pulled the wrong scenario.
+The live config can name a different scenario than the one the save was actually started from. Core 1.6.7 reads `CustomScenario` and `GameName` from the dedicated yaml the server was started with (including a `-dedicated` file such as `settings.yaml`), so a wrong `ActiveScenario` of `Default Multiplayer` no longer hides the running custom scenario. The download still follows the scenario you pick in Settings; the catalog's current pair should now match that yaml.
 
 **Analogy:** a library card that still has last year's shelf written on it. The librarian can now also list every folder on the scenario wall (`Content/Scenarios`) and every folder on the save wall (`Saves/Games`, not `Cache` or `Blueprints`). You pick one from each list. The two picks are independent: any scenario can be paired with any save.
 

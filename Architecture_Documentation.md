@@ -29,6 +29,7 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 - Core 1.6.4 adds the read-only `files:catalog` command, and optional `scenario` or `save` folder names on `files:list` and `files:get`, so ZAH can list every scenario and save folder and download from a chosen pair. `files:put` still uses only the live yaml/game pair and ignores those extra names. `protocol` stays 1.
 - Core 1.6.5 widens `AllowedFolders` in `ServerFiles.cs`: a scenario also includes `Playfields`, `RandomPresets`, `Extras`, `Sectors` and `Prefabs`, and a save also includes `PDA`. `protocol` stays 1. The same lists apply to `files:put`.
 - Core 1.6.6 adds `.epb` to `AllowedExtensions` so Prefabs blueprints can be listed and downloaded. `MaxFileBytes` stays 16 MB (local scenario `.epb` files are well under 1 MB). `protocol` stays 1.
+- Core 1.6.7 reads `CustomScenario` and `GameName` from the dedicated yaml the server was started with (`-dedicated` or `-dedicated=path`, then `dedicated.yaml` / `dedicated.yml` in the server folder). Inline `#` comments and spaces around the colon are accepted. When that yaml names a folder that exists, it wins over `GetPathFor(ActiveScenario)`, which can report `Default Multiplayer` (or nothing) while a custom scenario is running. `protocol` stays 1.
 - Core 1.6.2 adds the first two **write** commands, approved by Ray on Nov 22, 2026 ("make the changes on your own as long as the server itself doesn't need to be restarted"): `files:put` (replace one existing editable file, backup first) and `coreupload:put` (place a new core in `Updates/`). Both are core-only, so they install with a hot reload and never need a restart. See **Server write commands** below.
 - The server files download is **read-only** on both sides: the bridge only opens files with read access, and ZAH never deletes anything on this PC.
 
@@ -408,7 +409,7 @@ Empyrion loads `ZeroGBridge.Loader.ZeroGBridgeLoader`, which implements **API v2
 - It owns the TCP listener and authentication (`BridgeListener`, `AuthConfig`).
 - It hosts `CoreHost`, which loads the reloadable core (`ZeroGBridge.Core.dll`) in its own AppDomain.
 - Game-state work is marshalled onto the **game thread** (`GameThread`, `GameGateway`), never executed on the network thread.
-- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.6** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, the 1.6.3 read-only chat history `chat:recent`, the 1.6.4 read-only scenario/save catalog plus optional named `files:list` / `files:get`, the 1.6.5 wider file-folder allowlist, and the 1.6.6 `.epb` extension). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
+- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.7** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, the 1.6.3 read-only chat history `chat:recent`, the 1.6.4 read-only scenario/save catalog plus optional named `files:list` / `files:get`, the 1.6.5 wider file-folder allowlist, the 1.6.6 `.epb` extension, and the 1.6.7 dedicated-yaml current scenario). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
 
 The auth token is read from `ZeroGBridge.json` only and is never written into log lines.
 
@@ -570,7 +571,7 @@ Catalog parents: the parent of the live scenario root (normally `Content/Scenari
 
 Limits: one `files:get` reply carries at most **192 KB** of raw bytes (about 256 KB of text). Items past that budget come back `deferred`. A single file over the budget arrives in pieces. A file over **16 MB** is refused. A list scan stops at 50,000 files per root and 12 folder levels. The first list page (`offset` 0) always rescans the folders; later pages reuse that scan for up to 60 seconds so paging stays consistent.
 
-Where the roots come from: `IApplication.GetPathFor(AppFolder.ActiveScenario)` and `AppFolder.SaveGame`, read on the **game thread** from `ModMain.OnApplicationUpdate` (at most every 30 seconds) and kept in memory. If the game gives no folder, `dedicated.yaml` in the server's working folder is used: only `CustomScenario` and `GameName` are read, and only plain folder names are accepted. Command handlers only read the saved values.
+Where the roots come from: `IApplication.GetPathFor(AppFolder.ActiveScenario)` and `AppFolder.SaveGame`, read on the **game thread** from `ModMain.OnApplicationUpdate` (at most every 30 seconds) and kept in memory. The dedicated yaml the server was started with is also read: only `CustomScenario` and `GameName` are used, and only plain folder names that exist on disk are accepted. That yaml is found from the `-dedicated` command-line argument, or from `dedicated.yaml` / `dedicated.yml` in the server folder (inferred from the game-reported path when present, otherwise the process working directory). When those folders exist, they win over `GetPathFor`, including when the game reports `Default Multiplayer` or no scenario. Inline `#` comments and spaces around the colon are accepted. Command handlers only read the saved values.
 
 Safety checks, in order (`NormalizeRelativePath`, `ResolveUnderRoot`):
 
@@ -629,7 +630,7 @@ Kill switch: `"FileWritesEnabled": false` in `ZeroGBridge.json` turns both comma
 
 Error codes: `writes_disabled`, `not_ready` (mod folder unknown), `bad_request`, `unknown_root`, `root_unavailable`, `bad_path`, `not_allowed`, `not_found`, `too_large`, `bad_offset`, `hash_mismatch`, `changed_on_server`, `bad_core`, `write_failed`, `exception`.
 
-Checks: the same `ServerFilesTest` program also compiles `ServerFileWrites.cs` (137 checks in total): kill switch, not-ready, a chunked put with its backup, a second put keeping both backups, stale base hash, hash mismatch, new file, `.png`, `.json`, traversal, symlink, out-of-order chunk, size caps, the save root, a non-DLL and a wrong DLL refused, and the real Release core uploaded byte for byte with its version read back. The `serve` mode answers `coreupload:` too; set `ZGB_TEST_MODDIR` to a test folder for the write commands.
+Checks: the same `ServerFilesTest` program also compiles `ServerFileWrites.cs` (148 checks in total): kill switch, not-ready, a chunked put with its backup, a second put keeping both backups, stale base hash, hash mismatch, new file, `.png`, `.json`, traversal, symlink, out-of-order chunk, size caps, the save root, a non-DLL and a wrong DLL refused, and the real Release core uploaded byte for byte with its version read back. The `serve` mode answers `coreupload:` too; set `ZGB_TEST_MODDIR` to a test folder for the write commands.
 
 ### Chat history (`chat:recent`)
 
@@ -1131,7 +1132,7 @@ These items have UI placeholders, agreed behaviour, or both. They are **not** im
 
 ### SERVER FILES download: what is left
 
-Done: the read-only `files:` bridge commands (core 1.6.1), the working Settings download button, (core 1.6.4) the scenario/save picker plus `files:catalog`, (core 1.6.5) the wider folder allowlist, and (core 1.6.6) `.epb` in `AllowedExtensions`. See **Server files download** and **Server file commands** above.
+Done: the read-only `files:` bridge commands (core 1.6.1), the working Settings download button, (core 1.6.4) the scenario/save picker plus `files:catalog`, (core 1.6.5) the wider folder allowlist, (core 1.6.6) `.epb` in `AllowedExtensions`, and (core 1.6.7) the current scenario from the started dedicated yaml. See **Server files download** and **Server file commands** above.
 
 Still to do:
 

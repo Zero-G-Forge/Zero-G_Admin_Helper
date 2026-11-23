@@ -19,6 +19,10 @@
 //   and save PDA. ProtocolVersion stays 1.
 // 1.6.6: AllowedExtensions adds .epb so Prefabs blueprints can be listed and downloaded.
 //   MaxFileBytes stays 16 MB; local scenario .epb files are well under 1 MB. ProtocolVersion stays 1.
+// 1.6.7: the current scenario comes from CustomScenario in the dedicated yaml the server was
+//   started with (-dedicated, or dedicated.yaml / dedicated.yml in the server folder). That value
+//   wins over a wrong ActiveScenario from the game (for example "Default Multiplayer"). Inline
+//   # comments and spaces around the colon are accepted. ProtocolVersion stays 1.
 // Safety: two whitelisted roots, whitelisted sub-folders and file types, no ".." or absolute
 // paths, the resolved full path must stay under the root, no symlinks or junctions, size caps.
 // The bridge AuthToken is never read or printed here (the auth handshake already happened).
@@ -105,6 +109,10 @@ namespace ZeroGBridge
         private static string _rootSource = "none";
         private static DateTime _lastRootRefreshUtc = DateTime.MinValue;
 
+        // Tests can set these. The running server leaves them null.
+        public static string ServerDirectoryOverride;
+        public static string[] CommandLineOverride;
+
         // Scan results reused for a few seconds: root name -> (time, files).
         private static readonly Dictionary<string, KeyValuePair<DateTime, List<FileEntry>>> ListCache =
             new Dictionary<string, KeyValuePair<DateTime, List<FileEntry>>>(StringComparer.Ordinal);
@@ -117,26 +125,30 @@ namespace ZeroGBridge
         }
 
         /// <summary>
-        /// Reads the active scenario and save game folders from the game (IApplication.GetPathFor).
-        /// Called from ModMain.OnApplicationUpdate, which runs on the game thread. Throttled to one
-        /// read every 30 seconds. When the game gives no usable folder, dedicated.yaml next to the
-        /// server is used as a fallback (only the CustomScenario and GameName values are read).
+        /// Reads the active scenario and save game folders. Called from ModMain.OnApplicationUpdate,
+        /// which runs on the game thread. Throttled to one read every 30 seconds. CustomScenario and
+        /// GameName from the dedicated yaml the server was started with win over GetPathFor, which
+        /// can report "Default Multiplayer" (or nothing) even when a custom scenario is running.
         /// </summary>
         public static void RefreshRoots(IModApi api)
         {
+            RefreshRoots(api, false);
+        }
+
+        public static void RefreshRoots(IModApi api, bool force)
+        {
             DateTime now = DateTime.UtcNow;
-            if ((now - _lastRootRefreshUtc).TotalSeconds < RootRefreshSeconds) return;
+            if (!force && (now - _lastRootRefreshUtc).TotalSeconds < RootRefreshSeconds) return;
             _lastRootRefreshUtc = now;
 
-            string scenario = null, save = null, source = "none";
+            string gameScenario = null, gameSave = null;
             try
             {
                 var app = api?.Application;
                 if (app != null)
                 {
-                    scenario = SafeGetPath(app, AppFolder.ActiveScenario);
-                    save = SafeGetPath(app, AppFolder.SaveGame);
-                    if (scenario != null || save != null) source = "game";
+                    gameScenario = SafeGetPath(app, AppFolder.ActiveScenario);
+                    gameSave = SafeGetPath(app, AppFolder.SaveGame);
                 }
             }
             catch (Exception ex)
@@ -144,12 +156,20 @@ namespace ZeroGBridge
                 ZgbLog.Write("[ZGB] -WARN- [ServerFiles] GetPathFor failed: " + ex.Message);
             }
 
-            if (scenario == null || save == null)
+            string yamlScenario, yamlSave;
+            ReadDedicatedYamlFolders(gameScenario, gameSave, out yamlScenario, out yamlSave);
+            // The yaml the server was started with is the real pair when those folders exist.
+            string scenario = yamlScenario ?? gameScenario;
+            string save = yamlSave ?? gameSave;
+            string source = "none";
+            if (yamlScenario != null || yamlSave != null)
             {
-                string fallbackScenario, fallbackSave;
-                ReadDedicatedYamlFolders(out fallbackScenario, out fallbackSave);
-                if (scenario == null && fallbackScenario != null) { scenario = fallbackScenario; source = source == "game" ? "game+dedicated.yaml" : "dedicated.yaml"; }
-                if (save == null && fallbackSave != null) { save = fallbackSave; source = source == "game" ? "game+dedicated.yaml" : "dedicated.yaml"; }
+                bool gameAlso = gameScenario != null || gameSave != null;
+                source = gameAlso ? "game+dedicated.yaml" : "dedicated.yaml";
+            }
+            else if (gameScenario != null || gameSave != null)
+            {
+                source = "game";
             }
 
             lock (RootLock)
@@ -188,38 +208,172 @@ namespace ZeroGBridge
             return Path.GetFileName(fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
         }
 
-        // Fallback: dedicated.yaml in the server's working folder names the scenario (CustomScenario) and
-        // the save game (GameName). Only those two keys are read, and only plain folder names are accepted.
-        private static void ReadDedicatedYamlFolders(out string scenarioFolder, out string saveFolder)
+        // CustomScenario and GameName from the yaml the server was started with. Only those two
+        // keys are read, and only plain folder names that exist on disk are accepted.
+        private static void ReadDedicatedYamlFolders(string gameScenario, string gameSave, out string scenarioFolder, out string saveFolder)
         {
             scenarioFolder = null; saveFolder = null;
             try
             {
-                string serverDir = Directory.GetCurrentDirectory();
-                string yamlPath = Path.Combine(serverDir, "dedicated.yaml");
-                if (!File.Exists(yamlPath)) return;
-                string scenarioName = null, gameName = null;
-                foreach (string raw in File.ReadLines(yamlPath))
-                {
-                    string line = raw.Trim();
-                    if (line.StartsWith("CustomScenario:", StringComparison.Ordinal)) scenarioName = YamlValue(line.Substring(15));
-                    else if (line.StartsWith("GameName:", StringComparison.Ordinal)) gameName = YamlValue(line.Substring(9));
-                }
+                string serverDir = ResolveServerDirectory(gameScenario, gameSave);
+                if (string.IsNullOrEmpty(serverDir)) return;
+                string yamlPath = FindDedicatedYamlPath(serverDir, CommandLineOverride ?? Environment.GetCommandLineArgs());
+                if (yamlPath == null) return;
+                string yamlText = ReadAllTextShared(yamlPath);
+                if (yamlText == null) return;
+                string scenarioName, gameName;
+                ReadDedicatedYamlNames(yamlText, out scenarioName, out gameName);
                 if (IsPlainFolderName(scenarioName))
                 {
                     string dir = Path.Combine(serverDir, "Content", "Scenarios", scenarioName);
-                    if (Directory.Exists(dir)) scenarioFolder = Path.GetFullPath(dir);
+                    if (Directory.Exists(dir) && !IsReparsePoint(dir)) scenarioFolder = Path.GetFullPath(dir);
                 }
                 if (IsPlainFolderName(gameName))
                 {
                     string dir = Path.Combine(serverDir, "Saves", "Games", gameName);
-                    if (Directory.Exists(dir)) saveFolder = Path.GetFullPath(dir);
+                    if (!Directory.Exists(dir)) dir = Path.Combine(serverDir, "Saves", gameName);
+                    if (Directory.Exists(dir) && !IsReparsePoint(dir)) saveFolder = Path.GetFullPath(dir);
                 }
             }
             catch (Exception ex)
             {
-                ZgbLog.Write("[ZGB] -WARN- [ServerFiles] dedicated.yaml fallback failed: " + ex.Message);
+                ZgbLog.Write("[ZGB] -WARN- [ServerFiles] dedicated yaml read failed: " + ex.Message);
             }
+        }
+
+        // The server folder: a test override, then the parent of Content/Scenarios or Saves/Games,
+        // then the process working directory.
+        private static string ResolveServerDirectory(string gameScenario, string gameSave)
+        {
+            if (!string.IsNullOrEmpty(ServerDirectoryOverride))
+            {
+                try { return Path.GetFullPath(ServerDirectoryOverride); }
+                catch { return null; }
+            }
+            string inferred = InferServerDirectory(gameScenario) ?? InferServerDirectory(gameSave);
+            if (!string.IsNullOrEmpty(inferred)) return inferred;
+            try { return Directory.GetCurrentDirectory(); }
+            catch { return null; }
+        }
+
+        // Walks up from a game-reported folder when it sits at Content/Scenarios/<name> or
+        // Saves/Games/<name> (or directly under Saves).
+        private static string InferServerDirectory(string rootFolder)
+        {
+            if (string.IsNullOrEmpty(rootFolder)) return null;
+            try
+            {
+                var current = new DirectoryInfo(Path.GetFullPath(rootFolder));
+                if (!current.Exists) return null;
+                var parent = current.Parent;
+                var grand = parent != null ? parent.Parent : null;
+                var great = grand != null ? grand.Parent : null;
+                if (parent != null && grand != null && great != null
+                    && string.Equals(parent.Name, "Scenarios", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(grand.Name, "Content", StringComparison.OrdinalIgnoreCase)
+                    && Directory.Exists(great.FullName))
+                    return great.FullName;
+                if (parent != null && grand != null && great != null
+                    && string.Equals(parent.Name, "Games", StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(grand.Name, "Saves", StringComparison.OrdinalIgnoreCase)
+                    && Directory.Exists(great.FullName))
+                    return great.FullName;
+                if (parent != null && grand != null
+                    && string.Equals(parent.Name, "Saves", StringComparison.OrdinalIgnoreCase)
+                    && Directory.Exists(grand.FullName))
+                    return grand.FullName;
+            }
+            catch { }
+            return null;
+        }
+
+        // The yaml from -dedicated / -dedicated=path, then dedicated.yaml or dedicated.yml in the server folder.
+        public static string FindDedicatedYamlPath(string serverDir, string[] commandLine)
+        {
+            if (commandLine != null)
+            {
+                for (int i = 0; i < commandLine.Length; i++)
+                {
+                    string arg = commandLine[i] ?? "";
+                    string given = null;
+                    if (arg.StartsWith("-dedicated=", StringComparison.OrdinalIgnoreCase)
+                        || arg.StartsWith("/dedicated=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        given = arg.Substring(arg.IndexOf('=') + 1);
+                    }
+                    else if (string.Equals(arg, "-dedicated", StringComparison.OrdinalIgnoreCase)
+                             || string.Equals(arg, "/dedicated", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 < commandLine.Length) given = commandLine[i + 1];
+                    }
+                    if (string.IsNullOrWhiteSpace(given)) continue;
+                    given = given.Trim().Trim('"');
+                    string resolved = given;
+                    if (!Path.IsPathRooted(resolved) && !string.IsNullOrEmpty(serverDir))
+                        resolved = Path.Combine(serverDir, given);
+                    try
+                    {
+                        string full = Path.GetFullPath(resolved);
+                        if (File.Exists(full) && !IsReparsePoint(full)) return full;
+                    }
+                    catch { }
+                }
+            }
+            if (string.IsNullOrEmpty(serverDir)) return null;
+            foreach (string name in new[] { "dedicated.yaml", "dedicated.yml" })
+            {
+                try
+                {
+                    string candidate = Path.Combine(serverDir, name);
+                    if (File.Exists(candidate) && !IsReparsePoint(candidate)) return Path.GetFullPath(candidate);
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        // Reads CustomScenario and GameName from yaml text. Spaces around the colon and trailing
+        // # comments are accepted. Other keys that only contain those words are ignored.
+        public static void ReadDedicatedYamlNames(string yamlText, out string customScenario, out string gameName)
+        {
+            customScenario = null;
+            gameName = null;
+            if (string.IsNullOrEmpty(yamlText)) return;
+            using (var reader = new StringReader(yamlText))
+            {
+                string raw;
+                while ((raw = reader.ReadLine()) != null)
+                {
+                    string value;
+                    if (TryYamlKey(raw, "CustomScenario", out value) && IsPlainFolderName(value))
+                        customScenario = value;
+                    else if (TryYamlKey(raw, "GameName", out value) && IsPlainFolderName(value))
+                        gameName = value;
+                }
+            }
+        }
+
+        private static string ReadAllTextShared(string path)
+        {
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var reader = new StreamReader(stream, Encoding.UTF8, true))
+            {
+                return reader.ReadToEnd();
+            }
+        }
+
+        // "CustomScenario :  Ascension-Reborn   # comment" -> key matches, value is the folder name.
+        private static bool TryYamlKey(string raw, string key, out string value)
+        {
+            value = null;
+            if (string.IsNullOrEmpty(raw) || string.IsNullOrEmpty(key)) return false;
+            string line = raw.Trim();
+            if (line.StartsWith("- ", StringComparison.Ordinal)) line = line.Substring(2).Trim();
+            if (!line.StartsWith(key, StringComparison.Ordinal)) return false;
+            string rest = line.Substring(key.Length).TrimStart();
+            if (!rest.StartsWith(":")) return false;
+            value = YamlValue(rest.Substring(1));
+            return true;
         }
 
         // "  Name   # comment" -> "Name". Quotes are removed.

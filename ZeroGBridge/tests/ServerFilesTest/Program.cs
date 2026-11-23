@@ -438,7 +438,62 @@ namespace ServerFilesTest
                 Check("put ignores a different scenario name and stays on the reported pair",
                     (bool)pinnedPut["ok"] && File.ReadAllBytes(itemsPath).SequenceEqual(pinned) && File.ReadAllText(otherPath) == otherBefore);
 
-                // ---------------- coreupload: with the real core build when it exists
+                // ---------------- 1.6.7: dedicated yaml CustomScenario wins over a wrong game path
+                string rayYaml = "ServerConfig:\n  Srv_Port: 30000                 # public port\nGameConfig:\n  GameName: Zero-G Server - Season 4   # the save folder\n  CustomScenario : Ascension-Reborn    # running scenario, space before colon\n  CustomPlayerTab: Ignore Me\n  IsManagedScenario: false\n";
+                string parsedScenario, parsedSave;
+                ServerFiles.ReadDedicatedYamlNames(rayYaml, out parsedScenario, out parsedSave);
+                Check("yaml parser reads CustomScenario with a space before the colon and a comment", parsedScenario == "Ascension-Reborn");
+                Check("yaml parser reads GameName with a comment", parsedSave == "Zero-G Server - Season 4");
+                string ignoredScenario, ignoredSave;
+                ServerFiles.ReadDedicatedYamlNames("Options:\n  CustomScenarioName: Not This\n  ScenarioName: Not This Either\n", out ignoredScenario, out ignoredSave);
+                Check("yaml parser ignores keys that only contain CustomScenario or Scenario", ignoredScenario == null && ignoredSave == null);
+
+                string customScenarioDir = Path.Combine(serverDir, "Content", "Scenarios", "Ascension-Reborn");
+                string defaultMpDir = Path.Combine(serverDir, "Content", "Scenarios", "Default Multiplayer");
+                string seasonSaveDir = Path.Combine(serverDir, "Saves", "Games", "Zero-G Server - Season 4");
+                Directory.CreateDirectory(Path.Combine(customScenarioDir, "Content"));
+                Directory.CreateDirectory(Path.Combine(defaultMpDir, "Content"));
+                Directory.CreateDirectory(seasonSaveDir);
+                string settingsYaml = Path.Combine(serverDir, "settings.yaml");
+                File.WriteAllText(settingsYaml, rayYaml);
+                string foundEquals = ServerFiles.FindDedicatedYamlPath(serverDir, new[] { "EmpyrionDedicated.exe", "-dedicated=" + settingsYaml });
+                string foundArg = ServerFiles.FindDedicatedYamlPath(serverDir, new[] { "EmpyrionDedicated.exe", "-dedicated", "settings.yaml" });
+                Check("FindDedicatedYamlPath honors -dedicated=path", foundEquals == Path.GetFullPath(settingsYaml));
+                Check("FindDedicatedYamlPath honors -dedicated filename", foundArg == Path.GetFullPath(settingsYaml));
+                File.WriteAllText(Path.Combine(serverDir, "dedicated.yaml"), "GameConfig:\n  CustomScenario: Other Scenario\n");
+                Check("FindDedicatedYamlPath prefers -dedicated over dedicated.yaml",
+                    ServerFiles.FindDedicatedYamlPath(serverDir, new[] { "game.exe", "-dedicated", "settings.yaml" }) == Path.GetFullPath(settingsYaml));
+                Check("FindDedicatedYamlPath falls back to dedicated.yaml",
+                    Path.GetFileName(ServerFiles.FindDedicatedYamlPath(serverDir, new[] { "game.exe" })) == "dedicated.yaml");
+                File.Delete(Path.Combine(serverDir, "dedicated.yaml"));
+
+                var previousDir = ServerFiles.ServerDirectoryOverride;
+                var previousArgs = ServerFiles.CommandLineOverride;
+                try
+                {
+                    ServerFiles.ServerDirectoryOverride = serverDir;
+                    ServerFiles.CommandLineOverride = new[] { "EmpyrionDedicated.exe", "-dedicated", "settings.yaml" };
+                    var wrongGame = new FakeApplication { Scenario = defaultMpDir, Save = Path.Combine(serverDir, "Saves", "Games", "TestSave") };
+                    ServerFiles.RefreshRoots(wrongGame, true);
+                    JObject yamlInfo = Run("files:info");
+                    Check("info prefers CustomScenario from the started yaml over Default Multiplayer",
+                        (string)yamlInfo["scenario"] == "Ascension-Reborn");
+                    Check("info uses GameName from the started yaml",
+                        (string)yamlInfo["saveName"] == "Zero-G Server - Season 4");
+                    Check("info source mentions dedicated.yaml when the yaml pair is used",
+                        ((string)yamlInfo["source"] ?? "").Contains("dedicated.yaml"));
+                }
+                finally
+                {
+                    ServerFiles.CommandLineOverride = previousArgs;
+                    ServerFiles.ServerDirectoryOverride = previousDir;
+                    ServerFiles.RefreshRoots(fake, true);
+                }
+                JObject restored = Run("files:info");
+                Check("info roots restore to the game-reported TestScenario pair after the yaml test",
+                    (string)restored["scenario"] == "TestScenario" && (string)restored["saveName"] == "TestSave");
+
+                                // ---------------- coreupload: with the real core build when it exists
                 string builtCore = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "CoreProject", "bin", "Release", "net48", "ZeroGBridge.Core.dll"));
                 Check("corestatus empty at first", RunCore("coreupload:status")["files"].Count() == 0);
                 Check("coreupload refuses a non-DLL", (string)SendInChunks(null, null, Encoding.UTF8.GetBytes("not a dll"), null, 64, "dll")["error"] == "bad_core");
