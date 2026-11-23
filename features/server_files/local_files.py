@@ -1,9 +1,10 @@
 ## =====================================================================
 ## MODULE: features/server_files/local_files.py
 ## DESCRIPTION: Finds things inside the downloaded server files on this PC, for the Library and the editors.
-## Everything here only reads data/server_files/<scenario>/; it never reads the local base game and never
-## changes a file. The scenario folder is the one the last download went to (app_settings), so it works
-## with whatever scenario name the server reported (for example "Default Multiplayer" or "Ascension-Reborn").
+## Everything here only reads data/server_files/<scenario>/; it never reads the local base game, never
+## changes a file, and never mixes files from another downloaded scenario. The folder is the Settings
+## scenario choice for the active server when that download exists, otherwise the last download
+## (app_settings), otherwise the newest manifest.
 ## Layout (made by the download):
 ##   data/server_files/<scenario>/scenario/<path on the server>
 ##   data/server_files/<scenario>/save/<path on the server>
@@ -38,6 +39,7 @@ IMAGE_TYPES = (".jpg", ".jpeg", ".png")
 
 ## The items file and its English names, relative to a root.
 ITEMS_FILE = ("Content", "Configuration", "ItemsConfig.ecf")
+BLOCKS_FILE = ("Content", "Configuration", "BlocksConfig.ecf")
 NAMES_FILE = ("Content", "Extras", "Localization.csv")
 
 ## Folder names inside a scenario folder that are ZAH's own (never server files).
@@ -56,8 +58,11 @@ ROOT_ORDER = ("save", "scenario")
 ## Otherwise the newest folder there that has a manifest is used (fail closed: None if there is none).
 def current_scenario_folder():
     try:
-        saved = load_app_settings().get("server_files_local_folder", "")
         base_full = os.path.abspath(file_store.SERVER_FILES_DIR)
+        selected = _selected_scenario_folder(base_full)
+        if selected:
+            return selected
+        saved = load_app_settings().get("server_files_local_folder", "")
         if saved:
             saved_full = os.path.abspath(saved)
             if os.path.dirname(saved_full) == base_full and _has_downloaded_files(saved_full):
@@ -88,6 +93,26 @@ def _has_downloaded_files(folder):
 ## Name shown to people: the scenario folder's name, or "" when there is none.
 def scenario_label(folder):
     return os.path.basename(folder) if folder else ""
+
+
+## The Settings scenario choice for the active server, if that download is still on this PC.
+def _selected_scenario_folder(base_full):
+    try:
+        from features.bridge.server_settings import get_active_profile
+        from features.server_files.download_settings import load_server_download_settings
+        profile = get_active_profile()
+        name = profile.get("server_name") if isinstance(profile, dict) else None
+        if not name:
+            return None
+        chosen = load_server_download_settings(name).get("scenario")
+        if not chosen:
+            return None
+        folder = os.path.abspath(file_store.scenario_folder(chosen))
+        if os.path.dirname(folder) == base_full and _has_downloaded_files(folder):
+            return folder
+    except Exception:
+        return None
+    return None
 
 # endregion
 
@@ -181,5 +206,82 @@ def build_image_index(folder):
                 if extension.lower() in IMAGE_TYPES and stem.lower() not in image_index:
                     image_index[stem.lower()] = os.path.join(images_folder, file_name)
     return image_index
+
+
+## {item or block id: block dict} from BlocksConfig.ecf in this scenario folder only (save copy first).
+def load_block_index(folder):
+    block_index = {}
+    root, path = find_file(folder, BLOCKS_FILE)
+    if path is None:
+        return block_index
+    try:
+        from features.shared.ecf_parser import parse_ecf_blocks, resolve_refs
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            blocks = resolve_refs(parse_ecf_blocks(handle.read()))
+    except Exception as e:
+        print(f"[ERROR] LocalServerFiles: Could not read BlocksConfig.ecf: {e}")
+        return block_index
+    for block in blocks:
+        if block.get("type") != "Block":
+            continue
+        block_id = str((block.get("header") or {}).get("Id") or "").strip()
+        if not block_id.isdigit():
+            continue
+        props = block.get("props") or {}
+        def _val(key):
+            prop = props.get(key)
+            return prop.get("value") if prop else ""
+        block_index[block_id] = {
+            "id": block_id,
+            "name": (block.get("header") or {}).get("Name", ""),
+            "class": _val("Class"),
+            "force_max_count": _val("ForceMaxCount"),
+            "can_pickup": _val("CanPickup"),
+            "root": root,
+        }
+    return block_index
+
+
+def block_is_giveable(block):
+    """False for cores and ForceMaxCount blocks, which Request_Player_AddItem will not put in an inventory."""
+    if not block:
+        return False
+    if str(block.get("class") or "").strip().lower() == "core":
+        return False
+    if str(block.get("force_max_count") or "").strip().lower() in ("true", "1", "yes"):
+        return False
+    return True
+
+
+## None when GIVE ITEM may send this ID. Otherwise a short reason for the button tooltip.
+def item_give_reason(item, block_index):
+    if not item:
+        return "Pick an item first."
+    item_id = str(item.get("id") or "").strip()
+    if not item_id.isdigit():
+        return "Pick an item first."
+    block = (block_index or {}).get(item_id)
+    if not block:
+        return None
+    item_name = item.get("display_name") or item.get("name") or "that item"
+    block_name = block.get("name") or "a block"
+    if not block_is_giveable(block):
+        return ("ID " + item_id + " is the block " + block_name
+                + " in this scenario, not " + item_name
+                + ". The game will not add it to an inventory.")
+    return None
+
+
+## Extra tooltip when the ID is also a giveable block (the game may add the block, not the item).
+def item_give_warning(item, block_index):
+    if not item:
+        return ""
+    item_id = str(item.get("id") or "").strip()
+    block = (block_index or {}).get(item_id)
+    if not block or not block_is_giveable(block):
+        return ""
+    block_name = block.get("name") or "a block"
+    return ("ID " + item_id + " is also the block " + block_name
+            + " in this scenario. The game may add that block.")
 
 # endregion

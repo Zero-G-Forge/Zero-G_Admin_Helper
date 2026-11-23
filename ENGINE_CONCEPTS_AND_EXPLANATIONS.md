@@ -335,7 +335,7 @@ When a game is first started, the scenario's files are copied into the save. Aft
 
 ### Why the scenario name is not written into the code
 
-The download names the local folder after the scenario you picked (or, without a pick, the name the bridge reports). ZAH looks that folder up from Settings instead of assuming a name, so a switch from "Default Multiplayer" to "Ascension-Reborn" needs no code change. `Ascension-Reborn` and `Zero-G Server - Season 4` are only used as the starting highlight when those folders are actually in the catalog.
+The download names the local folder after the scenario you picked (or, without a pick, the name the bridge reports). The Library and the editors then read only that selected folder (plus its save-side overrides), never another downloaded scenario sitting beside it. In some scenarios an item ID and a block ID can be the same number: GIVE ITEM will not send an ID that is a core or ForceMaxCount block, because the game will not put that block in an inventory.
 
 ### Pictures: one look at the folder, then a lookup table
 

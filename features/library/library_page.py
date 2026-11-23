@@ -39,7 +39,8 @@ from features.library.item_stats_dialog import ItemStatsDialog
 
 ## Where the downloaded server files are, and the item pictures inside them.
 from features.server_files.local_files import (NO_FILES_TEXT, ITEMS_FILE, NAMES_FILE, current_scenario_folder,
-                                               find_file, build_image_index, find_item_image)
+                                               find_file, build_image_index, find_item_image,
+                                               load_block_index, item_give_reason, item_give_warning)
 
 # endregion
 
@@ -106,6 +107,7 @@ class LibraryPage(QWidget):
 
         ## The downloaded scenario folder the items came from (None = nothing downloaded).
         self.server_folder = None
+        self.block_index = {}
         self.setup_widgets()
 
         ## Fill ITEMS and BLUEPRINTS from the downloaded server files (or show how to download them) before the first tab shows.
@@ -399,11 +401,12 @@ class LibraryPage(QWidget):
     # region Items
 
     def load_server_files(self, folder=None):
-        """Loads ITEMS and BLUEPRINTS from the downloaded server files. folder=None uses the last download. Returns how many items loaded."""
+        """Loads ITEMS and BLUEPRINTS from the downloaded server files. folder=None uses the selected or last download. Returns how many items loaded."""
         try:
             if folder is None:
                 folder = current_scenario_folder()
             self.server_folder = folder
+            self.block_index = load_block_index(folder) if folder else {}
             items_root, items_path = (None, None)
             if folder is not None:
                 items_root, items_path = find_file(folder, ITEMS_FILE)
@@ -561,8 +564,11 @@ class LibraryPage(QWidget):
             reason = server_actions.block_reason(self, "give_item") or ("" if item_ok else "Pick an item first.")
             if not reason and self.cmb_player.currentData() is None:
                 reason = "Pick an online player first."
+            if not reason and item_ok:
+                reason = item_give_reason(self.picked_item, self.block_index) or ""
+            warning = item_give_warning(self.picked_item, self.block_index) if item_ok else ""
             self.btn_add_pending.setEnabled(reason == "")
-            self.btn_add_pending.setToolTip(reason or "Adds this item to that player (Safety Flow).")
+            self.btn_add_pending.setToolTip(reason or warning or "Adds this item to that player (Safety Flow).")
             self.btn_add_template.setEnabled(item_ok)
             self.btn_add_template.setToolTip("Adds this item and quantity to a template on this PC." if item_ok else "Pick an item first.")
         except Exception as e:

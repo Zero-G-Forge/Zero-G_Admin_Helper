@@ -301,7 +301,7 @@ Rows are kept for 30 days. List calls cap the count (default 50, hard max 200).
 
 The Library and both editors read only `data/server_files/<scenario>/`, the folder the Settings download made. They never read the local base game.
 
-- **Which scenario:** `local_files.current_scenario_folder()` uses `server_files_local_folder` from `app_settings` when it is a folder directly inside `data/server_files` with a manifest. Otherwise it takes the newest such folder. No folder means the empty state. The scenario name is whatever `files:info` reported, so nothing is hard-coded.
+- **Which scenario:** `local_files.current_scenario_folder()` uses the Settings scenario choice for the active server when that download exists under `data/server_files`. Otherwise it uses `server_files_local_folder` from `app_settings` when that is a folder directly inside `data/server_files` with a manifest. Otherwise it takes the newest such folder. It never mixes files from another downloaded scenario. No folder means the empty state.
 - **Which copy:** a path that exists in both `save/` and `scenario/` is read from `save/`, because the running game uses the save's copy. `ItemsConfig.ecf` and `Localization.csv` are looked up separately, so one can come from the save and the other from the scenario.
 - **Empty state:** every page shows `No server files yet. Use Settings > DOWNLOAD SERVER FILES.`
 
@@ -1119,7 +1119,7 @@ Page wiring:
 | Servers | BROADCAST (one server) | `api:Request_InGameMessage_AllPlayers` to that server | yes |
 | Servers | BROADCAST TO ALL SERVERS | `api:Request_InGameMessage_AllPlayers` to every answering server | yes |
 | Items (Library) | PLAYER list | `plys` (online players with an entity id), read when the page shows | no |
-| Items (Library) | GIVE ITEM (was ADD TO PENDING EDITS) | `api:Request_Player_AddItem {"id":N,"item":{"id":X,"count":Q}}` | yes |
+| Items (Library) | GIVE ITEM (was ADD TO PENDING EDITS) | `api:Request_Player_AddItem {"id":N,"item":{"id":X,"count":Q}}` | yes, and the button stays off when that ID is a core or ForceMaxCount block in the same scenario's `BlocksConfig.ecf` (for example ID 1402 is `CoreNoCPU`, not `AlienCookie`) |
 | Items (Library) | ADD TO TEMPLATE | none: adds the item and quantity to STARTER / EXPLORER / BUILDER in `data/loadout_templates.json` | no |
 | BP Editor (Library) | BLUEPRINTS tab | none: reads downloaded `Prefabs/**/*.epb` (same `LibraryPage`) | no |
 | ECF / PDA Editor | DOWNLOAD FOLDER FROM SERVER (READ-ONLY) | the `files:` download (`ServerFileDownloadWorker`), then `load_server_files` | no |
@@ -1151,7 +1151,7 @@ Still to do:
 - Lookup folders, once the scenario is downloaded: `SharedData/Content/Images` and `SharedData/Content/Bundles/ItemIcons` under `data/server_files/<scenario>/`. Most item pngs are in `ItemIcons`. `Images` is mostly UI and PDA jpgs, and only a few item names match there.
 - An item with no image falls back to the drawn hex tile.
 - Files in those folders that do not match an item name or `CustomIcon` (for example PDA pictures) are skipped.
-- Done (Nov 22, 2026): `local_files.build_image_index` reads both folders in the downloaded save and scenario copies (save first, Images before ItemIcons, `.jpg` / `.jpeg` before `.png`, names compared without case). The Library looks up the item `Name`, then `CustomIcon`. The grid tile still draws the picture cut to the hex shape (`item_tiles.draw_hex_picture`), with the category colour as the edge. The detail card (above VIEW ALL STATS) and the Item Stats window show the **whole** picture, scaled to fit with its aspect ratio kept (`item_tiles.make_fit_pixmap`), not cropped to a hex. The stats window splits the top half 50/50 (large full picture on the left, Name, FILE NAME, ID, CATEGORY and TEMPLATE on the right) and puts only the STAT / VALUE tree in the bottom half; both halves stretch when the window is resized. Pictures are cached by path and size (`PICTURE_CACHE`).
+- Done (Nov 22, 2026): `local_files.build_image_index` reads both folders in the downloaded save and scenario copies (save first, Images before ItemIcons, `.jpg` / `.jpeg` before `.png`, names compared without case). The Library looks up the item `Name`, then `CustomIcon`. The grid tile still draws the picture cut to the hex shape (`item_tiles.draw_hex_picture`), with the category colour as the edge. The detail card (above VIEW ALL STATS) and the Item Stats window show the **whole** picture, scaled to fit with its aspect ratio kept (`item_tiles.make_fit_pixmap`), not cropped to a hex. The stats window splits the top half 50/50 (large full picture on the left, Name, FILE NAME, ID, CATEGORY and TEMPLATE on the right) and puts only the STAT / VALUE tree in the bottom half; both halves stretch when the window is resized. Pictures are cached by path and size (`PICTURE_CACHE`). GIVE ITEM also reads `BlocksConfig.ecf` from that same folder (save copy first). If the item's ID is a core or `ForceMaxCount` block, the button stays off and the tooltip names the block. A giveable block that shares the ID gets a warning tooltip (the game may add the block).
 
 ### LIVE MODE
 

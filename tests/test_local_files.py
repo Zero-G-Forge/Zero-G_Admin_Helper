@@ -230,4 +230,42 @@ def test_pda_editor_empty_state(qapp):
     assert page.code_editor.placeholderText() == local_files.NO_FILES_TEXT
     page.deleteLater()
 
+
+def test_library_uses_only_the_selected_scenario_and_blocks_ungiveable_ids(tmp_path, monkeypatch):
+    from features.bridge import server_settings
+    from features.library.item_library import load_items
+    from features.server_files import download_settings
+
+    default_folder = build_download(tmp_path, "Default Multiplayer")
+    write(os.path.join(default_folder, "save", "Content", "Configuration", "ItemsConfig.ecf"),
+          "{ +Item Id: 99, Name: OnlyInDefault\n  Category: Food\n}\n")
+    chosen_folder = build_download(tmp_path, "Ascension-Reborn")
+    write(os.path.join(chosen_folder, "save", "Content", "Configuration", "ItemsConfig.ecf"),
+          "{ +Item Id: 1402, Name: AlienCookie, Ref: FoodTemplate\n  Category: Food\n}\n"
+          "{ +Item Id: 1617, Name: Soup, Ref: FoodTemplate\n  Category: Food\n}\n"
+          "{ +Item Id: 88, Name: OnlyInAscension\n  Category: Devices\n}\n")
+    write(os.path.join(chosen_folder, "scenario", "Content", "Configuration", "BlocksConfig.ecf"),
+          "{ +Block Id: 1402, Name: CoreNoCPU, Ref: Core\n  Class: Core\n  ForceMaxCount: true\n}\n"
+          "{ +Block Id: 1617, Name: ModularWingLongL\n  Category: BuildingBlocks\n}\n")
+    ## Last download points at Default Multiplayer; Settings still says Ascension-Reborn.
+    app_settings.save_app_setting("server_files_local_folder", default_folder)
+    monkeypatch.setattr(server_settings, "get_active_profile", lambda: {"server_name": "Zero-G Forge Reborn"})
+    monkeypatch.setattr(download_settings, "load_server_download_settings",
+                        lambda name: {"scenario": "Ascension-Reborn"})
+    folder = local_files.current_scenario_folder()
+    assert os.path.abspath(folder) == os.path.abspath(chosen_folder)
+    root, items_path = local_files.find_file(folder, local_files.ITEMS_FILE)
+    text = open(items_path, encoding="utf-8").read()
+    assert "OnlyInAscension" in text and "OnlyInDefault" not in text
+    items = load_items(None, items_path=items_path, names_path="")
+    names = {item["name"] for item in items}
+    assert names == {"AlienCookie", "Soup", "OnlyInAscension"}
+    blocks = local_files.load_block_index(folder)
+    cookie_reason = local_files.item_give_reason({"id": "1402", "name": "AlienCookie", "display_name": "Alien Cookie"}, blocks)
+    assert cookie_reason and "CoreNoCPU" in cookie_reason and "Alien Cookie" in cookie_reason
+    assert local_files.item_give_reason({"id": "88", "name": "OnlyInAscension", "display_name": "Only In Ascension"}, blocks) is None
+    assert local_files.item_give_reason({"id": "1617", "name": "Soup", "display_name": "Soup"}, blocks) is None
+    warning = local_files.item_give_warning({"id": "1617", "name": "Soup", "display_name": "Soup"}, blocks)
+    assert "ModularWingLongL" in warning
+
 # endregion
