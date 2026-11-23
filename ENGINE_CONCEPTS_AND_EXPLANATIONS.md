@@ -341,6 +341,18 @@ The download names the local folder after the scenario you picked (or, without a
 
 The Library may hold over a thousand items. Asking the disk "is there a picture for this one?" a thousand times is slow, so ZAH lists the Images and `Bundles/ItemIcons` folders once and builds a table from lower-case file name to picture file. Each item looks up its `Name`, then its `CustomIcon` if the name has no file. The picture is cut to the hex shape with a **clip path**, which works like a stencil: paint only lands inside the shape.
 
+### Blueprints come from the Prefabs folder
+
+A blueprint in Empyrion is an `.epb` file. The server keeps them in the scenario's top-level `Prefabs` folder (not the `SharedData/Content/Prefabs` folder, which is mostly preview pictures and sounds). ZAH reads those files from the downloaded save and scenario copies, the same way it reads items, and the save copy wins when both have the same name.
+
+The file itself starts with a short header. One byte in that header says whether the blueprint is a small vessel, a capital vessel, a hover vessel, or an asteroid. Bases and world points of interest share the same header value, so ZAH then looks at the file name: a name with `BA` or `Base` stays under BA, and a name with `POI`, or with no type token, goes under POI. That is why the BLUEPRINTS tab has a POI button next to BA, CV, SV and HV.
+
+The current download may still have no `.epb` files. Core 1.6.5 already allows the `Prefabs` folder, but it does not yet list or send `.epb` files, and ZAH's download types do not include them either. Those two changes are still needed before a Settings download can fill the BLUEPRINTS tab from the server. This step did not change the core.
+
+### Nothing shows until you pick a category
+
+A library with thousands of items or blueprints is noisy if everything appears at once. Both lists start empty. Clicking a category button, such as WEAPONS or BA, shows only that group. The FILTER button is the only way to tick more than one group at a time. The search box still narrows whatever is already selected.
+
 ## Validating, Comparing, and Saving Edits
 
 ### The downloaded copy stays untouched

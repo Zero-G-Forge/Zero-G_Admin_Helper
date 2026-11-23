@@ -32,6 +32,11 @@ GROUP_COLORS = {
     "ORES": "#ff9e57",
     "DEVICES": "#7ee787",
     "FOOD": "#d7e36b",
+    "BA": "#5dade2",
+    "CV": "#c39bd3",
+    "SV": "#58d68d",
+    "HV": "#f5b041",
+    "POI": "#f0c14d",
     "": "#8fa6b8",
 }
 

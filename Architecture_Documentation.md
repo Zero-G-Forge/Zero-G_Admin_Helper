@@ -859,11 +859,16 @@ class CheatCheckerPage(QWidget)
 
 ```python
 def load_items(content_folder)
+def load_blueprints(folder)
+def classify_blueprint(file_name, path=None)
 
 class LibraryPage(QWidget):
     def __init__(self, start_tab="items", parent=None)
+    def load_server_files(self, folder=None)
     def load_items_from(self, content_folder)
     def _apply_filters(self, *args)
+    def _on_category_clicked(self, btn)
+    def _on_filter_menu_toggled(self, *args)
     def _on_tile_picked(self, item)
     def _show_item_stats(self)
 
@@ -888,6 +893,10 @@ class PdaYamlHighlighter(QSyntaxHighlighter)
 ```
 
 Item filter groups, in button order: `WEAPONS`, `ARMOR`, `MEDICAL`, `AMMO`, `COMPONENTS`, `ORES`, `DEVICES`, `FOOD`. Items with `ShowUser: No` are omitted. Display names come from `Localization.csv`.
+
+Blueprint filter groups, in button order: `BA`, `CV`, `SV`, `HV`, `POI`. `load_blueprints` reads `.epb` files under `Prefabs/` in the downloaded save and scenario copies (save first; a stand-alone `Prefabs/` folder is also accepted). The `.epb` type byte sets `SV` / `CV` / `HV` / asteroid `POI`. Type 2 (base-shaped) uses the file name: a `BA` or `Base` token stays under `BA`, and a `POI` token or no type token goes under `POI`.
+
+Both the ITEMS and BLUEPRINTS grids stay empty until a category button is clicked. A plain click is a single choice. The only way to show more than one category at a time is the `FILTER` button, which opens a checkbox menu (`QMenu#LibraryFilterMenu`). The search box still narrows the current selection.
 
 `ItemStatsDialog` sections: **GENERAL**, one **MODE n** section per child block, **OTHER**, and collapsed **FILE DETAILS**. Inherited Ref values are marked. Units are appended from the property `formatter` (`Kilogram` to `kg`, `Liter` to `L`, `ROF` to `s`, `WattHour` to `Wh`).
 
@@ -1105,7 +1114,7 @@ Page wiring:
 | Items (Library) | PLAYER list | `plys` (online players with an entity id), read when the page shows | no |
 | Items (Library) | GIVE ITEM (was ADD TO PENDING EDITS) | `api:Request_Player_AddItem {"id":N,"item":{"id":X,"count":Q}}` | yes |
 | Items (Library) | ADD TO TEMPLATE | none: adds the item and quantity to STARTER / EXPLORER / BUILDER in `data/loadout_templates.json` | no |
-| BP Editor (Library) | BLUEPRINTS tab | none: no blueprint data source yet | empty state |
+| BP Editor (Library) | BLUEPRINTS tab | none: reads downloaded `Prefabs/**/*.epb` (same `LibraryPage`) | no |
 | ECF / PDA Editor | DOWNLOAD FOLDER FROM SERVER (READ-ONLY) | the `files:` download (`ServerFileDownloadWorker`), then `load_server_files` | no |
 | Settings | CANCEL DOWNLOAD | none on the server: `request_stop` on the download thread | no |
 | Users | Live file editing checkbox | none on the game server: login service `/users/live_files` (owner or developer key) | no (login service only) |
@@ -1124,6 +1133,8 @@ Still to do:
 - Done (Nov 22, 2026): Settings can pick any scenario folder under `Content/Scenarios` and any save folder under `Saves/Games`, independently of the live yaml/game pair. The default starting names are `Ascension-Reborn` and `Zero-G Server - Season 4` when those folders are in the catalog.
 - Check the real scenario's folder layout with `files:info` (`topFolders`) and adjust the `AllowedFolders` table in `ServerFiles.cs` if the real folders differ. The save game folders in particular are guesses until seen on the live server.
 - Done (Nov 22, 2026): Items, ECF Editor, and PDA Editor read from `data/server_files/<scenario>/`, **never** from local base-game Content files.
+- Done (Nov 22, 2026): the Library BLUEPRINTS tab reads `.epb` files from `Prefabs/` in that same download (save copy first). A `POI` category button sits next to `BA` / `CV` / `SV` / `HV`. Both lists stay empty until a category is clicked; more than one category is chosen only through the `FILTER` checkbox menu.
+- Still needed before those blueprints can be downloaded from a live server: add `.epb` to ZeroGBridge `AllowedExtensions` in `ServerFiles.cs`, and add a blueprints / `.epb` type to ZAH `FILE_TYPE_EXTENSIONS`. The `Prefabs` folder is already in the core 1.6.5 folder allowlist, but the current download has only preview pictures under `SharedData/Content/Prefabs` (no `.epb`). This step did not change the core.
 - Done (Nov 22, 2026): CANCEL DOWNLOAD on the Settings page calls the worker's `request_stop`; the worker stops between two requests and reports `Download stopped.` Half-finished `.part` files are removed.
 - Done (Nov 22, 2026): the editors' DOWNLOAD FOLDER button runs the same read-only download. Only one download runs at a time across ZAH (`settings_page.RUNNING_DOWNLOADS`).
 

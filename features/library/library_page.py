@@ -8,7 +8,9 @@
 ## (Nov 22, 2026: on opening, ITEMS reads the downloaded server files through load_server_files, never the
 ## local base game. Pictures come from the downloaded Images and Bundles/ItemIcons folders,
 ## matched to the item Name, then to CustomIcon, as <name>.jpg or .png.)
-## BLUEPRINTS has no data yet, so it shows "nothing yet".
+## BLUEPRINTS reads .epb files from Prefabs in those same downloaded files (save copy first).
+## Both lists stay empty until a category button is clicked. A plain click shows only that
+## category. The FILTER button is the only way to pick more than one, through a checkbox menu.
 ## GIVE ITEM changes a live player, so its button stays off until Ray OKs that step.
 ## Wired (Nov 22, 2026): GIVE ITEM sends api:Request_Player_AddItem through the Safety Flow (admin and up), to
 ## an online player from plys. ADD TO TEMPLATE saves the picked item and quantity on this PC (loadouts.py).
@@ -17,9 +19,10 @@
 
 # region Imports
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,
-                             QPushButton, QButtonGroup, QLineEdit, QSpinBox, QComboBox, QInputDialog)
+                             QPushButton, QButtonGroup, QLineEdit, QSpinBox, QComboBox, QInputDialog, QMenu)
 
 ## Read-only bridge reads, the Safety Flow, and loadout templates saved on this PC.
 from features.shared import server_actions, loadouts
@@ -29,6 +32,7 @@ from features.dashboard.dashboard_page import make_card, spread_letters
 
 ## Item data, the hex tile grid and the full stats window.
 from features.library.item_library import load_items
+from features.library.blueprint_library import load_blueprints
 from features.library.item_tiles import TileFlowArea, make_hex_pixmap
 from features.library.item_stats_dialog import ItemStatsDialog
 
@@ -47,13 +51,25 @@ LIBRARY_TABS = [("items", "ITEMS"), ("blueprints", "BLUEPRINTS")]
 ## Filter buttons under the search box, different for each tab.
 TAB_FILTERS = {
     "items": ["WEAPONS", "ARMOR", "MEDICAL", "AMMO", "COMPONENTS", "ORES", "DEVICES", "FOOD"],
-    "blueprints": ["BA", "CV", "SV", "HV"],
+    "blueprints": ["BA", "CV", "SV", "HV", "POI"],
 }
 
-## What the empty grid says on each tab.
+## What the empty grid says on each tab when nothing is loaded.
 TAB_EMPTY_TEXT = {
     "items": "No items loaded yet.",
     "blueprints": "No blueprints loaded yet.",
+}
+
+## Shown when files are loaded but no category is selected yet.
+PICK_CATEGORY_TEXT = {
+    "items": "Pick a category to see items.",
+    "blueprints": "Pick a category to see blueprints.",
+}
+
+## Shown when the current category (and search text) matches nothing.
+NO_MATCH_TEXT = {
+    "items": "No items match.",
+    "blueprints": "No blueprints match.",
 }
 
 ## Tooltip for every button that isn't wired up yet.
@@ -76,9 +92,14 @@ class LibraryPage(QWidget):
         self.active_tab = start_tab if start_tab in TAB_FILTERS else "items"
         self.tab_buttons = {}
         self.filter_buttons = []
+        self.filter_actions = {}
+        self.btn_multi_filter = None
+        self.filter_menu = None
+        self._syncing_filters = False
 
-        ## Loaded items, and the one picked in the grid (None until a tile is clicked).
+        ## Loaded items and blueprints, and the one picked in the grid (None until a tile is clicked).
         self.items = []
+        self.blueprints = []
         self.picked_item = None
         self.stats_dialog = None
 
@@ -86,7 +107,7 @@ class LibraryPage(QWidget):
         self.server_folder = None
         self.setup_widgets()
 
-        ## Fill ITEMS from the downloaded server files (or show how to download them) before the first tab shows.
+        ## Fill ITEMS and BLUEPRINTS from the downloaded server files (or show how to download them) before the first tab shows.
         self.load_server_files()
         self._on_tab_clicked(self.active_tab)
         self._wire_give_and_templates()
@@ -267,63 +288,154 @@ class LibraryPage(QWidget):
                 self.tab_buttons[tab_key].setChecked(True)
 
             ## Take the old filter buttons out, then add the ones for this tab.
-            for btn_old in self.filter_buttons:
-                self.filter_group.removeButton(btn_old)
-                self.filter_row.removeWidget(btn_old)
-                btn_old.deleteLater()
-            self.filter_buttons = []
-            while self.filter_row.count() > 0:
-                self.filter_row.takeAt(0)
-            for filter_text in TAB_FILTERS.get(tab_key, []):
-                btn_filter = QPushButton(filter_text)
-                btn_filter.setObjectName("StructFilterButton")
-                btn_filter.setCheckable(True)
-                btn_filter.setFixedHeight(30)
-                btn_filter.setCursor(Qt.CursorShape.PointingHandCursor)
+            self._rebuild_filter_row(tab_key)
 
-                ## Turning a filter on or off narrows the grid straight away.
-                btn_filter.toggled.connect(self._apply_filters)
-                self.filter_group.addButton(btn_filter)
-                self.filter_buttons.append(btn_filter)
-                self.filter_row.addWidget(btn_filter)
-            self.filter_row.addStretch()
+            ## Each tab has its own list; the grid starts empty until a category is clicked.
+            if tab_key == "blueprints":
+                self.tile_area.set_items(self.blueprints)
+            else:
+                self.tile_area.set_items(self.items)
             self.lbl_grid_empty.setText(TAB_EMPTY_TEXT.get(tab_key, ""))
             self._apply_filters()
         except Exception as e:
             print(f"[ERROR] LibraryPage: Failed to switch tab to {tab_key}: {e}")
+
+    def _rebuild_filter_row(self, tab_key):
+        """Rebuilds the category buttons and the FILTER checkbox menu for the active tab."""
+        for btn_old in self.filter_buttons:
+            self.filter_group.removeButton(btn_old)
+            self.filter_row.removeWidget(btn_old)
+
+            ## Hide and unparent now; deleteLater alone leaves the old buttons visible
+            ## in their last position until the event loop runs.
+            btn_old.hide()
+            btn_old.setParent(None)
+            btn_old.deleteLater()
+        self.filter_buttons = []
+        if self.btn_multi_filter is not None:
+            self.filter_row.removeWidget(self.btn_multi_filter)
+            self.btn_multi_filter.hide()
+            self.btn_multi_filter.setParent(None)
+            self.btn_multi_filter.deleteLater()
+            self.btn_multi_filter = None
+        if self.filter_menu is not None:
+            self.filter_menu.deleteLater()
+            self.filter_menu = None
+        self.filter_actions = {}
+        while self.filter_row.count() > 0:
+            self.filter_row.takeAt(0)
+        for filter_text in TAB_FILTERS.get(tab_key, []):
+            btn_filter = QPushButton(filter_text)
+            btn_filter.setObjectName("StructFilterButton")
+            btn_filter.setCheckable(True)
+            btn_filter.setFixedHeight(30)
+            btn_filter.setCursor(Qt.CursorShape.PointingHandCursor)
+
+            ## A plain click shows only this category; more than one is chosen in FILTER.
+            btn_filter.clicked.connect(lambda _checked, btn=btn_filter: self._on_category_clicked(btn))
+            self.filter_group.addButton(btn_filter)
+            self.filter_buttons.append(btn_filter)
+            self.filter_row.addWidget(btn_filter)
+        self.filter_row.addStretch()
+        self.filter_menu = QMenu(self)
+        self.filter_menu.setObjectName("LibraryFilterMenu")
+        for filter_text in TAB_FILTERS.get(tab_key, []):
+            action = self.filter_menu.addAction(filter_text)
+            action.setCheckable(True)
+            action.toggled.connect(self._on_filter_menu_toggled)
+            self.filter_actions[filter_text] = action
+        self.btn_multi_filter = QPushButton("FILTER")
+        self.btn_multi_filter.setObjectName("StructFilterButton")
+        self.btn_multi_filter.setFixedHeight(30)
+        self.btn_multi_filter.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_multi_filter.setToolTip("Pick more than one category.")
+        self.btn_multi_filter.clicked.connect(self._show_filter_menu)
+        self.filter_row.addWidget(self.btn_multi_filter)
+
+    def _on_category_clicked(self, btn):
+        """A plain category click is a single choice: only that button stays on."""
+        if self._syncing_filters:
+            return
+        self._syncing_filters = True
+        try:
+            for other in self.filter_buttons:
+                other.setChecked(other is btn)
+            for text, action in self.filter_actions.items():
+                action.setChecked(text == btn.text())
+        finally:
+            self._syncing_filters = False
+        self._apply_filters()
+
+    def _on_filter_menu_toggled(self, *args):
+        """Applies the FILTER checkboxes. Category buttons only light when exactly one is checked."""
+        if self._syncing_filters:
+            return
+        self._syncing_filters = True
+        try:
+            lit = {text for text, action in self.filter_actions.items() if action.isChecked()}
+            for btn in self.filter_buttons:
+                btn.setChecked(len(lit) == 1 and btn.text() in lit)
+        finally:
+            self._syncing_filters = False
+        self._apply_filters()
+
+    def _show_filter_menu(self):
+        """Opens the FILTER checkbox menu under the FILTER button."""
+        if self.filter_menu is None or self.btn_multi_filter is None:
+            return
+        pos = self.btn_multi_filter.mapToGlobal(QPoint(0, self.btn_multi_filter.height()))
+        self.filter_menu.popup(pos)
+
+    def _selected_groups(self):
+        """The categories currently checked in FILTER (kept in sync with a single category click)."""
+        if self.filter_actions:
+            return {text for text, action in self.filter_actions.items() if action.isChecked()}
+        return {btn.text() for btn in self.filter_buttons if btn.isChecked()}
 
     # endregion
 
     # region Items
 
     def load_server_files(self, folder=None):
-        """Loads ITEMS from the downloaded server files. folder=None uses the last download. Returns how many loaded."""
+        """Loads ITEMS and BLUEPRINTS from the downloaded server files. folder=None uses the last download. Returns how many items loaded."""
         try:
             if folder is None:
                 folder = current_scenario_folder()
             self.server_folder = folder
-            items_root, items_path = find_file(folder, ITEMS_FILE)
+            items_root, items_path = (None, None)
+            if folder is not None:
+                items_root, items_path = find_file(folder, ITEMS_FILE)
             if items_path is None:
 
                 ## Nothing downloaded (or no ItemsConfig.ecf in it): the grid says how to get the files.
                 TAB_EMPTY_TEXT["items"] = NO_FILES_TEXT if folder is None else "The downloaded server files have no ItemsConfig.ecf."
                 self.items = []
-                self.tile_area.set_items(self.items)
-                self._apply_filters()
-                return 0
-            TAB_EMPTY_TEXT["items"] = "No items loaded yet."
+            else:
+                TAB_EMPTY_TEXT["items"] = "No items loaded yet."
 
-            ## Localization.csv may be missing (the scenario then shows internal names).
-            names_root, names_path = find_file(folder, NAMES_FILE)
-            self.items = load_items(None, items_path=items_path, names_path=names_path or "")
-            image_index = build_image_index(folder)
-            for item in self.items:
-                custom_prop = (item.get("props") or {}).get("CustomIcon")
-                custom_icon = custom_prop.get("value") if custom_prop else None
-                item["image_path"] = find_item_image(folder, item["name"], image_index, custom_icon=custom_icon)
-            self.tile_area.set_items(self.items)
+                ## Localization.csv may be missing (the scenario then shows internal names).
+                names_root, names_path = find_file(folder, NAMES_FILE)
+                self.items = load_items(None, items_path=items_path, names_path=names_path or "")
+                image_index = build_image_index(folder)
+                for item in self.items:
+                    custom_prop = (item.get("props") or {}).get("CustomIcon")
+                    custom_icon = custom_prop.get("value") if custom_prop else None
+                    item["image_path"] = find_item_image(folder, item["name"], image_index, custom_icon=custom_icon)
+            if folder is None:
+                TAB_EMPTY_TEXT["blueprints"] = NO_FILES_TEXT
+                self.blueprints = []
+            else:
+                self.blueprints = load_blueprints(folder)
+                if self.blueprints:
+                    TAB_EMPTY_TEXT["blueprints"] = "No blueprints loaded yet."
+                else:
+                    TAB_EMPTY_TEXT["blueprints"] = "No blueprint files in the downloaded server files."
+            if self.active_tab == "blueprints":
+                self.tile_area.set_items(self.blueprints)
+            else:
+                self.tile_area.set_items(self.items)
             self._apply_filters()
-            print(f"[INFO] LibraryPage: {len(self.items)} items from {items_root}, {sum(1 for item in self.items if item['image_path'])} with pictures")
+            print(f"[INFO] LibraryPage: {len(self.items)} items from {items_root}, {sum(1 for item in self.items if item['image_path'])} with pictures, {len(self.blueprints)} blueprints")
             return len(self.items)
         except Exception as e:
             print(f"[ERROR] LibraryPage: Could not load the downloaded server files: {e}")
@@ -337,30 +449,29 @@ class LibraryPage(QWidget):
         return len(self.items)
 
     def _apply_filters(self, *args):
-        """Shows only tiles that match the search text and (if any are on) the lit filter buttons."""
+        """Shows only tiles that match the selected categories and the search text. Nothing shows until a category is picked."""
         try:
-
-            ## Blueprints have no data yet, so their tab shows the empty text.
-            if self.active_tab != "items":
-                self.tile_area.show_only([])
-                self.tile_area.setVisible(False)
-                self.lbl_grid_empty.setVisible(True)
-                return
             search_text = self.txt_search.text().strip().lower()
-            lit_filters = {btn.text() for btn in self.filter_buttons if btn.isChecked()}
+            lit_filters = self._selected_groups()
             shown_tiles = []
-            for tile in self.tile_area.tiles:
-                item = tile.item
-                if lit_filters and item["filter_group"] not in lit_filters:
-                    continue
-                if search_text and search_text not in (item["display_name"] + " " + item["name"] + " " + item["id"]).lower():
-                    continue
-                shown_tiles.append(tile)
+            if lit_filters:
+                for tile in self.tile_area.tiles:
+                    item = tile.item
+                    if item.get("filter_group") not in lit_filters:
+                        continue
+                    if search_text and search_text not in (item["display_name"] + " " + item["name"] + " " + item["id"]).lower():
+                        continue
+                    shown_tiles.append(tile)
             self.tile_area.show_only(shown_tiles)
             self.tile_area.setVisible(bool(shown_tiles))
             self.lbl_grid_empty.setVisible(not shown_tiles)
-            if self.items and not shown_tiles:
-                self.lbl_grid_empty.setText("No items match.")
+            loaded = self.blueprints if self.active_tab == "blueprints" else self.items
+            if not loaded:
+                self.lbl_grid_empty.setText(TAB_EMPTY_TEXT.get(self.active_tab, ""))
+            elif not lit_filters:
+                self.lbl_grid_empty.setText(PICK_CATEGORY_TEXT.get(self.active_tab, ""))
+            elif not shown_tiles:
+                self.lbl_grid_empty.setText(NO_MATCH_TEXT.get(self.active_tab, ""))
             else:
                 self.lbl_grid_empty.setText(TAB_EMPTY_TEXT.get(self.active_tab, ""))
         except Exception as e:
@@ -374,8 +485,12 @@ class LibraryPage(QWidget):
         self.lbl_detail_id.setText("ID:  " + item["id"])
         self.lbl_detail_stack.setText("STACK SIZE:  " + item["stack_size"])
         self.lbl_detail_category.setText("CATEGORY:  " + (item["filter_group"] or item["category"] or "--"))
-        self.btn_view_stats.setEnabled(True)
-        self.btn_view_stats.setToolTip("See every stat for " + item["display_name"] + ".")
+        if self.active_tab == "items":
+            self.btn_view_stats.setEnabled(True)
+            self.btn_view_stats.setToolTip("See every stat for " + item["display_name"] + ".")
+        else:
+            self.btn_view_stats.setEnabled(False)
+            self.btn_view_stats.setToolTip("Stats are for items.")
 
         ## If the stats window is already open, switch it to the new item.
         if self.stats_dialog is not None and self.stats_dialog.isVisible():
