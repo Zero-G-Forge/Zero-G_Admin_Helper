@@ -6,7 +6,8 @@
 ## The ITEMS and BP EDITOR nav entries both open this page, each starting on its own tab.
 ## ITEMS reads a game Content folder (ItemsConfig.ecf + Localization.csv) through load_items_from; read-only.
 ## (Nov 22, 2026: on opening, ITEMS reads the downloaded server files through load_server_files, never the
-## local base game. Pictures come from the downloaded SharedData/Content/Images/<ItemName>.jpg or .png.)
+## local base game. Pictures come from the downloaded Images and Bundles/ItemIcons folders,
+## matched to the item Name, then to CustomIcon, as <name>.jpg or .png.)
 ## BLUEPRINTS has no data yet, so it shows "nothing yet".
 ## GIVE ITEM changes a live player, so its button stays off until Ray OKs that step.
 ## Wired (Nov 22, 2026): GIVE ITEM sends api:Request_Player_AddItem through the Safety Flow (admin and up), to
@@ -33,7 +34,7 @@ from features.library.item_stats_dialog import ItemStatsDialog
 
 ## Where the downloaded server files are, and the item pictures inside them.
 from features.server_files.local_files import (NO_FILES_TEXT, ITEMS_FILE, NAMES_FILE, current_scenario_folder,
-                                               find_file, build_image_index)
+                                               find_file, build_image_index, find_item_image)
 
 # endregion
 
@@ -317,7 +318,9 @@ class LibraryPage(QWidget):
             self.items = load_items(None, items_path=items_path, names_path=names_path or "")
             image_index = build_image_index(folder)
             for item in self.items:
-                item["image_path"] = image_index.get(item["name"].lower())
+                custom_prop = (item.get("props") or {}).get("CustomIcon")
+                custom_icon = custom_prop.get("value") if custom_prop else None
+                item["image_path"] = find_item_image(folder, item["name"], image_index, custom_icon=custom_icon)
             self.tile_area.set_items(self.items)
             self._apply_filters()
             print(f"[INFO] LibraryPage: {len(self.items)} items from {items_root}, {sum(1 for item in self.items if item['image_path'])} with pictures")

@@ -1129,12 +1129,11 @@ Still to do:
 
 ### Item images
 
-- Image files are named after each item's internal `Name`, for example `<ItemName>.jpg`.
-- Lookup path, once the scenario is downloaded: `Scenarios/<scenario>/SharedData/Content/Images/<ItemName>.jpg`.
+- Image files are named after each item's internal `Name`, or its `CustomIcon` when the name has no file, for example `<ItemName>.png`.
+- Lookup folders, once the scenario is downloaded: `SharedData/Content/Images` and `SharedData/Content/Bundles/ItemIcons` under `data/server_files/<scenario>/`. Most item pngs are in `ItemIcons`. `Images` is mostly UI and PDA jpgs, and only a few item names match there.
 - An item with no image falls back to the drawn hex tile.
-- Files in that folder that do not match an item name (for example PDA pictures) are skipped.
-- Done (Nov 22, 2026): `local_files.build_image_index` reads `SharedData/Content/Images` in the downloaded save and scenario folders (save first, `.jpg` before `.png`, names compared without case). The tile, the detail card and the stats window draw the picture cut to the hex shape (`item_tiles.draw_hex_picture`), with the category colour as the edge. Pictures are cached by path and size (`PICTURE_CACHE`).
-- The live server currently reports the scenario **Default Multiplayer**, which has no Images folder, so every item shows the drawn hex there until the real scenario is confirmed.
+- Files in those folders that do not match an item name or `CustomIcon` (for example PDA pictures) are skipped.
+- Done (Nov 22, 2026): `local_files.build_image_index` reads both folders in the downloaded save and scenario copies (save first, Images before ItemIcons, `.jpg` / `.jpeg` before `.png`, names compared without case). The Library looks up the item `Name`, then `CustomIcon`. The tile, the detail card and the stats window draw the picture cut to the hex shape (`item_tiles.draw_hex_picture`), with the category colour as the edge. Pictures are cached by path and size (`PICTURE_CACHE`).
 
 ### LIVE MODE
 

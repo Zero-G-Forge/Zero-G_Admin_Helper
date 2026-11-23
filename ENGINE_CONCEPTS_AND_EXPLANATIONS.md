@@ -149,9 +149,9 @@ The PDA editor reuses the same code editor widget, with the YAML highlighter pas
 
 ### Tiles are buttons that paint themselves
 
-Each item is a `HexTile` (`QAbstractButton`). It paints a hex badge, initials or a short name, and a group colour (weapons, medical, and the other filters). Clicking a tile is the same idea as clicking a button: it emits a signal, and the detail card listens.
+Each item is a `HexTile` (`QAbstractButton`). It paints a hex badge with the item's picture when the downloaded server files have one, or initials when they do not, and a group colour (weapons, medical, and the other filters). Clicking a tile is the same idea as clicking a button: it emits a signal, and the detail card listens.
 
-`make_hex_pixmap` can also draw a standalone hex for the detail card and the stats window. Until server images are wired, that drawn hex is the picture.
+`make_hex_pixmap` can also draw a standalone hex for the detail card and the stats window, using the same picture or initials.
 
 ### Why the grid is a flow area, not a fixed table
 
@@ -339,7 +339,7 @@ The download names the local folder after the scenario you picked (or, without a
 
 ### Pictures: one look at the folder, then a lookup table
 
-The Library may hold over a thousand items. Asking the disk "is there a picture for this one?" a thousand times is slow, so ZAH lists the Images folder once and builds a table from lower-case item name to picture file. Each item then just looks itself up. The picture is cut to the hex shape with a **clip path**, which works like a stencil: paint only lands inside the shape.
+The Library may hold over a thousand items. Asking the disk "is there a picture for this one?" a thousand times is slow, so ZAH lists the Images and `Bundles/ItemIcons` folders once and builds a table from lower-case file name to picture file. Each item looks up its `Name`, then its `CustomIcon` if the name has no file. The picture is cut to the hex shape with a **clip path**, which works like a stencil: paint only lands inside the shape.
 
 ## Validating, Comparing, and Saving Edits
 

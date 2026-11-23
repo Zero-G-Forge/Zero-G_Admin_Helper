@@ -2,7 +2,8 @@
 ## TEST: tests/test_local_files.py
 ## DESCRIPTION: Checks that the Library, ECF Editor and PDA Editor read the DOWNLOADED server files
 ## (data/server_files/<scenario>/), whatever the scenario is called, and show the empty-state text
-## when nothing is downloaded. Item pictures: <ItemName>.jpg, then .png, else the drawn hex.
+## when nothing is downloaded. Item pictures: Images then Bundles/ItemIcons, <ItemName> then CustomIcon,
+## .jpg then .png, else the drawn hex.
 ## Run from the app root:  QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest tests -q
 ## Everything happens in a temporary folder; the real data/ folder is never touched.
 ## =====================================================================
@@ -132,6 +133,22 @@ def test_image_index_prefers_jpg_and_is_case_blind(tmp_path):
     assert local_files.find_item_image(folder, "Flashlight") is None
     assert local_files.find_item_image(None, "Flashlight") is None
 
+
+def test_image_index_reads_itemicons_when_images_has_no_match(tmp_path):
+    folder = build_download(tmp_path)
+    write_picture(os.path.join(folder, "scenario", "SharedData", "Content", "Bundles", "ItemIcons", "Flashlight.png"), 0x0000ff)
+    write_picture(os.path.join(folder, "scenario", "SharedData", "Content", "Bundles", "ItemIcons", "AdrenalineShot.png"), 0xffffff)
+    assert local_files.find_item_image(folder, "Flashlight").endswith(os.path.join("ItemIcons", "Flashlight.png"))
+    ## Images already has AdrenalineShot.jpg, so that copy still wins over the ItemIcons png.
+    assert local_files.find_item_image(folder, "AdrenalineShot").endswith("AdrenalineShot.jpg")
+
+
+def test_find_item_image_falls_back_to_custom_icon(tmp_path):
+    folder = build_download(tmp_path)
+    write_picture(os.path.join(folder, "scenario", "SharedData", "Content", "Bundles", "ItemIcons", "ZeroAkua.png"), 0x00ffff)
+    assert local_files.find_item_image(folder, "AkuaWine", custom_icon="ZeroAkua").endswith("ZeroAkua.png")
+    assert local_files.find_item_image(folder, "AkuaWine") is None
+
 # endregion
 
 
@@ -148,6 +165,23 @@ def test_library_reads_download_with_pictures(tmp_path, qapp):
     assert names["Flashlight"]["image_path"] is None
     page._on_tile_picked(names["AdrenalineShot"])
     assert not page.lbl_detail_picture.pixmap().isNull()
+    page.deleteLater()
+
+
+def test_library_uses_custom_icon_and_itemicons(tmp_path, qapp):
+    from features.library.library_page import LibraryPage
+    folder = build_download(tmp_path)
+    write(
+        os.path.join(folder, "save", "Content", "Configuration", "ItemsConfig.ecf"),
+        ITEMS_ECF + "{ +Item Id: 4, Name: AkuaWine\n  Category: Food\n  CustomIcon: ZeroAkua\n  StackSize: 5\n}\n",
+    )
+    write_picture(os.path.join(folder, "scenario", "SharedData", "Content", "Bundles", "ItemIcons", "Flashlight.png"), 0x0000ff)
+    write_picture(os.path.join(folder, "scenario", "SharedData", "Content", "Bundles", "ItemIcons", "ZeroAkua.png"), 0x00ffff)
+    page = LibraryPage()
+    names = {item["name"]: item for item in page.items}
+    assert names["Flashlight"]["image_path"].endswith(os.path.join("ItemIcons", "Flashlight.png"))
+    assert names["AkuaWine"]["image_path"].endswith("ZeroAkua.png")
+    assert names["AdrenalineShot"]["image_path"].endswith("AdrenalineShot.jpg")
     page.deleteLater()
 
 

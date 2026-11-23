@@ -3,8 +3,9 @@
 ## HexTile: one item drawn as a hex (like the concept mockup), with its short initials inside,
 ##          the name and ID underneath. The game's item pictures aren't in the server files,
 ##          so each category gets its own edge colour instead.
-##          (Nov 22, 2026: when the downloaded server files have SharedData/Content/Images/<ItemName>.jpg
-##          or .png, that picture is drawn inside the hex instead of the initials. No picture = the drawn hex.)
+##          (Nov 22, 2026: when the downloaded server files have a matching <ItemName> or CustomIcon
+##          picture under SharedData/Content/Images or SharedData/Content/Bundles/ItemIcons, that
+##          picture is drawn inside the hex instead of the initials. No picture = the drawn hex.)
 ## TileFlowArea: a scrolling grid that re-flows the tiles into as many columns as fit.
 ## ==========================================
 

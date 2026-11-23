@@ -28,8 +28,13 @@ from features.settings.app_settings import load_app_settings
 NO_FILES_TEXT = "No server files yet. Use Settings > DOWNLOAD SERVER FILES."
 
 ## Where the game keeps item pictures, relative to the scenario (or save) root. Named <ItemName>.jpg or .png.
+## SharedData/Content/Images holds mostly UI and PDA jpgs. The item pngs live in Bundles/ItemIcons.
 IMAGES_FOLDER = ("SharedData", "Content", "Images")
-IMAGE_TYPES = (".jpg", ".png")
+IMAGES_FOLDERS = (
+    IMAGES_FOLDER,
+    ("SharedData", "Content", "Bundles", "ItemIcons"),
+)
+IMAGE_TYPES = (".jpg", ".jpeg", ".png")
 
 ## The items file and its English names, relative to a root.
 ITEMS_FILE = ("Content", "Configuration", "ItemsConfig.ecf")
@@ -136,34 +141,45 @@ def list_files(folder, extensions, under=None):
 
 
 ## Full path of an item's picture (<ItemName>.jpg, then .png), or None so the drawn hex is used.
-## Only the downloaded Images folder is searched; the local base game is never looked at.
-def find_item_image(folder, item_name, image_index=None):
-    if not folder or not item_name:
+## The item Name is tried first, then CustomIcon when the name has no file.
+## Only the downloaded Images and ItemIcons folders are searched; the local base game is never looked at.
+def find_item_image(folder, item_name, image_index=None, custom_icon=None):
+    if not folder or not (item_name or custom_icon):
         return None
     if image_index is None:
         image_index = build_image_index(folder)
-    return image_index.get(str(item_name).lower())
+    if item_name:
+        path = image_index.get(str(item_name).lower())
+        if path:
+            return path
+    if custom_icon:
+        return image_index.get(str(custom_icon).lower())
+    return None
 
 
-## {lower-case item name: full path} for every picture in the downloaded Images folders.
+## {lower-case file stem: full path} for every picture in the downloaded Images and ItemIcons folders.
 ## Built once per load, so a Library with thousands of items does not check the disk per item.
-## The save copy wins over the scenario copy; .jpg wins over .png.
+## The save copy wins over the scenario copy; Images wins over ItemIcons; .jpg / .jpeg wins over .png.
 def build_image_index(folder):
     image_index = {}
     if not folder:
         return image_index
     for root in ROOT_ORDER:
-        images_folder = os.path.join(folder, root, *IMAGES_FOLDER)
-        if not os.path.isdir(images_folder):
-            continue
-        try:
-            names = sorted(os.listdir(images_folder), key=lambda name: (os.path.splitext(name)[1].lower() != ".jpg", name))
-        except OSError:
-            continue
-        for file_name in names:
-            stem, extension = os.path.splitext(file_name)
-            if extension.lower() in IMAGE_TYPES and stem.lower() not in image_index:
-                image_index[stem.lower()] = os.path.join(images_folder, file_name)
+        for relative in IMAGES_FOLDERS:
+            images_folder = os.path.join(folder, root, *relative)
+            if not os.path.isdir(images_folder):
+                continue
+            try:
+                names = sorted(
+                    os.listdir(images_folder),
+                    key=lambda name: (os.path.splitext(name)[1].lower() not in (".jpg", ".jpeg"), name),
+                )
+            except OSError:
+                continue
+            for file_name in names:
+                stem, extension = os.path.splitext(file_name)
+                if extension.lower() in IMAGE_TYPES and stem.lower() not in image_index:
+                    image_index[stem.lower()] = os.path.join(images_folder, file_name)
     return image_index
 
 # endregion
