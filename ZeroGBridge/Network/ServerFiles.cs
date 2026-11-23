@@ -15,6 +15,8 @@
 //   be a plain folder name (no separators, no "..", no rooted path) and must be in the catalog.
 //   The same allowed folders and extensions apply. files:put stays pinned to the reported pair
 //   and ignores any extra name. ProtocolVersion stays 1 (reply shape of info/list/get is unchanged).
+// 1.6.5: AllowedFolders adds scenario Playfields, RandomPresets, Extras, Sectors and Prefabs,
+//   and save PDA. ProtocolVersion stays 1.
 // Safety: two whitelisted roots, whitelisted sub-folders and file types, no ".." or absolute
 // paths, the resolved full path must stay under the root, no symlinks or junctions, size caps.
 // The bridge AuthToken is never read or printed here (the auth handshake already happened).
@@ -76,8 +78,8 @@ namespace ZeroGBridge
         // Change these lists to open or close folders. Names use "/" as the separator.
         private static readonly Dictionary<string, string[]> AllowedFolders = new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
-            { "scenario", new[] { "Content", "SharedData/Content" } },
-            { "save", new[] { "Content", "Shared/Content", "SharedData/Content" } }
+            { "scenario", new[] { "Content", "SharedData/Content", "Playfields", "RandomPresets", "Extras", "Sectors", "Prefabs" } },
+            { "save", new[] { "Content", "Shared/Content", "SharedData/Content", "PDA" } }
         };
 
         // Names Windows treats as devices. They are refused as path segments on every platform.

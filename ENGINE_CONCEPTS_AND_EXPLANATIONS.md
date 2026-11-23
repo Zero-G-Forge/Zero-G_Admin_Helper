@@ -258,7 +258,7 @@ A slip that says `../../somewhere/else` is an attempt to wander out of the shelf
 
 1. The text of the name: no `..`, no full paths from the top of the disk, no drive letters, no strange characters, no names Windows treats as devices.
 2. The kind of file: only configuration, PDA, and picture types (`.ecf`, `.yaml`, `.yml`, `.csv`, `.jpg`, `.png`). A database or a password file is never on the menu.
-3. The room: only named folders inside each shelf.
+3. The room: only named folders inside each shelf. Core 1.6.5 opened more of those rooms: `Playfields`, `RandomPresets`, `Extras`, `Sectors` and `Prefabs` on the scenario shelf, and `PDA` on the save shelf. Other rooms stay locked.
 4. The real address: the bridge turns the name into a full address and proves it is still inside the shelf.
 5. Shortcuts: a folder or file that is really a pointer to somewhere else (a symlink) is refused.
 

@@ -27,6 +27,7 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 - Secrets (auth token, passwords, database URL, developer key, session tokens) are never printed, logged, or committed. Local secrets live under `data/`, which is git-ignored.
 - New bridge commands need explicit approval before they are written. The read-only `files:` commands (`files:info`, `files:list`, `files:get`) were approved and added in core 1.6.1. They can read, never write.
 - Core 1.6.4 adds the read-only `files:catalog` command, and optional `scenario` or `save` folder names on `files:list` and `files:get`, so ZAH can list every scenario and save folder and download from a chosen pair. `files:put` still uses only the live yaml/game pair and ignores those extra names. `protocol` stays 1.
+- Core 1.6.5 widens `AllowedFolders` in `ServerFiles.cs`: a scenario also includes `Playfields`, `RandomPresets`, `Extras`, `Sectors` and `Prefabs`, and a save also includes `PDA`. `protocol` stays 1. The same lists apply to `files:put`.
 - Core 1.6.2 adds the first two **write** commands, approved by Ray on Nov 22, 2026 ("make the changes on your own as long as the server itself doesn't need to be restarted"): `files:put` (replace one existing editable file, backup first) and `coreupload:put` (place a new core in `Updates/`). Both are core-only, so they install with a hot reload and never need a restart. See **Server write commands** below.
 - The server files download is **read-only** on both sides: the bridge only opens files with read access, and ZAH never deletes anything on this PC.
 
@@ -406,7 +407,7 @@ Empyrion loads `ZeroGBridge.Loader.ZeroGBridgeLoader`, which implements **API v2
 - It owns the TCP listener and authentication (`BridgeListener`, `AuthConfig`).
 - It hosts `CoreHost`, which loads the reloadable core (`ZeroGBridge.Core.dll`) in its own AppDomain.
 - Game-state work is marshalled onto the **game thread** (`GameThread`, `GameGateway`), never executed on the network thread.
-- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.4** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, the 1.6.3 read-only chat history `chat:recent`, and the 1.6.4 read-only scenario/save catalog plus optional named `files:list` / `files:get`). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
+- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.5** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, the 1.6.3 read-only chat history `chat:recent`, the 1.6.4 read-only scenario/save catalog plus optional named `files:list` / `files:get`, and the 1.6.5 wider file-folder allowlist). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
 
 The auth token is read from `ZeroGBridge.json` only and is never written into log lines.
 
@@ -573,13 +574,15 @@ Safety checks, in order (`NormalizeRelativePath`, `ResolveUnderRoot`):
 1. Root name must be `scenario` or `save`.
 2. The path text is refused when empty, longer than 260, absolute, has a drive letter or `:` (this also blocks NTFS streams), `*`, `?`, quotes, `<`, `>`, `|`, control characters, an empty or `.` or `..` segment, a segment starting or ending with a space or ending with a dot, or a Windows device name (`CON`, `NUL`, `COM1` and similar).
 3. File type must be on the list: `.ecf .yaml .yml .csv .jpg .jpeg .png`. Databases, `.json`, `.dll`, `.key` and everything else are unreachable.
-4. The first folder must be on the root's whitelist (whole folder names only), or the file must sit directly in the root. Scenario: `Content`, `SharedData/Content`. Save: `Content`, `Shared/Content`, `SharedData/Content`. The lists are the `AllowedFolders` table in `ServerFiles.cs`.
+4. The first folder must be on the root's whitelist (whole folder names only), or the file must sit directly in the root. Scenario: `Content`, `SharedData/Content`, `Playfields`, `RandomPresets`, `Extras`, `Sectors`, `Prefabs`. Save: `Content`, `Shared/Content`, `SharedData/Content`, `PDA`. The lists are the `AllowedFolders` table in `ServerFiles.cs`.
 5. The resolved full path must still start with the root folder.
 6. Neither the file nor any folder on the way may be a symlink or junction. The folder scan skips them too.
 7. Files open with `FileAccess.Read` and `FileShare.ReadWrite` only, so the running game is never blocked and nothing can be written.
 8. The auth token is never read in this code. The dispatcher still refuses any command line that contains the token, and removes it from any reply.
 
-Checks: `ZeroGBridge/tests/ServerFilesTest` (run `dotnet run` in that folder) compiles the real `ServerFiles.cs` and runs 65 checks: listing, paging, chunk reassembly byte for byte, the batch budget, every refused path shape, symlinks, and reading while another handle has the file open for writing.
+Checks: `ZeroGBridge/tests/ServerFilesTest` (run `dotnet run` in that folder) compiles the real `ServerFiles.cs` and runs the read checks, including that `files:list` includes a Playfields file and a save PDA file, while a folder still off the list is skipped.
+
+- Deployed (Nov 22, 2026, 8:26 PM CST) to Zero-G Forge Reborn with `coreupload:put` (pdb, then dll) and `hot:reload`, after a read-only `plys` check showed 0 of 53 players online. `hot:status` reports core `1.6.5` (`1.6.1122.2125_a27f3d29`), loader still `1.5.0`, no restart. A named `files:list` of `Ascension-Reborn` returned 6,334 files (including 1,600 under `Playfields`, 245 under `RandomPresets`, 3 under `Extras`, and 1 under `Sectors`). The save `Zero-G Server - Season 4` still has 2 files; it has no top-level `PDA` files. Ascension-Reborn was not reloaded and stays on core 1.6.4.
 
 ### Server write commands (`files:put`, `coreupload:`)
 
@@ -621,7 +624,7 @@ Kill switch: `"FileWritesEnabled": false` in `ZeroGBridge.json` turns both comma
 
 Error codes: `writes_disabled`, `not_ready` (mod folder unknown), `bad_request`, `unknown_root`, `root_unavailable`, `bad_path`, `not_allowed`, `not_found`, `too_large`, `bad_offset`, `hash_mismatch`, `changed_on_server`, `bad_core`, `write_failed`, `exception`.
 
-Checks: the same `ServerFilesTest` program also compiles `ServerFileWrites.cs` (103 checks in total): kill switch, not-ready, a chunked put with its backup, a second put keeping both backups, stale base hash, hash mismatch, new file, `.png`, `.json`, traversal, symlink, out-of-order chunk, size caps, the save root, a non-DLL and a wrong DLL refused, and the real Release core uploaded byte for byte with its version read back. The `serve` mode answers `coreupload:` too; set `ZGB_TEST_MODDIR` to a test folder for the write commands.
+Checks: the same `ServerFilesTest` program also compiles `ServerFileWrites.cs` (134 checks in total): kill switch, not-ready, a chunked put with its backup, a second put keeping both backups, stale base hash, hash mismatch, new file, `.png`, `.json`, traversal, symlink, out-of-order chunk, size caps, the save root, a non-DLL and a wrong DLL refused, and the real Release core uploaded byte for byte with its version read back. The `serve` mode answers `coreupload:` too; set `ZGB_TEST_MODDIR` to a test folder for the write commands.
 
 ### Chat history (`chat:recent`)
 
@@ -1111,7 +1114,7 @@ These items have UI placeholders, agreed behaviour, or both. They are **not** im
 
 ### SERVER FILES download: what is left
 
-Done: the read-only `files:` bridge commands (core 1.6.1), the working Settings download button, and (core 1.6.4) the scenario/save picker plus `files:catalog`. See **Server files download** and **Server file commands** above.
+Done: the read-only `files:` bridge commands (core 1.6.1), the working Settings download button, (core 1.6.4) the scenario/save picker plus `files:catalog`, and (core 1.6.5) the wider folder allowlist. See **Server files download** and **Server file commands** above.
 
 Still to do:
 

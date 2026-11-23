@@ -155,7 +155,9 @@ namespace ServerFilesTest
                 Directory.CreateDirectory(Path.Combine(scenario, "SharedData", "Content", "Images"));
                 Directory.CreateDirectory(Path.Combine(scenario, "SharedData", "Content", "Extras", "PDA"));
                 Directory.CreateDirectory(Path.Combine(scenario, "Playfields", "Secret"));
+                Directory.CreateDirectory(Path.Combine(scenario, "Disabled", "Secret"));
                 Directory.CreateDirectory(Path.Combine(save, "Shared", "Content", "Configuration"));
+                Directory.CreateDirectory(Path.Combine(save, "PDA"));
                 Directory.CreateDirectory(outside);
 
                 File.WriteAllText(Path.Combine(scenario, "Content", "Configuration", "Items.ecf"), "Item text\n");
@@ -163,10 +165,12 @@ namespace ServerFilesTest
                 File.WriteAllText(Path.Combine(scenario, "Content", "Configuration", "notes.exe"), "not allowed type\n");
                 File.WriteAllText(Path.Combine(scenario, "Content", "Configuration", "secrets.json"), "{}\n");
                 File.WriteAllText(Path.Combine(scenario, "SharedData", "Content", "Extras", "PDA", "PDA.yaml"), "pda: 1\n");
-                File.WriteAllText(Path.Combine(scenario, "Playfields", "Secret", "playfield_static.yaml"), "not in a whitelisted folder\n");
+                File.WriteAllText(Path.Combine(scenario, "Playfields", "Secret", "playfield_static.yaml"), "playfield\n");
+                File.WriteAllText(Path.Combine(scenario, "Disabled", "Secret", "hidden.yaml"), "not in a whitelisted folder\n");
                 File.WriteAllText(Path.Combine(scenario, "gameoptions.yaml"), "top: level\n");
                 File.WriteAllText(Path.Combine(scenario, "description.txt"), "txt is not whitelisted\n");
                 File.WriteAllText(Path.Combine(save, "Shared", "Content", "Configuration", "Save.ecf"), "save file\n");
+                File.WriteAllText(Path.Combine(save, "PDA", "PDA.yaml"), "save pda\n");
                 File.WriteAllText(Path.Combine(save, "global.db"), "database\n");
                 File.WriteAllText(Path.Combine(save, "gameoptions.yaml"), "Options:\n  CustomScenario: Other Scenario\n  IsManagedScenario: false\n  CustomPlayerTab: Ignore Me\n  ScenarioName: Should Not Win\n");
                 File.WriteAllText(Path.Combine(otherScenario, "Content", "Configuration", "Other.ecf"), "other item\n");
@@ -209,13 +213,15 @@ namespace ServerFilesTest
                 Check("list has PDA.yaml", listed.Contains("SharedData/Content/Extras/PDA/PDA.yaml"));
                 Check("list has top-level gameoptions.yaml", listed.Contains("gameoptions.yaml"));
                 Check("list skips .exe, .json and .txt", !listed.Any(p => p.EndsWith(".exe") || p.EndsWith(".json") || p.EndsWith(".txt")));
-                Check("list skips non-whitelisted Playfields folder", !listed.Any(p => p.StartsWith("Playfields")));
+                Check("list has a Playfields file", listed.Contains("Playfields/Secret/playfield_static.yaml"));
+                Check("list skips non-whitelisted Disabled folder", !listed.Any(p => p.StartsWith("Disabled")));
                 Check("list is sorted", listed.SequenceEqual(listed.OrderBy(p => p, StringComparer.Ordinal)));
                 if (symlinkMade) Check("list skips symlinked folder and file", !listed.Any(p => p.Contains("LinkToOutside") || p.Contains("Linked.ecf")));
 
                 JObject saveList = Run("files:list:{\"root\":\"save\"}");
                 var savePaths = saveList["files"].Select(f => (string)f["path"]).ToList();
                 Check("save list has Save.ecf and not global.db", savePaths.Contains("Shared/Content/Configuration/Save.ecf") && !savePaths.Any(p => p.EndsWith(".db")));
+                Check("save list has a PDA file", savePaths.Contains("PDA/PDA.yaml"));
 
                 JObject page1 = Run("files:list:{\"root\":\"scenario\",\"offset\":0,\"limit\":2}");
                 Check("list paging returns next", (int)page1["count"] == 2 && page1["next"] != null && (int)page1["next"] == 2);
@@ -268,7 +274,9 @@ namespace ServerFilesTest
                 }
                 string e1;
                 Check("refused: not whitelisted extension", ServerFiles.NormalizeRelativePath("scenario", "Content/Configuration/notes.exe", out e1) == null && e1 == "not_allowed");
-                Check("refused: not whitelisted folder", ServerFiles.NormalizeRelativePath("scenario", "Playfields/Secret/playfield_static.yaml", out e1) == null && e1 == "not_allowed");
+                Check("refused: not whitelisted folder", ServerFiles.NormalizeRelativePath("scenario", "Disabled/Secret/hidden.yaml", out e1) == null && e1 == "not_allowed");
+                Check("Playfields folder is allowed for scenario", ServerFiles.NormalizeRelativePath("scenario", "Playfields/Secret/playfield_static.yaml", out e1) == "Playfields/Secret/playfield_static.yaml");
+                Check("PDA folder is allowed for save", ServerFiles.NormalizeRelativePath("save", "PDA/PDA.yaml", out e1) == "PDA/PDA.yaml");
                 Check("refused: folder prefix is whole segments only", ServerFiles.NormalizeRelativePath("scenario", "ContentEvil/Items.ecf", out e1) == null && e1 == "not_allowed");
                 Check("refused: unknown root", ServerFiles.NormalizeRelativePath("../x", "Content/Items.ecf", out e1) == null);
                 Check("save-only folder refused for scenario", ServerFiles.NormalizeRelativePath("scenario", "Shared/Content/Configuration/Save.ecf", out e1) == null);
@@ -396,7 +404,7 @@ namespace ServerFilesTest
                 Check("put refuses .json", SendInChunks("scenario", "Content/Configuration/secrets.json", newItems, new string('0', 64), 64)["ok"].Value<bool>() == false);
                 Check("put refuses traversal", SendInChunks("scenario", "../outside/stolen.ecf", newItems, new string('0', 64), 64)["ok"].Value<bool>() == false
                     && File.ReadAllText(Path.Combine(outside, "stolen.ecf")) == "must never be readable\n");
-                Check("put refuses a non-whitelisted folder", SendInChunks("scenario", "Playfields/Secret/playfield_static.yaml", newItems, new string('0', 64), 64)["ok"].Value<bool>() == false);
+                Check("put refuses a non-whitelisted folder", SendInChunks("scenario", "Disabled/Secret/hidden.yaml", newItems, new string('0', 64), 64)["ok"].Value<bool>() == false);
                 if (symlinkMade) Check("put refuses a symlinked file", SendInChunks("scenario", "Content/Configuration/Linked.ecf", newItems, Sha(Encoding.UTF8.GetBytes("must never be readable\n")), 64)["ok"].Value<bool>() == false
                     && File.ReadAllText(Path.Combine(outside, "stolen.ecf")) == "must never be readable\n");
                 Check("put refuses a chunk out of order", (string)Run("files:put:" + new JObject { ["root"] = "scenario", ["path"] = "Content/Configuration/Items.ecf", ["offset"] = 5, ["total"] = 10, ["sha256"] = new string('a', 64), ["data"] = "AAAA" }.ToString(Newtonsoft.Json.Formatting.None))["error"] == "bad_offset");
