@@ -600,8 +600,8 @@ def test_factions_page_reads_lists_and_alliances(monkeypatch, tmp_path):
 
 def test_faction_role_and_tag_helpers():
     from features.shared.faction_display import format_faction_role, faction_tag
-    assert format_faction_role("Founder") == "Owner"
-    assert format_faction_role("owner") == "Owner"
+    assert format_faction_role("Founder") == "Founder"
+    assert format_faction_role("owner") == "Founder"
     assert format_faction_role("Admin") == "Admin"
     assert format_faction_role("Member") == "Member"
     assert format_faction_role("None") == "--"
@@ -624,7 +624,7 @@ def test_factions_members_use_faction_id_and_known_roles(monkeypatch, tmp_path):
         {"origin": 1, "factionId": 103, "name": "Mechanics (Admin)", "abbrev": "MEC"}]}}
     players = {"type": "PLAYER_CACHE", "player_list": [
         {"entityId": "2057", "name": "Manta", "factionId": 103, "faction": "[GoG]", "role": "Founder", "status": "Online"},
-        {"entityId": "61373", "name": "HammerBlow", "factionId": 103, "faction": "[GoG]", "status": "Offline"},
+        {"entityId": "61373", "name": "HammerBlow", "factionId": 1, "faction": "[MEC]", "status": "Offline"},
         {"entityId": "22153", "name": "E21L", "factionId": 100, "faction": "[MEC]", "role": "Member", "status": "Offline"}]}
     alliances = {"type": "API_RESULT", "status": "ok", "data": {"alliances": []}}
     bridge = install(monkeypatch, tmp_path, {"api:Request_Get_Factions": factions, "plys": players,
@@ -635,16 +635,16 @@ def test_factions_members_use_faction_id_and_known_roles(monkeypatch, tmp_path):
     settle(qapp)
     mec = next(page.lst_factions.item(i) for i in range(page.lst_factions.count()) if "Mechanics" in page.lst_factions.item(i).text())
     sof = next(page.lst_factions.item(i) for i in range(page.lst_factions.count()) if "Some Old Farts" in page.lst_factions.item(i).text())
-    assert "2 members" in mec.text()
+    assert "1 members" in mec.text()
     assert "1 members" in sof.text()
     mec.setSelected(True)
     settle(qapp)
     names = [page.tbl_members.item(row, 0).text() for row in range(page.tbl_members.rowCount())]
     roles = [page.tbl_members.item(row, 1).text() for row in range(page.tbl_members.rowCount())]
     statuses = [page.tbl_members.item(row, 2).text() for row in range(page.tbl_members.rowCount())]
-    assert names == ["Manta", "HammerBlow"]
-    assert roles == ["Owner", "--"]
-    assert statuses == ["Online", "Offline"]
+    assert names == ["Manta"]
+    assert roles == ["Founder"]
+    assert statuses == ["Online"]
     sof.setSelected(True)
     settle(qapp)
     assert page.tbl_members.rowCount() == 1 and page.tbl_members.item(0, 0).text() == "E21L"
@@ -660,7 +660,7 @@ def test_factions_members_use_faction_id_and_known_roles(monkeypatch, tmp_path):
     shown = {player_page.tbl_players.item(row, 0).text(): player_page.tbl_players.item(row, 2).text()
              for row in range(player_page.tbl_players.rowCount())}
     assert shown.get("Manta") == "[MEC]"
-    assert shown.get("HammerBlow") == "[MEC]"
+    assert shown.get("HammerBlow") == "--"
     assert shown.get("E21L") == "[SOF]"
 
 

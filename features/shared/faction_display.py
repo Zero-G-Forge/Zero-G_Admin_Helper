@@ -1,4 +1,4 @@
-## Shared helpers for faction tags and club ranks (Owner / Admin / Member).
+## Shared helpers for faction tags and club ranks (Founder / Admin / Member).
 ## Membership is always by factionId. The plys "faction" tag can be a leftover
 ## name from an older mapping, so the live Request_Get_Factions list is the
 ## source of the tag that is shown.
@@ -6,10 +6,10 @@
 # region Role and Tag
 
 
-## Empyrion IPlayer.FactionRole / PlayerInfo.factionRole uses Founder for the club owner.
+## Empyrion IPlayer.FactionRole / PlayerInfo.factionRole uses Founder for the club founder.
 ROLE_NAMES = {
-    "founder": "Owner",
-    "owner": "Owner",
+    "founder": "Founder",
+    "owner": "Founder",
     "admin": "Admin",
     "member": "Member",
     "guest": "Guest",
@@ -17,7 +17,7 @@ ROLE_NAMES = {
 
 
 def format_faction_role(role):
-    """Owner / Admin / Member / Guest, or '--' when the role is unknown."""
+    """Founder / Admin / Member / Guest, or '--' when the role is unknown."""
     text = str(role or "").strip()
     if not text or text == "--" or text.lower() == "none":
         return "--"

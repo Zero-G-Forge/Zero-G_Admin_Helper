@@ -73,6 +73,10 @@ namespace ZeroGBridge
         private readonly ConcurrentDictionary<int, FactionTag> _factionLookup = new ConcurrentDictionary<int, FactionTag>();
         private readonly string _cacheFilePath;
         private readonly object _diskLock = new object();
+        private DateTime _lastDbScanUtc = DateTime.MinValue;
+        private string _lastDbStamp = "";
+        private static bool _loggedFactionSchema;
+        private const int DbScanIntervalSeconds = 15;
 
         public PlayerCache()
         {
@@ -635,8 +639,38 @@ namespace ZeroGBridge
 
         public List<PlayerRecord> GetAllPlayers()
         {
+            RefreshMembershipFromDatabase();
             RefreshFactionTags();
             return new List<PlayerRecord>(_allPlayers.Values);
+        }
+
+        /// <summary>
+        /// Re-reads current faction membership and ranks from a copy of global.db.
+        /// Official rule: the live database may be read while the server is running
+        /// and must not be written. This uses the existing FileShare.ReadWrite copy
+        /// to temp_scan.db, then queries the copy. StructuresHistory is not used
+        /// for membership (a last-touched structure can keep a player in a club
+        /// they already left). Request_Get_Factions has no member list or founder.
+        /// Request_Player_Info is rejected for offline players, so ranks for
+        /// offline players come from PlayerData (or a Factions owner column)
+        /// when those columns exist. Player .ply files are not read.
+        /// </summary>
+        private void RefreshMembershipFromDatabase()
+        {
+            try
+            {
+                if ((DateTime.UtcNow - _lastDbScanUtc).TotalSeconds < DbScanIntervalSeconds)
+                {
+                    return;
+                }
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                SafeScanDatabase(baseDir);
+                _lastDbScanUtc = DateTime.UtcNow;
+            }
+            catch (Exception ex)
+            {
+                ZgbLog.Write($"[ZGB] -WARN- RefreshMembershipFromDatabase: {ex.GetType().Name} - {ex.Message}");
+            }
         }
 
         public List<PlayerRecord> GetOnlinePlayers() => _allPlayers.Values.Where(p => p.status == "Online").ToList();
@@ -856,14 +890,17 @@ namespace ZeroGBridge
 
         private void SafeScanDatabase(string baseDir)
         {
-            try
+            lock (_diskLock)
             {
-                ZgbLog.Write("[ZGB] -INFO- Executing SafeScanDatabase...");
-                ScanSaveGameDatabase(baseDir);
-            }
-            catch (Exception ex)
-            {
-                ZgbLog.Write($"[ZGB] -ERROR- SafeScanDatabase failure: {ex.GetType().Name} - {ex.Message}");
+                try
+                {
+                    ZgbLog.Write("[ZGB] -INFO- Executing SafeScanDatabase...");
+                    ScanSaveGameDatabase(baseDir);
+                }
+                catch (Exception ex)
+                {
+                    ZgbLog.Write($"[ZGB] -ERROR- SafeScanDatabase failure: {ex.GetType().Name} - {ex.Message}");
+                }
             }
         }
 
@@ -876,6 +913,13 @@ namespace ZeroGBridge
                 string resolvedDb = ResolveGlobalDbPath(baseDir, currentDir);
 
                 if (string.IsNullOrEmpty(resolvedDb))
+                {
+                    return;
+                }
+
+                var dbInfo = new FileInfo(resolvedDb);
+                string stamp = dbInfo.Length.ToString(CultureInfo.InvariantCulture) + ":" + dbInfo.LastWriteTimeUtc.Ticks.ToString(CultureInfo.InvariantCulture);
+                if (!string.IsNullOrEmpty(_lastDbStamp) && stamp == _lastDbStamp)
                 {
                     return;
                 }
@@ -911,18 +955,7 @@ namespace ZeroGBridge
                             l.playerid AS steamId,
                             l.entityid AS entityId,
                             l.playername AS playerName,
-                            COALESCE(
-                                NULLIF(e.facid, 0),
-                                (SELECT sh.facid 
-                                 FROM StructuresHistory sh 
-                                 WHERE sh.touchedentityid = l.entityid AND sh.facid > 0 
-                                 ORDER BY sh.gametime DESC LIMIT 1),
-                                (SELECT sh2.facid 
-                                 FROM StructuresHistory sh2 
-                                 WHERE sh2.entityid = l.entityid AND sh2.facid > 0 
-                                 ORDER BY sh2.gametime DESC LIMIT 1),
-                                0
-                            ) AS factionId,
+                            COALESCE(e.facid, 0) AS factionId,
                             COALESCE(pf.name, '--') AS playfield,
                             COALESCE(e.posx, 0.0) AS posx,
                             COALESCE(e.posy, 0.0) AS posy,
@@ -969,9 +1002,12 @@ namespace ZeroGBridge
                                 record.steamId = steamId;
                                 record.entityId = entityId.ToString();
                                 record.name = realName;
-                                record.factionId = factionId;
-                                record.status = "Offline";
-                                record.faction = factionTag; // Unconditionally updates in-memory record
+                                if (record.status != "Online")
+                                {
+                                    record.factionId = factionId;
+                                    record.status = "Offline";
+                                    record.faction = factionTag;
+                                }
                                 record.playfield = playfield;
                                 record.coordinates = coords;
                                 record.stats["playtime"] = playtimeStr;
@@ -988,8 +1024,12 @@ namespace ZeroGBridge
 
                     int seenCount = ApplyLastSeenFromDb(connection);
                     ZgbLog.Write($"[ZGB] -INFO- last_seen filled from global.db for {seenCount} player(s).");
+
+                    int factioned = ApplyFactionAndRoleFromDb(connection);
+                    ZgbLog.Write($"[ZGB] -INFO- Current faction membership/ranks applied for {factioned} player(s).");
                 }
 
+                _lastDbStamp = stamp;
                 SaveToDisk();
             }
             catch (Exception ex)
@@ -1138,6 +1178,258 @@ namespace ZeroGBridge
                 ZgbLog.Write($"[ZGB] -WARN- Could not read last_seen from global.db: {ex.Message}");
                 return 0;
             }
+        }
+
+        /// <summary>
+        /// Current club membership is Entities.facid, or PlayerData.facid when that
+        /// column exists. Club rank is PlayerData / Entities role when present, or
+        /// Founder from a Factions owner column. Online players keep the live
+        /// IPlayer values. StructuresHistory is not consulted.
+        /// </summary>
+        private int ApplyFactionAndRoleFromDb(SqliteConnection connection)
+        {
+            try
+            {
+                var tables = GetTables(connection);
+                var entityCols = GetColumns(connection, "Entities");
+                var playerCols = GetColumns(connection, "PlayerData");
+                string pdFacCol = PickColumn(playerCols, new[] { "facid", "factionid" }, new string[0], null);
+                string pdRoleCol = PickColumn(playerCols, new[] { "facrole", "factionrole", "faction_role", "facrights", "factionrights", "role" }, new string[0], null);
+                string entRoleCol = PickColumn(entityCols, new[] { "facrole", "factionrole", "faction_role", "facrights", "factionrights", "role" }, new string[0], null);
+                if (!SafeIdent(pdFacCol)) pdFacCol = null;
+                if (!SafeIdent(pdRoleCol)) pdRoleCol = null;
+                if (!SafeIdent(entRoleCol)) entRoleCol = null;
+
+                if (!_loggedFactionSchema)
+                {
+                    _loggedFactionSchema = true;
+                    ZgbLog.Write($"[ZGB] -INFO- global.db tables: {string.Join(",", tables)}");
+                    ZgbLog.Write($"[ZGB] -INFO- Entities columns: {string.Join(",", entityCols)}");
+                    ZgbLog.Write($"[ZGB] -INFO- PlayerData columns: {string.Join(",", playerCols)}");
+                    ZgbLog.Write("[ZGB] -INFO- faction membership uses Entities.facid"
+                        + (pdFacCol != null ? $", PlayerData.{pdFacCol} when present" : "")
+                        + (pdRoleCol != null ? $"; rank from PlayerData.{pdRoleCol}" : "")
+                        + (entRoleCol != null ? $"; rank from Entities.{entRoleCol}" : "")
+                        + ".");
+                }
+
+                string pdFacSql = pdFacCol != null ? "pd.\"" + pdFacCol + "\"" : "NULL";
+                string pdRoleSql = pdRoleCol != null ? "pd.\"" + pdRoleCol + "\"" : "NULL";
+                string entRoleSql = entRoleCol != null ? "e.\"" + entRoleCol + "\"" : "NULL";
+                string query = @"
+                    SELECT
+                        l.playerid,
+                        COALESCE(e.facid, 0),
+                        " + pdFacSql + @",
+                        " + pdRoleSql + @",
+                        " + entRoleSql + @"
+                    FROM LoginLogoff l
+                    INNER JOIN (
+                        SELECT playerid, MAX(lid) AS max_lid FROM LoginLogoff
+                        WHERE playerid LIKE '7656%' GROUP BY playerid
+                    ) latest ON l.playerid = latest.playerid AND l.lid = latest.max_lid
+                    LEFT JOIN Entities e ON l.entityid = e.entityid
+                    LEFT JOIN PlayerData pd ON l.entityid = pd.entityid;";
+
+                int count = 0;
+                int rolesFromDb = 0;
+                using (var cmd = new SqliteCommand(query, connection))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        string steamId = reader.IsDBNull(0) ? "" : reader.GetString(0).Trim();
+                        if (!_allPlayers.TryGetValue(steamId, out var record)) continue;
+                        if (record.status == "Online") continue;
+
+                        int entityFac = reader.IsDBNull(1) ? 0 : Convert.ToInt32(reader.GetValue(1));
+                        int currentFac = entityFac;
+                        if (pdFacCol != null && !reader.IsDBNull(2))
+                        {
+                            currentFac = Convert.ToInt32(reader.GetValue(2));
+                        }
+                        record.factionId = currentFac;
+                        record.faction = ResolveFactionAbbrev(currentFac);
+
+                        object roleValue = null;
+                        if (pdRoleCol != null && !reader.IsDBNull(3)) roleValue = reader.GetValue(3);
+                        else if (entRoleCol != null && !reader.IsDBNull(4)) roleValue = reader.GetValue(4);
+                        string roleName = RoleNameFromValue(roleValue);
+                        if (!string.IsNullOrEmpty(roleName))
+                        {
+                            record.role = roleName;
+                            record.roleKnown = true;
+                            rolesFromDb++;
+                        }
+                        else
+                        {
+                            record.role = "--";
+                            record.roleKnown = false;
+                        }
+                        count++;
+                    }
+                }
+
+                int founders = ApplyFounderFromFactionsTable(connection, tables);
+                if (rolesFromDb > 0 || founders > 0)
+                {
+                    ZgbLog.Write($"[ZGB] -INFO- Faction ranks from database: {rolesFromDb} role(s), {founders} Founder(s) from a Factions owner column.");
+                }
+                return count;
+            }
+            catch (Exception ex)
+            {
+                ZgbLog.Write($"[ZGB] -WARN- Faction membership/role enrichment skipped: {ex.Message}");
+                return 0;
+            }
+        }
+
+        private int ApplyFounderFromFactionsTable(SqliteConnection connection, List<string> tables)
+        {
+            string facTable = tables.FirstOrDefault(t =>
+                string.Equals(t, "Factions", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(t, "Faction", StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrEmpty(facTable) || !SafeIdent(facTable)) return 0;
+
+            var facCols = GetColumns(connection, facTable);
+            if (!_loggedFactionSchema)
+            {
+                ZgbLog.Write($"[ZGB] -INFO- {facTable} columns: {string.Join(",", facCols)}");
+            }
+            else
+            {
+                ZgbLog.Write($"[ZGB] -INFO- {facTable} columns: {string.Join(",", facCols)}");
+            }
+            string idCol = PickColumn(facCols, new[] { "facid", "factionid", "id" }, new string[0], null);
+            string ownerCol = PickColumn(
+                facCols,
+                new[] { "ownerid", "ownerentityid", "founderid", "founder", "leaderid", "leader", "owner" },
+                new[] { "owner", "founder", "leader" },
+                new[] { "name", "abbrev", "origin" });
+            if (!SafeIdent(idCol) || !SafeIdent(ownerCol)) return 0;
+
+            int filled = 0;
+            string sql = "SELECT \"" + idCol + "\", \"" + ownerCol + "\" FROM \"" + facTable + "\";";
+            using (var cmd = new SqliteCommand(sql, connection))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    if (reader.IsDBNull(0) || reader.IsDBNull(1)) continue;
+                    int facId = Convert.ToInt32(reader.GetValue(0));
+                    string ownerRaw = Convert.ToString(reader.GetValue(1));
+                    if (string.IsNullOrWhiteSpace(ownerRaw)) continue;
+                    foreach (var record in _allPlayers.Values)
+                    {
+                        if (record.status == "Online") continue;
+                        if (record.factionId != facId) continue;
+                        if (!string.Equals(record.entityId, ownerRaw.Trim(), StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+                        if (!record.roleKnown)
+                        {
+                            record.role = "Founder";
+                            record.roleKnown = true;
+                            filled++;
+                        }
+                    }
+                }
+            }
+            return filled;
+        }
+
+        internal static string RoleNameFromValue(object value)
+        {
+            if (value == null || value is DBNull)
+            {
+                return null;
+            }
+            string text = Convert.ToString(value);
+            if (string.IsNullOrWhiteSpace(text) || text == "--")
+            {
+                return null;
+            }
+            int number;
+            if (int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+            {
+                return RoleNameFromInt(number);
+            }
+            string trimmed = text.Trim();
+            if (trimmed.Equals("None", StringComparison.OrdinalIgnoreCase)
+                || trimmed.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            if (trimmed.Equals("Owner", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Founder";
+            }
+            try
+            {
+                foreach (FactionRole role in Enum.GetValues(typeof(FactionRole)))
+                {
+                    if (string.Equals(role.ToString(), trimmed, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return role.ToString();
+                    }
+                }
+            }
+            catch { }
+            return trimmed;
+        }
+
+        private static string RoleNameFromInt(int number)
+        {
+            try
+            {
+                var role = (FactionRole)number;
+                if (!Enum.IsDefined(typeof(FactionRole), role))
+                {
+                    return null;
+                }
+                string name = role.ToString();
+                if (name.Equals("None", StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+                return name;
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static bool SafeIdent(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            foreach (char ch in name)
+            {
+                if (!(char.IsLetterOrDigit(ch) || ch == '_')) return false;
+            }
+            return true;
+        }
+
+        private static List<string> GetTables(SqliteConnection connection)
+        {
+            var tables = new List<string>();
+            try
+            {
+                using (var cmd = new SqliteCommand("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;", connection))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        if (!reader.IsDBNull(0))
+                        {
+                            tables.Add(reader.GetString(0));
+                        }
+                    }
+                }
+            }
+            catch { }
+            return tables;
         }
 
         private static List<string> GetColumns(SqliteConnection connection, string table)
