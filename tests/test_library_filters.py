@@ -16,6 +16,7 @@ import struct
 import sys
 
 import pytest
+from PyQt6.QtCore import Qt
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -111,7 +112,20 @@ def test_nothing_shows_until_a_category_is_clicked(tmp_path, qapp):
     page = LibraryPage()
     assert {item["name"] for item in page.items} == {"PulseRifle", "AdrenalineShot", "IronOre"}
     assert visible_names(page) == []
-    assert "Pick a category" in page.lbl_grid_empty.text()
+    assert page.lbl_grid_empty.text() == "Choose a Category"
+    page.show()
+    page.resize(1280, 800)
+    qapp.processEvents()
+    assert page.lbl_grid_empty.isVisible()
+    assert page.lbl_grid_empty.alignment() == Qt.AlignmentFlag.AlignCenter
+    grid_box = page.lbl_grid_empty.parent()
+    margins = grid_box.layout().contentsMargins()
+    inner_h = grid_box.height() - margins.top() - margins.bottom()
+    assert page.lbl_grid_empty.height() >= inner_h - 8
+    empty_center = page.lbl_grid_empty.geometry().center()
+    assert abs(empty_center.x() - grid_box.rect().center().x()) <= 16
+    assert abs(empty_center.y() - grid_box.rect().center().y()) <= 16
+    page.hide()
     click_category(page, "WEAPONS")
     assert visible_names(page) == ["PulseRifle"]
     click_category(page, "ORES")

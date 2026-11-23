@@ -106,11 +106,24 @@ def test_detail_card_and_stats_use_the_full_picture(tmp_path, qapp):
     assert detail.toImage().pixelColor(10, 60).red() > 200
     assert detail.toImage().pixelColor(110, 60).blue() > 200
     dialog = ItemStatsDialog(item, item.get("own_keys"), page)
-    assert dialog.lbl_picture.width() == 180
+    dialog.show()
+    dialog.resize(800, 720)
+    qapp.processEvents()
+    ## Top half is 50/50: the picture box and the details box share the header width.
+    header_box = dialog.lbl_picture.parent()
+    text_box = header_box.layout().itemAt(1).widget()
+    assert abs(dialog.lbl_picture.width() - text_box.width()) < 40
+    assert dialog.lbl_picture.width() > 250
+    ## Bottom half is the stats tree, about the same height as the header.
+    assert abs(dialog.tree_stats.height() - header_box.height()) < 80
     stats_pic = dialog.lbl_picture.pixmap()
     assert stats_pic is not None and not stats_pic.isNull()
-    assert stats_pic.toImage().pixelColor(10, 90).red() > 200
-    assert stats_pic.toImage().pixelColor(170, 90).blue() > 200
+    pic = stats_pic.toImage()
+    mid_y = pic.height() // 2
+    left_x = max(1, pic.width() // 8)
+    right_x = pic.width() - 1 - max(1, pic.width() // 8)
+    assert pic.pixelColor(left_x, mid_y).red() > 200
+    assert pic.pixelColor(right_x, mid_y).blue() > 200
     from PyQt6.QtWidgets import QLabel
     labels = [widget.text() for widget in dialog.findChildren(QLabel)]
     assert any(text.startswith("FILE NAME:") for text in labels)

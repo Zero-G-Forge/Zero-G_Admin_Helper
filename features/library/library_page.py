@@ -22,7 +22,8 @@
 from PyQt6.QtCore import Qt, QPoint
 from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, QGridLayout,
-                             QPushButton, QButtonGroup, QLineEdit, QSpinBox, QComboBox, QInputDialog, QMenu)
+                             QPushButton, QButtonGroup, QLineEdit, QSpinBox, QComboBox, QInputDialog, QMenu,
+                             QSizePolicy)
 
 ## Read-only bridge reads, the Safety Flow, and loadout templates saved on this PC.
 from features.shared import server_actions, loadouts
@@ -62,8 +63,8 @@ TAB_EMPTY_TEXT = {
 
 ## Shown when files are loaded but no category is selected yet.
 PICK_CATEGORY_TEXT = {
-    "items": "Pick a category to see items.",
-    "blueprints": "Pick a category to see blueprints.",
+    "items": "Choose a Category",
+    "blueprints": "Choose a Category",
 }
 
 ## Shown when the current category (and search text) matches nothing.
@@ -174,6 +175,7 @@ class LibraryPage(QWidget):
         self.lbl_grid_empty = QLabel("")
         self.lbl_grid_empty.setObjectName("DashEmptyLabel")
         self.lbl_grid_empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_grid_empty.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         grid_box_layout.addWidget(self.lbl_grid_empty, stretch=1)
         library_layout.addWidget(self.grid_box, stretch=1)
         page_grid.addWidget(library_card, 0, 0, 3, 1)

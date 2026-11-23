@@ -6,9 +6,9 @@
 ##   OTHER         every remaining stat
 ##   FILE DETAILS  mesh and sound paths and other file-only lines (folded shut)
 ## Values marked "(from Template)" come from the item's Ref parent, not its own block.
-## The header shows the whole item picture (about 180 px) on the left, with Name, FILE NAME,
-## ID, CATEGORY and TEMPLATE on the right. The STAT / VALUE tree sits under both, full width.
-## Read-only.
+## The window is split in half vertically. The top half is 50/50: a large full item picture
+## on the left (it grows with the window), and Name, FILE NAME, ID, CATEGORY and TEMPLATE
+## on the right. The bottom half is only the STAT / VALUE tree. Read-only.
 ## ==========================================
 
 # region Imports
@@ -17,7 +17,7 @@ import re
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem,
-                             QHeaderView, QAbstractItemView)
+                             QHeaderView, QAbstractItemView, QSizePolicy, QWidget)
 
 from features.dashboard.dashboard_page import make_card
 from features.library.item_tiles import make_fit_pixmap
@@ -65,23 +65,30 @@ class ItemStatsDialog(QDialog):
         ## Name that ZAH_main.css can use to style the window.
         self.setObjectName("ItemStatsDialog")
         self.setWindowTitle("Item Stats - " + item["display_name"])
-        self.resize(700, 720)
+        self.resize(860, 760)
+        self._stats_item = item
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         stats_card, stats_layout = make_card()
 
         # region Header
 
-        ## Whole picture on the left, Name / FILE NAME / ID / CATEGORY / TEMPLATE on the right.
-        header_row = QHBoxLayout()
+        ## Top half of the card: picture and details each take half the width and grow on resize.
+        header_box = QWidget()
+        header_box.setObjectName("ItemStatsHeader")
+        header_row = QHBoxLayout(header_box)
+        header_row.setContentsMargins(0, 0, 0, 0)
         header_row.setSpacing(16)
         self.lbl_picture = QLabel()
         self.lbl_picture.setObjectName("ItemStatsPicture")
-        self.lbl_picture.setFixedSize(180, 180)
         self.lbl_picture.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_picture.setPixmap(make_fit_pixmap(176, 176, item["filter_group"], item["display_name"], item.get("image_path")))
-        header_row.addWidget(self.lbl_picture, alignment=Qt.AlignmentFlag.AlignTop)
-        header_text = QVBoxLayout()
+        self.lbl_picture.setMinimumSize(160, 160)
+        self.lbl_picture.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        header_row.addWidget(self.lbl_picture, stretch=1)
+        text_box = QWidget()
+        text_box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        header_text = QVBoxLayout(text_box)
+        header_text.setContentsMargins(0, 0, 0, 0)
         header_text.setSpacing(4)
         lbl_name = QLabel(item["display_name"])
         lbl_name.setObjectName("PlayerNameLabel")
@@ -97,8 +104,8 @@ class ItemStatsDialog(QDialog):
             lbl_line.setObjectName("PlayerInfoLabel")
             header_text.addWidget(lbl_line)
         header_text.addStretch()
-        header_row.addLayout(header_text, stretch=1)
-        stats_layout.addLayout(header_row)
+        header_row.addWidget(text_box, stretch=1)
+        stats_layout.addWidget(header_box, stretch=1)
 
         # endregion
 
@@ -136,6 +143,21 @@ class ItemStatsDialog(QDialog):
         # endregion
 
         outer_layout.addWidget(stats_card)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._refit_picture()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._refit_picture()
+
+    def _refit_picture(self):
+        ## Fit the whole picture into the current left-half box, keeping its aspect ratio.
+        item = self._stats_item
+        box_w = max(16, self.lbl_picture.width() - 8)
+        box_h = max(16, self.lbl_picture.height() - 8)
+        self.lbl_picture.setPixmap(make_fit_pixmap(box_w, box_h, item["filter_group"], item["display_name"], item.get("image_path")))
 
     def _add_section(self, section_title, rows, expanded, mark_inherited=True):
         """Adds one fold-out section with a row per stat. Skips sections with nothing in them."""

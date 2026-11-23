@@ -151,7 +151,7 @@ The PDA editor reuses the same code editor widget, with the YAML highlighter pas
 
 Each item is a `HexTile` (`QAbstractButton`). It paints a hex badge with the item's picture when the downloaded server files have one, or initials when they do not, and a group colour (weapons, medical, and the other filters). Clicking a tile is the same idea as clicking a button: it emits a signal, and the detail card listens.
 
-`make_hex_pixmap` still draws a standalone hex when a clipped badge is needed. The detail card and the Item Stats window use `make_fit_pixmap` instead, so you see the whole picture with its aspect ratio kept.
+`make_hex_pixmap` still draws a standalone hex when a clipped badge is needed. The detail card and the Item Stats window use `make_fit_pixmap` instead, so you see the whole picture with its aspect ratio kept. In the stats window the picture fills the left half of the top half, and grows when you resize the window.
 
 ### Why the grid is a flow area, not a fixed table
 
@@ -351,7 +351,7 @@ Core 1.6.6 lets the bridge list and send `.epb` files, and Settings has a `Bluep
 
 ### Nothing shows until you pick a category
 
-A library with thousands of items or blueprints is noisy if everything appears at once. Both lists start empty. Clicking a category button, such as WEAPONS or BA, shows only that group. The FILTER button is the only way to tick more than one group at a time. The search box still narrows whatever is already selected.
+A library with thousands of items or blueprints is noisy if everything appears at once. Both lists start empty, with a `Choose a Category` label centered in the list plate. Clicking a category button, such as WEAPONS or BA, shows only that group. The FILTER button is the only way to tick more than one group at a time. The search box still narrows whatever is already selected.
 
 ## Validating, Comparing, and Saving Edits
 
