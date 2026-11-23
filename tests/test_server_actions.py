@@ -266,6 +266,64 @@ def test_offline_bridge_reads_nothing(qapp, monkeypatch, tmp_path):
     settle(qapp)
     assert bridge.sent == [] and not page.action_buttons["KICK"].isEnabled()
 
+
+def test_online_ping_offline_dash_and_log_count(qapp, monkeypatch, tmp_path, capsys):
+    page, bridge = players_page(qapp, monkeypatch, tmp_path)
+    assert page.tbl_players.item(0, 4).text() == "40 ms"
+    assert page.tbl_players.item(1, 4).text() == "--"
+    capsys.readouterr()
+    page._on_players_read(PLAYERS)
+    settle(qapp)
+    logged = capsys.readouterr().out
+    assert "[INFO] PlayersPage: 1 online player(s)" in logged
+    assert "player(s) shown" not in logged
+    assert page.tbl_players.rowCount() == 2
+
+
+def test_column_sort_keeps_staff_on_top_and_keeps_selection(qapp, monkeypatch, tmp_path):
+    from PyQt6.QtCore import Qt
+    from features.players import players_page as players_mod
+    rows = [
+        {"name": "Zed", "entityId": "1", "status": "Offline", "faction": "AAA", "playfield": "Akua", "ping": 0},
+        {"name": "Amy", "entityId": "2", "status": "Online", "faction": "BBB", "playfield": "Omicron", "ping": 40},
+        {"name": "Cal", "entityId": "3", "status": "Online", "faction": "CCC", "playfield": "Akua", "ping": 10, "permission": 9},
+        {"name": "Bea", "entityId": "4", "status": "Online", "faction": "AAA", "playfield": "Nesoi", "ping": 200, "permission": 3},
+    ]
+    player_col = players_mod.PLAYER_COLUMNS.index("PLAYER")
+    ping_col = players_mod.PLAYER_COLUMNS.index("PING")
+
+    def names(ordered):
+        return [row["name"] for row in ordered]
+
+    assert names(players_mod.sort_player_rows(rows, player_col, False)) == ["Bea", "Cal", "Amy", "Zed"]
+    assert names(players_mod.sort_player_rows(rows, player_col, True)) == ["Cal", "Bea", "Zed", "Amy"]
+    assert names(players_mod.sort_player_rows(rows, ping_col, False)) == ["Cal", "Bea", "Amy", "Zed"]
+    assert names(players_mod.sort_player_rows(rows, ping_col, True)) == ["Bea", "Cal", "Amy", "Zed"]
+    assert players_mod.format_ping({"status": "Offline", "ping": 0}) == "--"
+    assert players_mod.format_ping({"status": "Online", "ping": 0}) == "--"
+    assert players_mod.format_ping({"status": "Online", "ping": 40}) == "40 ms"
+
+    page, bridge = players_page(qapp, monkeypatch, tmp_path)
+    page.selected_player = {"entityId": "2"}
+    page._sort_column = None
+    page._sort_descending = False
+    page.fill_players(rows)
+    settle(qapp)
+    page._on_header_clicked(player_col)
+    settle(qapp)
+    assert [page.tbl_players.item(row, 0).text() for row in range(4)] == ["Bea", "Cal", "Amy", "Zed"]
+    assert page.tbl_players.currentRow() == 2
+    assert page.tbl_players.horizontalHeader().sortIndicatorSection() == player_col
+    assert page.tbl_players.horizontalHeader().sortIndicatorOrder() == Qt.SortOrder.AscendingOrder
+    page._on_header_clicked(player_col)
+    settle(qapp)
+    assert [page.tbl_players.item(row, 0).text() for row in range(4)] == ["Cal", "Bea", "Zed", "Amy"]
+    assert page.tbl_players.horizontalHeader().sortIndicatorOrder() == Qt.SortOrder.DescendingOrder
+    page.fill_players(rows)
+    settle(qapp)
+    assert [page.tbl_players.item(row, 0).text() for row in range(4)] == ["Cal", "Bea", "Zed", "Amy"]
+    assert page.tbl_players.item(page.tbl_players.currentRow(), 0).text() == "Amy"
+
 # endregion
 
 

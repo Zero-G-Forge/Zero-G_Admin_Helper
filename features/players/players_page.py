@@ -7,6 +7,9 @@
 ## Every action button stays greyed out; each one changes something on the server and gets its own step with Ray's OK.
 ## Wired (Nov 22, 2026): the list comes from plys, the detail from api:Request_Player_Info, the inventory from
 ## api:Request_Player_GetInventory (all read-only, refreshed every 15 s while the page is open).
+## Ping for ONLINE players is filled from Request_Player_Info (PlayerInfo.ping), in ms; OFFLINE players show "--".
+## Clicking a PLAYER LIST column header sorts that column A-Z, then Z-A; in-game GameMaster/Admin
+## (PlayerInfo.permission >= 3) stay at the top. The sort and the selection are kept across refreshes.
 ## MESSAGE (api:Request_InGameMessage_SinglePlayer), WARP (api:Request_Entity_Teleport / Request_Entity_ChangePlayfield), KICK (con:kick),
 ## BAN (con:ban), SAVE & APPLY (api:Request_Player_SetInventory) and the loadouts (api:Request_Player_AddItem)
 ## go through the ZAH Safety Flow in features/shared/server_actions.py. GOD MODE stays off (see GOD_MODE_TIP).
@@ -33,6 +36,12 @@ from features.dashboard.dashboard_page import make_card, spread_letters
 
 ## Columns of the PLAYER LIST table, as in the mockup.
 PLAYER_COLUMNS = ["PLAYER", "STATUS", "FACTION", "PLAYFIELD", "PING"]
+
+## PlayerInfo.permission: 0 is a regular player, 3 is GameMaster, 9 is Admin. Staff at 3 or above stay at the top.
+STAFF_PERMISSION = 3
+
+## Table columns whose cells are numbers (missing values, shown as "--", sort last).
+NUMERIC_COLUMNS = {"PING"}
 
 ## Stat bars in PLAYER DETAIL: (label text, CSS object name that sets the bar colour).
 STAT_BARS = [
@@ -74,6 +83,66 @@ BAN_LENGTHS = ["1h", "1d", "7d", "30d", "1y"]
 
 # region PlayersPage Class
 
+
+# region List Helpers
+
+def format_ping(player):
+    """Live ping in milliseconds for an online player, or '--' when there is none."""
+    if str((player or {}).get("status") or "") != "Online":
+        return "--"
+    try:
+        ping = int(player.get("ping"))
+    except (TypeError, ValueError):
+        return "--"
+    if ping <= 0:
+        return "--"
+    return str(ping) + " ms"
+
+
+def is_staff(player):
+    """True when PlayerInfo.permission is GameMaster (3) or Admin (9). Faction 'Admin' role is ignored."""
+    try:
+        return int((player or {}).get("permission")) >= STAFF_PERMISSION
+    except (TypeError, ValueError):
+        return False
+
+
+def ping_sort_value(player):
+    """(0, ping) for a real online ping, or (1, 0) so '--' sorts last in both directions."""
+    if format_ping(player) == "--":
+        return (1, 0)
+    return (0, int(player.get("ping")))
+
+
+def column_sort_key(player, column, descending):
+    """Sort key for one column. PING is numeric, with '--' last even when the order is Z-A."""
+    heading = PLAYER_COLUMNS[column]
+    if heading == "PING":
+        missing, value = ping_sort_value(player)
+        return (missing, -value if descending else value)
+    field_names = {"PLAYER": "name", "STATUS": "status", "FACTION": "faction", "PLAYFIELD": "playfield"}
+    text = str((player or {}).get(field_names[heading], "") or "").lower()
+    if descending:
+        return tuple(255 - ord(char) for char in text[:80])
+    return text
+
+
+def sort_player_rows(rows, column, descending):
+    """Staff first, then everyone else, each group sorted by the same column and direction."""
+    players = [row for row in rows if isinstance(row, dict)]
+    staff = [row for row in players if is_staff(row)]
+    others = [row for row in players if not is_staff(row)]
+    if column is None:
+        staff.sort(key=lambda row: (str(row.get("status")) != "Online", str(row.get("name", "")).lower()))
+        others.sort(key=lambda row: (str(row.get("status")) != "Online", str(row.get("name", "")).lower()))
+        return staff + others
+    staff.sort(key=lambda row: column_sort_key(row, column, descending))
+    others.sort(key=lambda row: column_sort_key(row, column, descending))
+    return staff + others
+
+# endregion
+
+
 class PlayersPage(QWidget):
 
     # region Setup
@@ -92,6 +161,9 @@ class PlayersPage(QWidget):
         self.players = []
         self.selected_player = None
         self.inventory_original = None
+        self._sort_column = None
+        self._sort_descending = False
+        self._info_by_id = {}
         self.setup_widgets()
         self._wire_live_data()
 
@@ -116,6 +188,8 @@ class PlayersPage(QWidget):
         self.tbl_players.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_players.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl_players.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tbl_players.horizontalHeader().setSortIndicatorShown(True)
+        self.tbl_players.horizontalHeader().setSectionsClickable(True)
         list_layout.addWidget(self.tbl_players, stretch=1)
         self.lbl_players_empty = QLabel("No player data yet.")
         self.lbl_players_empty.setObjectName("DashEmptyLabel")
@@ -288,6 +362,7 @@ class PlayersPage(QWidget):
         """Connects the table and buttons, and starts the read-only refresh timer."""
         try:
             self.tbl_players.itemSelectionChanged.connect(self._on_player_picked)
+            self.tbl_players.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
             self.action_buttons["MESSAGE"].clicked.connect(self._on_message_clicked)
             self.action_buttons["WARP"].clicked.connect(self._on_warp_clicked)
             self.action_buttons["KICK"].clicked.connect(self._on_kick_clicked)
@@ -335,30 +410,93 @@ class PlayersPage(QWidget):
         try:
             rows = reply.get("player_list") if isinstance(reply, dict) else None
             self.fill_players(rows if isinstance(rows, list) else [])
+            online = sum(1 for player in self.players if str(player.get("status") or "") == "Online")
+            print(f"[INFO] PlayersPage: {online} online player(s)")
+            self._request_online_info()
         except Exception as e:
             print(f"[ERROR] PlayersPage: Could not show players: {e}")
 
+    def _merge_live_info(self, player):
+        """Applies the last Request_Player_Info ping and permission for this entity, if any."""
+        entity_id = str((player or {}).get("entityId") or "")
+        extra = self._info_by_id.get(entity_id)
+        if extra:
+            player = dict(player)
+            player.update(extra)
+        return player
+
+    def _request_online_info(self):
+        """Reads Request_Player_Info (read-only) for each online player, once per list refresh."""
+        if not server_actions.bridge_is_connected(self):
+            return
+        for player in self.players:
+            if str(player.get("status") or "") != "Online":
+                continue
+            try:
+                entity_id = int(player.get("entityId"))
+            except (TypeError, ValueError):
+                continue
+            server_actions.read_bridge(
+                'api:Request_Player_Info {"id":' + str(entity_id) + "}",
+                ("API_RESULT", "ERROR"),
+                lambda reply, eid=str(entity_id): self._on_online_info_read(eid, reply),
+                lambda message: None,
+            )
+
+    def _on_online_info_read(self, entity_id, reply):
+        try:
+            info = reply.get("data") if isinstance(reply, dict) and reply.get("status") == "ok" else None
+            if not isinstance(info, dict):
+                return
+            extra = dict(self._info_by_id.get(entity_id) or {})
+            if "ping" in info:
+                extra["ping"] = info.get("ping")
+            if "permission" in info:
+                extra["permission"] = info.get("permission")
+            if extra == (self._info_by_id.get(entity_id) or {}):
+                return
+            self._info_by_id[entity_id] = extra
+            self.fill_players(self.players)
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Could not apply player ping: {e}")
+
+    def _on_header_clicked(self, column):
+        try:
+            if column < 0 or column >= len(PLAYER_COLUMNS):
+                return
+            if self._sort_column == column:
+                self._sort_descending = not self._sort_descending
+            else:
+                self._sort_column = column
+                self._sort_descending = False
+            self.fill_players(self.players)
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Could not sort the player list: {e}")
+
     def fill_players(self, rows):
-        """Fills PLAYER LIST (online first), keeping the picked player picked."""
+        """Fills PLAYER LIST, keeping the picked player picked and the current column sort."""
         picked_id = (self.selected_player or {}).get("entityId")
-        self.players = sorted([row for row in rows if isinstance(row, dict)],
-                              key=lambda row: (str(row.get("status")) != "Online", str(row.get("name", "")).lower()))
+        merged = [self._merge_live_info(row) for row in rows if isinstance(row, dict)]
+        self.players = sort_player_rows(merged, self._sort_column, self._sort_descending)
         self.tbl_players.blockSignals(True)
         self.tbl_players.setRowCount(len(self.players))
         picked_row = -1
         for row_number, player in enumerate(self.players):
             cells = [player.get("name", "--"), player.get("status", "--"), player.get("faction", "--"),
-                     player.get("playfield", "--"), player.get("ping", "--")]
+                     player.get("playfield", "--"), format_ping(player)]
             for column, cell in enumerate(cells):
                 self.tbl_players.setItem(row_number, column, QTableWidgetItem(str(cell)))
             if picked_id is not None and str(player.get("entityId")) == str(picked_id):
                 picked_row = row_number
+        header = self.tbl_players.horizontalHeader()
+        if self._sort_column is not None:
+            order = Qt.SortOrder.DescendingOrder if self._sort_descending else Qt.SortOrder.AscendingOrder
+            header.setSortIndicator(self._sort_column, order)
         if picked_row >= 0:
             self.tbl_players.selectRow(picked_row)
         self.tbl_players.blockSignals(False)
         self.lbl_players_empty.setText("" if self.players else "No players known yet.")
         self.lbl_players_empty.setVisible(not self.players)
-        print(f"[INFO] PlayersPage: {len(self.players)} player(s) shown")
 
     def _on_player_picked(self):
         """Shows the picked row, then reads its detail and inventory (read-only)."""

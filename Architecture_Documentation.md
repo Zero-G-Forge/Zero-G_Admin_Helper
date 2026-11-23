@@ -136,7 +136,7 @@ The **SERVERS** button is hidden unless two or more servers are connected. If it
 | --- | --- | --- | --- | --- |
 | `dashboard` | DASHBOARD | `features.dashboard.dashboard_page` | `DashboardPage` | Live players, uptime, cheat-flag alerts, bridge events; ANNOUNCE through the Safety Flow; SAVE and BACKUP not possible while the server runs |
 | `chat` | CHAT | `features.chat.chat_page` | `ChatPage` | Live chat from `chat:recent` (core 1.6.3); SEND and WARN through the Safety Flow; watch words; MUTE and DISCORD not possible |
-| `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Live list, detail and inventory (read-only); MESSAGE, WARP, KICK, BAN, SAVE & APPLY and loadouts through the Safety Flow; GOD MODE not possible from the server |
+| `players` | PLAYERS | `features.players.players_page` | `PlayersPage` | Live list, detail and inventory (read-only); PING for online players from `api:Request_Player_Info` (offline shows `--`); column-header A-Z / Z-A sort with GameMaster/Admin (`permission` 3+) pinned at the top; MESSAGE, WARP, KICK, BAN, SAVE & APPLY and loadouts through the Safety Flow; GOD MODE not possible from the server |
 | `factions` | FACTIONS | `features.factions.factions_page` | `FactionsPage` | Read-only: factions, members, and alliances from the bridge; SET RELATION and RENAME not possible |
 | `structures` | STRUCTURES | `features.structures.structures_page` | `StructuresPage` | Live list from `gents` with type filters; TELEPORT TO and DESTROY through the Safety Flow; SET FACTION not possible |
 | `playfields` | PLAYFIELDS | `features.playfields.playfields_page` | `PlayfieldsPage` | Live summary and loaded-playfield cards; UNLOAD, RESTART PLAYFIELD, and WIPE on ticked cards (owner, Safety Flow); no star map (no coordinates) |
@@ -1062,7 +1062,7 @@ Page wiring:
 
 | Page | Control | Bridge command | Changes the server |
 | --- | --- | --- | --- |
-| Players | PLAYER LIST | `plys` (every 15 s while open) | no |
+| Players | PLAYER LIST | `plys` (every 15 s while open), then `api:Request_Player_Info` for each online player (ping and permission). The `[INFO] PlayersPage` line reports only the online count. Offline ping shows `--`. Column headers sort A-Z / Z-A (PING numerically, `--` last). Players with `permission` 3 or higher (GameMaster / Admin) stay at the top. | no |
 | Players | PLAYER DETAIL bars | `api:Request_Player_Info {"id":N}` | no |
 | Players | INVENTORY | `api:Request_Player_GetInventory {"id":N}` | no |
 | Players | MESSAGE | `api:Request_InGameMessage_SinglePlayer {"id":N,"msg":"..."}` | yes |

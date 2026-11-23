@@ -565,6 +565,13 @@ If the line goes dead on its own (the server's network hiccups, the bridge reloa
 
 The connection only notices it is dead when it tries to send something. A small read-only question every 30 seconds is enough to find out, without changing anything on the server.
 
+
+### Why the Players list asks for Player Info after plys
+
+`plys` already has a ping field, but the live value from `IPlayer.Ping` is often 0. The real number is `PlayerInfo.ping` from `Request_Player_Info`. While the Players page is open, each 15 second refresh still lists everyone from `plys`, then asks `Request_Player_Info` only for the online players and shows that ping in milliseconds. Offline players show `--`, not 0. The log line reports only how many are online.
+
+Clicking a column header sorts that column A to Z, and clicking it again sorts Z to A. PING sorts as a number, and `--` stays last either way. Server staff stay at the top: Empyrion's `PlayerInfo.permission` is 0 for a regular player, 3 for GameMaster, and 9 for Admin, so anyone at 3 or above is pinned. The faction `role` field (Owner / Admin / Member) is a club rank, not server permission, so it is not used for this. The sort and the selected row are kept when the list refreshes.
+
 ### Watching several servers at once
 
 Each saved server is asked the same three read-only questions on its own short connection. Nothing is kept open, so a slow or dead server cannot block the main one. A message to all servers passes the Safety Flow once, then goes to each server in turn, and each one gets its own line in the audit log.
