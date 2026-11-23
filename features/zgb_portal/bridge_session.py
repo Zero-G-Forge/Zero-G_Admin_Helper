@@ -15,6 +15,23 @@ import socket
 # Keep the GUI thread from sitting on a dead host. The cockpit logs this value.
 BRIDGE_LOGIN_TIMEOUT = 5.0
 
+## Routine connect, handshake, and accepted lines print once per server per run.
+## Set True to print every connection again.
+BRIDGE_LOG_VERBOSE = False
+
+## host:port keys that have already logged a successful handshake this run.
+## A drop or auth failure removes the key so the next success is logged again.
+_logged_ok_servers = set()
+
+
+def _server_key(host, port):
+    return f"{host}:{port}"
+
+
+def note_session_drop(host, port):
+    ## The next successful connect to this server may log again.
+    _logged_ok_servers.discard(_server_key(host, port))
+
 
 class BridgeAuthError(Exception):
     """ZeroGBridge refused the auth:<token> handshake."""
@@ -91,14 +108,17 @@ def open_authenticated_socket(host, port, token, timeout=BRIDGE_LOGIN_TIMEOUT):
     Returns the open socket after an Authenticated reply. Any other result
     closes the socket and raises BridgeAuthError.
     """
-    print(f"[BridgeSession] -INFO- Connecting to ZeroGBridge socket at {host}:{port}...")
+    log_connect = BRIDGE_LOG_VERBOSE or _server_key(host, port) not in _logged_ok_servers
+    if log_connect:
+        print(f"[BridgeSession] -INFO- Connecting to ZeroGBridge socket at {host}:{port}...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.settimeout(timeout)
         sock.connect((str(host), int(port)))
         auth_token = token if token is not None else ""
         sock.sendall(f"auth:{auth_token}\r\n".encode("utf-8"))
-        print("[BridgeSession] -STATUS- Transmitted socket auth handshake.")
+        if log_connect:
+            print("[BridgeSession] -STATUS- Transmitted socket auth handshake.")
 
         raw_line = _read_auth_line(sock, timeout)
         try:
@@ -110,19 +130,24 @@ def open_authenticated_socket(host, port, token, timeout=BRIDGE_LOGIN_TIMEOUT):
 
         status = str(payload.get("status", ""))
         if payload.get("type") == "AUTH" and status == "Authenticated":
-            print(f"[BridgeSession] -STATUS- Authentication accepted on {host}:{port}.")
+            if log_connect:
+                print(f"[BridgeSession] -STATUS- Authentication accepted on {host}:{port}.")
+            _logged_ok_servers.add(_server_key(host, port))
             sock.settimeout(timeout)
             return sock
 
         message = str(payload.get("message", "Authentication failed"))
         print(f"[BridgeSession] -WARN- Authentication {status or 'failed'} on {host}:{port}.")
+        _logged_ok_servers.discard(_server_key(host, port))
         raise BridgeAuthError(status or "Denied", message)
     except BridgeAuthError as err:
         close_bridge_socket(sock)
+        _logged_ok_servers.discard(_server_key(host, port))
         print(f"[ERROR] {login_failure_message(host, port, err)}")
         raise
     except Exception as err:
         close_bridge_socket(sock)
+        _logged_ok_servers.discard(_server_key(host, port))
         print(f"[ERROR] {login_failure_message(host, port, err)}")
         raise
 

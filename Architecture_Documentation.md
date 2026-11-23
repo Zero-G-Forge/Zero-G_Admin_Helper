@@ -411,6 +411,8 @@ Empyrion loads `ZeroGBridge.Loader.ZeroGBridgeLoader`, which implements **API v2
 
 The auth token is read from `ZeroGBridge.json` only and is never written into log lines.
 
+Connect, handshake, and "authentication accepted" lines in the Debug Console (`features/zgb_portal/bridge_session.py` and `features/bridge/bridge_connection.py`) print once per server per run, and again after a drop or an auth failure. Errors and auth rejections always print. Routine `CommandPipe` `plys` queue and send lines are treated the same way. Set `BRIDGE_LOG_VERBOSE = True` in those modules to print every connection and poll again.
+
 ### Wire format
 
 - Each command is a **single line** ending in `\r\n`.

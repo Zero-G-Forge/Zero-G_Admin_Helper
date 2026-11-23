@@ -23,6 +23,35 @@ BRIDGE_LOGIN_TIMEOUT = 5.0
 ## (carriage return + new line), as the bridge rules require.
 LINE_END = "\r\n"
 
+## Routine connect and login-success lines print once per server per run.
+## Set True to print every connection again.
+BRIDGE_LOG_VERBOSE = False
+
+## host:port keys that have already logged a successful login this run.
+## A drop or login failure removes the key so the next success is logged again.
+_logged_ok_servers = set()
+
+## True after this run has already logged a routine plys send.
+## Cleared after a drop or send failure so the next plys may log again.
+_logged_plys_sent = False
+
+
+def _server_key(host, port):
+    return f"{host}:{port}"
+
+
+def _note_connection_drop(bridge_socket=None):
+    ## After a drop, the next successful login and the next plys poll may log again.
+    global _logged_plys_sent
+    _logged_plys_sent = False
+    if bridge_socket is None:
+        return
+    try:
+        peer = bridge_socket.getpeername()
+        _logged_ok_servers.discard(_server_key(peer[0], peer[1]))
+    except Exception:
+        _logged_ok_servers.clear()
+
 # endregion
 
 
@@ -54,12 +83,14 @@ def read_bridge_line(bridge_socket, max_bytes=65536):
             ## An empty chunk means the server hung up the call.
             if not chunk:
                 print("[WARNING] BridgeConnection: Server closed the connection")
+                _note_connection_drop(bridge_socket)
                 return None
             received_bytes += chunk
 
             ## Safety limit: a reply bigger than max_bytes is treated as broken.
             if len(received_bytes) > max_bytes:
                 print(f"[ERROR] BridgeConnection: Reply over {max_bytes} bytes, dropped")
+                _note_connection_drop(bridge_socket)
                 return None
 
         ## Keep only the first line, turn the bytes into text, and trim the \r\n.
@@ -68,9 +99,11 @@ def read_bridge_line(bridge_socket, max_bytes=65536):
 
     except socket.timeout:
         print(f"[WARNING] BridgeConnection: No reply within {bridge_socket.gettimeout()} s")
+        _note_connection_drop(bridge_socket)
         return None
     except Exception as e:
         print(f"[ERROR] BridgeConnection: Failed to read reply: {e}")
+        _note_connection_drop(bridge_socket)
         return None
 
 
@@ -84,7 +117,9 @@ def open_authenticated_socket(host, port, token, timeout=BRIDGE_LOGIN_TIMEOUT):
 
     bridge_socket = None
     try:
-        print(f"[INFO] BridgeConnection: Connecting to {host}:{port}...")
+        log_connect = BRIDGE_LOG_VERBOSE or _server_key(host, port) not in _logged_ok_servers
+        if log_connect:
+            print(f"[INFO] BridgeConnection: Connecting to {host}:{port}...")
 
         ## AF_INET + SOCK_STREAM means a normal internet (TCP) connection.
         bridge_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -102,17 +137,23 @@ def open_authenticated_socket(host, port, token, timeout=BRIDGE_LOGIN_TIMEOUT):
             reply_data = {}
 
         if reply_data.get("type") == "AUTH" and reply_data.get("status") == "Authenticated":
-            print(f"[SUCCESS] BridgeConnection: Logged in to {host}:{port}")
+            if log_connect:
+                print(f"[SUCCESS] BridgeConnection: Logged in to {host}:{port}")
+            _logged_ok_servers.add(_server_key(host, port))
             return bridge_socket
 
         ## Anything else counts as a failed login: hang up and report the status.
         print(f"[ERROR] BridgeConnection: Login refused on {host}:{port}, "
               f"status: {reply_data.get('status', 'no reply')}")
+        _logged_ok_servers.discard(_server_key(host, port))
+        _note_connection_drop()
         close_bridge_socket(bridge_socket)
         return None
 
     except Exception as e:
         print(f"[ERROR] BridgeConnection: Could not connect to {host}:{port}: {e}")
+        _logged_ok_servers.discard(_server_key(host, port))
+        _note_connection_drop()
         close_bridge_socket(bridge_socket)
         return None
 
@@ -134,13 +175,20 @@ def send_bridge_command(bridge_socket, command_text):
         bridge_socket.sendall(f"{command_text}{LINE_END}".encode("utf-8"))
 
         ## Only the first word is logged, so any values after it stay out of the log.
-        print(f"[INFO] BridgeConnection: Sent command: {command_text.split(':')[0]}")
+        ## Routine plys polls are logged once, then stay quiet until a drop.
+        verb = command_text.split(":")[0]
+        global _logged_plys_sent
+        if BRIDGE_LOG_VERBOSE or verb.lower() != "plys" or not _logged_plys_sent:
+            print(f"[INFO] BridgeConnection: Sent command: {verb}")
+            if verb.lower() == "plys":
+                _logged_plys_sent = True
 
         ## Wait for the single reply line (read_bridge_line handles the timeout).
         return read_bridge_line(bridge_socket)
 
     except Exception as e:
         print(f"[ERROR] BridgeConnection: Failed to send command: {e}")
+        _note_connection_drop(bridge_socket)
         return None
 
 # endregion

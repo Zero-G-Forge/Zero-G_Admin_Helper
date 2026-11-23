@@ -32,6 +32,10 @@ INPUT_DELAY_SEC = 0.5
 ## How long the thread waits for a new command before checking whether it should stop.
 QUEUE_CHECK_SEC = 0.25
 
+## Routine "Queued command: plys" lines print once, then stay quiet until a drop.
+## Set True to print every queued command again.
+BRIDGE_LOG_VERBOSE = False
+
 # endregion
 
 
@@ -62,6 +66,10 @@ class CommandPipe(QThread):
         ## The thread keeps running while this is True; stop() flips it to False.
         self.is_running = False
 
+        ## True after this pipe has already logged a routine plys queue.
+        ## Cleared after a drop so the next plys may log again.
+        self._logged_plys_queue = False
+
     
     ## Adds one command to the queue. Safe to call from the window thread at any time.
     ## The thread sends it later, in order, after the 0.5 s pause.
@@ -73,7 +81,12 @@ class CommandPipe(QThread):
             return
         self.command_queue.put(command_str)
         ## Only the first word is logged, so values after the colon stay private.
-        print(f"[INFO] CommandPipe: Queued command: {command_str.split(':')[0]}")
+        ## Routine plys polls are logged once, then stay quiet until a drop.
+        verb = command_str.split(":")[0]
+        if BRIDGE_LOG_VERBOSE or verb.lower() != "plys" or not self._logged_plys_queue:
+            print(f"[INFO] CommandPipe: Queued command: {verb}")
+            if verb.lower() == "plys":
+                self._logged_plys_queue = True
 
     ## Asks the thread to finish its current step and shut down cleanly.
     ## The connection itself is closed by the thread, in run(), on its way out.
@@ -127,6 +140,7 @@ class CommandPipe(QThread):
                 ## (Nov 22, 2026: MainCockpit now reconnects after such a drop; see its Auto-Reconnect region.)
                 if reply_text is None:
                     print("[WARNING] CommandPipe: No reply, treating connection as lost")
+                    self._logged_plys_queue = False
                     self.connection_changed.emit(self.server_name, False)
                     break
 
@@ -140,6 +154,7 @@ class CommandPipe(QThread):
 
         except Exception as e:
             print(f"[ERROR] CommandPipe: Background loop failed: {e}")
+            self._logged_plys_queue = False
             self.connection_changed.emit(self.server_name, False)
 
         ## "finally" always runs, even after return or an error, so the socket is always closed.

@@ -591,7 +591,7 @@ The thread that draws the window is also the thread that handles clicks. If that
 
 ZAH uses `QThread` helpers for that walk:
 
-- `CommandPipe` keeps the bridge socket, logs in, and sends queued commands about half a second apart.
+- `CommandPipe` keeps the bridge socket, logs in, and sends queued commands about half a second apart. The Debug Console logs the first successful connect per server, and the first `plys` poll, then stays quiet on routine reconnects and polls unless the link drops or `BRIDGE_LOG_VERBOSE` is on. Errors and refused logins still always appear.
 - `ServerFileDownloadWorker` copies the server's files for the Settings download button.
 - `FailedLoginFetcher` loads the failed-login table.
 - `UserTaskRunner` lists, saves, and deletes login users.

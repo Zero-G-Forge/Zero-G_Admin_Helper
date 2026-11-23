@@ -19,6 +19,7 @@ import uuid
 from features.zgb_portal.bridge_session import (
     BridgeAuthError,
     close_bridge_socket,
+    note_session_drop,
     open_authenticated_socket,
     send_bridge_command,
 )
@@ -95,6 +96,8 @@ class ServerFilesSession:
         except ValueError:
             port = 30500
         self.label = f"{host}:{port}"
+        self.host = host
+        self.port = port
         if not host:
             raise ServerFilesError("config", "No active server is saved in ZAH.")
         if not token:
@@ -137,6 +140,7 @@ class ServerFilesSession:
         try:
             send_bridge_command(self.sock, command)
         except OSError as e:
+            note_session_drop(getattr(self, "host", ""), getattr(self, "port", 0))
             raise ServerFilesError("closed", f"Lost the connection to the server ({type(e).__name__}).") from None
         self.last_send_time = time.monotonic()
 
@@ -151,8 +155,10 @@ class ServerFilesSession:
             except (TimeoutError, socket.timeout):
                 continue
             except OSError as e:
+                note_session_drop(getattr(self, "host", ""), getattr(self, "port", 0))
                 raise ServerFilesError("closed", f"Lost the connection to the server ({type(e).__name__}).") from None
             if not raw_line:
+                note_session_drop(getattr(self, "host", ""), getattr(self, "port", 0))
                 raise ServerFilesError("closed", "The server closed the connection.")
             if not raw_line.endswith(b"\n"):
                 raise ServerFilesError("protocol", "A reply from the server was cut off or too large.")

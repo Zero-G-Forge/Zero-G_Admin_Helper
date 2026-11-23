@@ -26,6 +26,7 @@ from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
 from .bridge_session import (
     BridgeAuthError,
     close_bridge_socket,
+    note_session_drop,
     open_authenticated_socket,
     send_bridge_command,
 )
@@ -96,6 +97,7 @@ def bridge_request(profile: dict, command: str, want_type: str, req_id: str | No
             except (TimeoutError, socket.timeout):
                 continue
             if not raw:
+                note_session_drop(host, port)
                 raise PortalBridgeError("closed", f"{host}:{port} closed the connection.")
             try:
                 payload = json.loads(raw.decode("utf-8-sig").strip())
@@ -111,6 +113,7 @@ def bridge_request(profile: dict, command: str, want_type: str, req_id: str | No
     except PortalBridgeError:
         raise
     except OSError as err:
+        note_session_drop(host, port)
         raise PortalBridgeError("offline", _scrub(f"Connection to {host}:{port} failed ({err.__class__.__name__}).", token)) from None
     finally:
         close_bridge_socket(sock)
