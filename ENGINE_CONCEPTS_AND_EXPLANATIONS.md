@@ -436,9 +436,9 @@ The tests start the bridge's real C# file code as a small local stand-in server 
 
 ## The Safety Flow
 
-### Four brakes before a server change
+### Four brakes before a major server change
 
-A kick, a ban or a wipe cannot be undone with Ctrl+Z, so every such button goes through the same four brakes:
+A kick, a ban or a wipe cannot be undone with Ctrl+Z, so those major live changes go through the same four brakes:
 
 1. **Who are you?** The role ladder decides. An action that is not in the table is refused, so a new button can never be "open by accident".
 2. **What exactly?** The real command line is shown before anything else. What is shown is what is sent.
@@ -446,6 +446,8 @@ A kick, a ban or a wipe cannot be undone with Ctrl+Z, so every such button goes 
 4. **Last chance.** 15 seconds to change one's mind, with CANCEL.
 
 After the send, one line goes into the audit log, like a ship's logbook: who did what, when, on which server, and what the server answered. Cancelled actions are logged too.
+
+Smaller actions still check the role and write that audit line, but they skip the typed CONFIRM and the delay. That covers giving an item, messages and announcements, teleport, inventory and loadout edits, and editing a ban or a user. LIVE MODE file uploads, a core upload or reload, and installing or removing a mod keep their own confirmation, outside this list.
 
 ### Read-only views need no brakes
 
@@ -545,7 +547,7 @@ Inventory jumps, speed or position changes, and god mode turned on without a com
 
 ### Why a kick or ban is never sent from this page
 
-A settings page decides what to watch, not what to do to a player. Suggest PREVIEW BAN only fills the command box on the Alerts page. The admin still has to start PREVIEW BAN, type CONFIRM, and wait through the 15 second delay. There is no automatic kick or ban.
+A settings page decides what to watch, not what to do to a player. Suggest PREVIEW BAN only fills the command box on the Alerts page. The admin still has to start PREVIEW BAN, type CONFIRM, and wait through the 15 second delay, because a ban is a major live change. There is no automatic kick or ban.
 
 ### Why the watch-word list is not reset
 
@@ -580,7 +582,7 @@ Each saved server is asked the same three read-only questions on its own short c
 
 ### Why "pending edits" became GIVE ITEM
 
-The first drawing had a queue of pending edits that would be sent later. ZAH has no such queue: every server change already gets its own preview and CONFIRM in the Safety Flow, so a second waiting room would only add a step. The button now gives the item straight through the Safety Flow.
+The first drawing had a queue of pending edits that would be sent later. ZAH has no such queue: giving an item is a minor action, so it checks the role, sends at once, and writes an audit line, without CONFIRM or the delay.
 
 ### Templates live on the PC
 

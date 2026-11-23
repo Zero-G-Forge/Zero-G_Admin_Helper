@@ -23,7 +23,7 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 - The main window never opens until a login succeeds (fail closed).
 - **Bridge auto-connect** is off by default and is stored in `data/app_settings.json`.
 - Commands that would change the server (kick, ban, upload, live save, restart, and similar) stay **disabled** in the user interface, with the tooltip `Coming in a later step.`, until they are wired and approved.
-- (Nov 22, 2026: every such button is now either wired through the ZAH Safety Flow, with preview, typed CONFIRM, a 15 s countdown, an audit line and a role check, or disabled with the real reason it cannot work. See **Live Pages and the Safety Flow**.)
+- (Nov 22, 2026: every such button is now either wired through `run_server_action` (role check and audit; major live changes also use the Safety Flow: preview, typed CONFIRM, and a 15 s countdown), or disabled with the real reason it cannot work. See **Live Pages and the Safety Flow**.)
 - Secrets (auth token, passwords, database URL, developer key, session tokens) are never printed, logged, or committed. Local secrets live under `data/`, which is git-ignored.
 - New bridge commands need explicit approval before they are written. The read-only `files:` commands (`files:info`, `files:list`, `files:get`) were approved and added in core 1.6.1. They can read, never write.
 - Core 1.6.4 adds the read-only `files:catalog` command, and optional `scenario` or `save` folder names on `files:list` and `files:get`, so ZAH can list every scenario and save folder and download from a chosen pair. `files:put` still uses only the live yaml/game pair and ignores those extra names. `protocol` stays 1.
@@ -1041,12 +1041,10 @@ Widgets are targeted by `objectName` (`SettingsPage`, `DashCard`, `DashCardTitle
 Pages talk to the bridge through `features/shared/server_actions.py`, one short session per command (`live_client.bridge_request`, which now also accepts a tuple of reply types so an `ERROR` comes back at once).
 
 - **Read-only** (`read_bridge`): lists, stats and inventories. No confirmation. Runs on Qt's thread pool.
-- **Server-changing** (`run_server_action`): the ZAH Safety Flow.
-  1. Role check from `ACTION_ROLES` (an action missing from the table is refused) and a connected bridge.
-  2. Command preview: the exact line that will be sent.
-  3. `CONFIRM` typed by hand.
-  4. A 15 second countdown (`SAFETY_DELAY_SEC`) with CANCEL.
-  5. The role is checked again, the command is sent, and one line is added to `data/audit/server_actions.jsonl` (time, user, role, server, action, command, ok, detail). A cancel is audited too.
+- **Server-changing** (`run_server_action`): a role check from `ACTION_ROLES` (an action missing from the table is refused) and a connected bridge, then the send, then one line in `data/audit/server_actions.jsonl` (time, user, role, server, action, command, ok, detail).
+  - **Major** (`MAJOR_ACTIONS`): kick, ban, wipe, unload or restart a playfield, and destroy a structure also go through the Safety Flow: command preview, `CONFIRM` typed by hand, and a 15 second countdown (`SAFETY_DELAY_SEC`) with CANCEL. The role is checked again after the countdown. A cancel is audited too.
+  - **Minor**: give item, messages and announcements (including WARN and BROADCAST), teleport, inventory and loadout edits, and unban run at once after the role check. They still get an audit line.
+  - LIVE MODE file uploads (`files:put`), core upload and `hot:reload`, and mod install or remove keep their own confirmation (upload_flow and the portal) and are not in `MAJOR_ACTIONS` yet.
 - A list of commands (a loadout, or several playfields) is sent one by one, `gap_sec` apart (0.5 s by default, 20 s for RESTART PLAYFIELD); the first refusal stops the rest.
 - Tests replace `SEND_FUNCTION` and `ask_safety_flow`, so no test reaches a server.
 

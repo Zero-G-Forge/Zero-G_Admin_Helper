@@ -51,6 +51,21 @@ def test_countdown_accepts_and_cancel_rejects(qapp, monkeypatch):
 def test_default_delay_is_15_seconds():
     assert server_actions.SAFETY_DELAY_SEC == 15 and server_actions.CONFIRM_WORD == "CONFIRM"
 
+
+def test_major_actions_keep_confirm_and_minors_are_the_rest():
+    majors = server_actions.MAJOR_ACTIONS
+    assert majors == {
+        "player_kick", "player_ban", "alert_ban", "playfield_wipe",
+        "playfield_unload", "playfield_restart", "structure_destroy",
+    }
+    assert majors <= set(server_actions.ACTION_ROLES)
+    minors = set(server_actions.ACTION_ROLES) - majors
+    assert minors == {
+        "player_message", "player_unban", "player_warp", "player_inventory",
+        "player_loadout", "give_item", "chat_send", "chat_warn", "announce",
+        "structure_teleport", "multi_broadcast",
+    }
+
 # endregion
 
 
@@ -93,6 +108,31 @@ def test_cancel_sends_nothing_but_is_audited(qapp, monkeypatch, tmp_path):
     assert bridge.sent == []
     rows = server_actions.read_audit()
     assert rows[0]["ok"] is False and rows[0]["detail"] == "cancelled before sending"
+
+
+def test_minor_action_sends_without_confirm_and_is_audited(qapp, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QWidget
+    bridge = install(monkeypatch, tmp_path, {"api:": {"type": "API_RESULT", "status": "ok"}}, safety_answer=False)
+    page = QWidget()
+    host(page, "admin")
+    results = []
+    server_actions.run_server_action(page, "give_item", "t", "api:Request_Player_AddItem",
+                                     lambda ok, reply: results.append(ok))
+    settle(qapp)
+    assert bridge.asked == []
+    assert bridge.sent == ["api:Request_Player_AddItem"] and results == [True]
+    row = json.loads(open(server_actions.AUDIT_FILE).read().splitlines()[-1])
+    assert row["action"] == "give_item" and row["ok"] is True
+
+
+def test_cancelled_confirm_still_blocks_a_major_action(qapp, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QWidget
+    bridge = install(monkeypatch, tmp_path, safety_answer=False)
+    page = QWidget()
+    host(page, "moderator")
+    assert server_actions.run_server_action(page, "player_kick", "t", "con:kick 1 'x'") is False
+    settle(qapp)
+    assert bridge.sent == [] and bridge.asked == ["con:kick 1 'x'"]
 
 
 def test_send_then_audit(qapp, monkeypatch, tmp_path):
@@ -213,10 +253,21 @@ def test_kick_and_ban_commands(qapp, monkeypatch, tmp_path):
 def test_cancelled_safety_flow_sends_nothing(qapp, monkeypatch, tmp_path):
     from PyQt6.QtWidgets import QInputDialog
     page, bridge = players_page(qapp, monkeypatch, tmp_path, "admin", safety_answer=False)
+    monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("griefing base", True)))
+    page._on_kick_clicked()
+    settle(qapp)
+    assert not any(command.startswith("con:kick") for command in bridge.sent)
+    assert any("con:kick" in preview for preview in bridge.asked)
+
+
+def test_message_sends_without_confirm(qapp, monkeypatch, tmp_path):
+    from PyQt6.QtWidgets import QInputDialog
+    page, bridge = players_page(qapp, monkeypatch, tmp_path, "admin", safety_answer=False)
     monkeypatch.setattr(QInputDialog, "getText", staticmethod(lambda *a, **k: ("hello", True)))
     page._on_message_clicked()
     settle(qapp)
-    assert not any("InGameMessage" in command for command in bridge.sent)
+    assert any("InGameMessage" in command for command in bridge.sent)
+    assert bridge.asked == []
 
 
 def test_inventory_edit_and_apply(qapp, monkeypatch, tmp_path):
@@ -685,7 +736,7 @@ def test_multi_server_page_cards_and_broadcasts(monkeypatch, tmp_path):
     monkeypatch.setattr(server_actions, "SEND_FUNCTION", lambda c, w, p=None: sent_profiles.append(p["server_name"]) or real_send(c, w, p))
     page._on_broadcast_all()
     settle(qapp)
-    assert sent_profiles == ["Alpha", "Beta"] and len(bridge.asked) == 1
+    assert sent_profiles == ["Alpha", "Beta"] and bridge.asked == []
     audit_lines = server_actions.read_audit(10)
     assert len([line for line in audit_lines if line.get("action") == "multi_broadcast"]) == 2
     monkeypatch.setattr(multi_server_page.QInputDialog, "getText", staticmethod(lambda *a, **k: ("Beta only", True)))

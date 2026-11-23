@@ -2,12 +2,12 @@
 ## MODULE: features/shared/server_actions.py
 ## DESCRIPTION: The one path every page uses to talk to ZeroGBridge outside the cockpit's own pipe.
 ##   read_bridge          read-only commands (lists, stats, inventories): no confirmation, run in the background.
-##   run_server_action    anything that changes the game or the server, through the ZAH Safety Flow:
+##   run_server_action    anything that changes the game or the server:
 ##                          1. role check (fail closed) and a connected bridge
-##                          2. command preview
-##                          3. the word CONFIRM typed by hand
-##                          4. a 15 second countdown with Cancel
-##                          5. the send, then one audit log line (data/audit/server_actions.jsonl)
+##                          2. for a major live change (MAJOR_ACTIONS): the ZAH Safety Flow
+##                             (preview, the word CONFIRM typed by hand, a 15 second countdown with Cancel)
+##                          3. the send, then one audit log line (data/audit/server_actions.jsonl)
+##                        Minor actions (give item, messages, teleport, ban/user edits) skip CONFIRM and the delay.
 ## Tests swap SEND_FUNCTION for a stand-in, so no test can ever reach the live server.
 ## The bridge password is only ever written to the socket by live_client; it is never logged here.
 ## =====================================================================
@@ -57,6 +57,21 @@ ACTION_ROLES = {
     "playfield_wipe": "owner",
     "multi_broadcast": "admin",
     "alert_ban": "admin",
+}
+
+## Major live changes keep CONFIRM and the 15 second delay. Everything else in ACTION_ROLES
+## runs at once after the role check, and is still written to the audit log.
+## Kick, ban, wipe, stopping or restarting a playfield, and destroying a structure.
+## LIVE MODE file uploads (files:put), core upload/reload, and mod install/remove keep their
+## own confirmation (upload_flow and the portal) and are not sent through this table yet.
+MAJOR_ACTIONS = {
+    "player_kick",
+    "player_ban",
+    "alert_ban",
+    "playfield_wipe",
+    "playfield_unload",
+    "playfield_restart",
+    "structure_destroy",
 }
 
 ## Reply statuses that mean the bridge did what was asked.
@@ -304,7 +319,7 @@ def ask_safety_flow(parent, title, command_preview, explanation=""):
 
 def run_server_action(widget, action_key, title, command, on_done=None, explanation="", want_types=WRITE_REPLY_TYPES,
                       profile=None, preview=None, gap_sec=0.5, profiles=None):
-    """Role check, Safety Flow, send in the background, audit line, then on_done(ok, reply_or_message).
+    """Role check, Safety Flow for a major action, send in the background, audit line, then on_done(ok, reply_or_message).
     Returns False when it stopped before sending (no role, no bridge, cancelled)."""
     try:
         if not command:
@@ -313,13 +328,14 @@ def run_server_action(widget, action_key, title, command, on_done=None, explanat
         if reason:
             print(f"[WARN] ServerActions: {action_key} refused before sending: {reason}")
             return False
-        if not ask_safety_flow(widget, title, preview or (command if isinstance(command, str) else "\n".join(command)), explanation):
-            write_audit(widget, action_key, command, False, "cancelled before sending")
-            return False
+        if action_key in MAJOR_ACTIONS:
+            if not ask_safety_flow(widget, title, preview or (command if isinstance(command, str) else "\n".join(command)), explanation):
+                write_audit(widget, action_key, command, False, "cancelled before sending")
+                return False
 
-        ## Asked again right before the send, in case the role or the bridge changed during the countdown.
-        if not user_may(widget, action_key):
-            return False
+            ## Asked again right before the send, in case the role or the bridge changed during the countdown.
+            if not user_may(widget, action_key):
+                return False
 
         def finished(reply):
             ok = reply_ok(reply)
