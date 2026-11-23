@@ -597,6 +597,73 @@ def test_factions_page_reads_lists_and_alliances(monkeypatch, tmp_path):
     assert not any(not cmd.startswith(("api:Request_Get_Factions", "plys", "api:Request_AlliancesAll")) for cmd in bridge.sent)
     cockpit.close()
 
+
+def test_faction_role_and_tag_helpers():
+    from features.shared.faction_display import format_faction_role, faction_tag
+    assert format_faction_role("Founder") == "Owner"
+    assert format_faction_role("owner") == "Owner"
+    assert format_faction_role("Admin") == "Admin"
+    assert format_faction_role("Member") == "Member"
+    assert format_faction_role("None") == "--"
+    assert format_faction_role("") == "--"
+    assert format_faction_role(None) == "--"
+    factions = [{"factionId": 103, "abbrev": "MEC", "name": "Mechanics (Admin)"},
+                {"factionId": 100, "abbrev": "SOF", "name": "Some Old Farts"},
+                {"factionId": 1, "abbrev": "Hum", "name": "Human"}]
+    assert faction_tag(factions, 103, fallback="[GoG]") == "[MEC]"
+    assert faction_tag(factions, 100, fallback="[MEC]") == "[SOF]"
+    assert faction_tag(factions, 1, fallback="[Hum]") == "--"
+    assert faction_tag(factions, 999, fallback="[OLD]") == "[OLD]"
+
+
+def test_factions_members_use_faction_id_and_known_roles(monkeypatch, tmp_path):
+    from features.factions import factions_page
+    from features.players.players_page import PlayersPage
+    factions = {"type": "API_RESULT", "status": "ok", "data": {"factions": [
+        {"origin": 1, "factionId": 100, "name": "Some Old Farts", "abbrev": "SOF"},
+        {"origin": 1, "factionId": 103, "name": "Mechanics (Admin)", "abbrev": "MEC"}]}}
+    players = {"type": "PLAYER_CACHE", "player_list": [
+        {"entityId": "2057", "name": "Manta", "factionId": 103, "faction": "[GoG]", "role": "Founder", "status": "Online"},
+        {"entityId": "61373", "name": "HammerBlow", "factionId": 103, "faction": "[GoG]", "status": "Offline"},
+        {"entityId": "22153", "name": "E21L", "factionId": 100, "faction": "[MEC]", "role": "Member", "status": "Offline"}]}
+    alliances = {"type": "API_RESULT", "status": "ok", "data": {"alliances": []}}
+    bridge = install(monkeypatch, tmp_path, {"api:Request_Get_Factions": factions, "plys": players,
+                                             "api:Request_AlliancesAll": alliances})
+    qapp = get_qapp()
+    page = factions_page.create_page()
+    host(page, role="moderator")
+    settle(qapp)
+    mec = next(page.lst_factions.item(i) for i in range(page.lst_factions.count()) if "Mechanics" in page.lst_factions.item(i).text())
+    sof = next(page.lst_factions.item(i) for i in range(page.lst_factions.count()) if "Some Old Farts" in page.lst_factions.item(i).text())
+    assert "2 members" in mec.text()
+    assert "1 members" in sof.text()
+    mec.setSelected(True)
+    settle(qapp)
+    names = [page.tbl_members.item(row, 0).text() for row in range(page.tbl_members.rowCount())]
+    roles = [page.tbl_members.item(row, 1).text() for row in range(page.tbl_members.rowCount())]
+    statuses = [page.tbl_members.item(row, 2).text() for row in range(page.tbl_members.rowCount())]
+    assert names == ["Manta", "HammerBlow"]
+    assert roles == ["Owner", "--"]
+    assert statuses == ["Online", "Offline"]
+    sof.setSelected(True)
+    settle(qapp)
+    assert page.tbl_members.rowCount() == 1 and page.tbl_members.item(0, 0).text() == "E21L"
+    assert page.tbl_members.item(0, 1).text() == "Member"
+
+    player_page = PlayersPage()
+    host(player_page, role="moderator")
+    settle(qapp)
+    ## Default view is online only, so only Manta is listed; show all to check the others.
+    if player_page.btn_list_filter.text() == "SHOW ALL PLAYERS":
+        player_page.btn_list_filter.click()
+        settle(qapp)
+    shown = {player_page.tbl_players.item(row, 0).text(): player_page.tbl_players.item(row, 2).text()
+             for row in range(player_page.tbl_players.rowCount())}
+    assert shown.get("Manta") == "[MEC]"
+    assert shown.get("HammerBlow") == "[MEC]"
+    assert shown.get("E21L") == "[SOF]"
+
+
 # endregion
 
 

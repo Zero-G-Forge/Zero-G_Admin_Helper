@@ -239,6 +239,7 @@ namespace ZeroGBridge
             Interlocked.Exchange(ref _loggedFactionCount, playerFactions);
             if (prevKey != key)
                 ZgbLog.Write($"[ZGB] -INFO- Legacy Event_Get_Factions (seqNr {seqNr}, {whose}): {received} received, {stored} player faction(s) stored, {npc} NPC dropped; {playerFactions} with a real player available for alert targeting.");
+            _playerCache.RefreshFactionTags();
         }
 
         /// <summary>Max rows per DEBUG sample line for dropped/skipped faction rows.</summary>

@@ -15,6 +15,7 @@
 ## Clicking a PLAYER LIST column header sorts that column A-Z, then Z-A; in-game GameMaster/Admin
 ## (PlayerInfo.permission >= 3) stay at the top in both views. The sort, the filter, and the selection
 ## are kept across refreshes.
+## FACTION tags are taken from Request_Get_Factions by factionId, so a leftover plys tag is not shown.
 ## MESSAGE (api:Request_InGameMessage_SinglePlayer), WARP (api:Request_Entity_Teleport / Request_Entity_ChangePlayfield), KICK (con:kick),
 ## BAN (con:ban), SAVE & APPLY (api:Request_Player_SetInventory) and the loadouts (api:Request_Player_AddItem)
 ## go through the ZAH Safety Flow in features/shared/server_actions.py. GOD MODE stays off (see GOD_MODE_TIP).
@@ -32,6 +33,7 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, 
 
 ## Read-only bridge reads and the Safety Flow for every server-changing button.
 from features.shared import server_actions
+from features.shared.faction_display import faction_tag, format_faction_role
 from features.shared.loadouts import load_templates, list_template_names, TEMPLATE_NAMES
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
@@ -187,6 +189,7 @@ class PlayersPage(QWidget):
         self._show_all_players = False
         self._shown_players = []
         self._info_by_id = {}
+        self.factions = []
         self.setup_widgets()
         self._wire_live_data()
 
@@ -458,8 +461,21 @@ class PlayersPage(QWidget):
                 return
             server_actions.read_bridge("plys", "PLAYER_CACHE", self._on_players_read,
                                        lambda message: print(f"[ERROR] PlayersPage: plys failed: {message}"))
+            server_actions.read_bridge('api:Request_Get_Factions {"id":1}', ("API_RESULT", "ERROR"),
+                                       self._on_factions_read,
+                                       lambda message: print(f"[ERROR] PlayersPage: Factions read failed: {message}"))
         except Exception as e:
             print(f"[ERROR] PlayersPage: Refresh failed: {e}")
+
+    def _on_factions_read(self, reply):
+        try:
+            data = reply.get("data") if isinstance(reply, dict) else None
+            rows = data.get("factions") if isinstance(data, dict) else None
+            self.factions = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+            if self.players:
+                self.fill_players(self.players)
+        except Exception as e:
+            print(f"[ERROR] PlayersPage: Could not read factions: {e}")
 
     def _on_players_read(self, reply):
         try:
@@ -469,6 +485,13 @@ class PlayersPage(QWidget):
             self._request_online_info()
         except Exception as e:
             print(f"[ERROR] PlayersPage: Could not show players: {e}")
+
+    def _apply_faction_fields(self, player):
+        """Fills the faction tag from the live faction list, and the club rank for display."""
+        player = dict(player or {})
+        player["faction"] = faction_tag(self.factions, player.get("factionId"), fallback=player.get("faction") or "--")
+        player["role"] = format_faction_role(player.get("role"))
+        return player
 
     def _merge_live_info(self, player):
         """Applies the last Request_Player_Info ping and permission for this entity, if any."""
@@ -556,7 +579,7 @@ class PlayersPage(QWidget):
     def fill_players(self, rows):
         """Fills PLAYER LIST, keeping the picked player picked and the current column sort."""
         picked_id = (self.selected_player or {}).get("entityId")
-        merged = [self._merge_live_info(row) for row in rows if isinstance(row, dict)]
+        merged = [self._apply_faction_fields(self._merge_live_info(row)) for row in rows if isinstance(row, dict)]
         self.players = merged
         shown = sort_player_rows(visible_player_rows(merged, self._show_all_players),
                                  self._sort_column, self._sort_descending)

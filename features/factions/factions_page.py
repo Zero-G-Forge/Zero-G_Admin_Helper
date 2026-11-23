@@ -7,6 +7,10 @@
 ## SET RELATION and RENAME stay greyed out; both change the server and get their own step with Ray's OK.
 ## Wired (Nov 22, 2026), read-only: factions from api:Request_Get_Factions, members from plys,
 ## alliances from api:Request_AlliancesAll. SET RELATION and RENAME stay off (see RELATION_TIP and RENAME_TIP).
+## Nov 23, 2026: members are matched by factionId (the plys faction tag can be a leftover name).
+## Club ranks come from plys role (IPlayer.FactionRole). Founder is shown as Owner. Unknown
+## roles show "--" rather than a default Member. Request_Player_Info is rejected for offline
+## players, so a rank is only known after the player has been seen online.
 ## ==========================================
 
 # region Imports
@@ -18,6 +22,7 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QGridLayout, 
 
 ## Read-only bridge reads.
 from features.shared import server_actions
+from features.shared.faction_display import format_faction_role
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
@@ -222,6 +227,7 @@ class FactionsPage(QWidget):
             print(f"[ERROR] FactionsPage: Could not read alliances: {e}")
 
     def members_of(self, faction_id):
+        """Players whose plys factionId is this faction. The leftover faction tag is not used."""
         return [row for row in self.players if str(row.get("factionId")) == str(faction_id)]
 
     def faction_name(self, faction_id):
@@ -277,7 +283,7 @@ class FactionsPage(QWidget):
             for member in sorted(self.members_of(faction_id), key=lambda row: (row.get("status") != "Online", str(row.get("name", "")).lower())):
                 row_index = self.tbl_members.rowCount()
                 self.tbl_members.insertRow(row_index)
-                for column_index, value in enumerate((member.get("name", "?"), member.get("role", "--"), member.get("status", "--"))):
+                for column_index, value in enumerate((member.get("name", "?"), format_faction_role(member.get("role")), member.get("status", "--"))):
                     self.tbl_members.setItem(row_index, column_index, QTableWidgetItem(str(value)))
             allies = [second if first == faction_id else first for first, second in self.alliances if faction_id in (first, second)]
             for ally_id in allies:

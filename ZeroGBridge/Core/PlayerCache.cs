@@ -24,7 +24,9 @@ namespace ZeroGBridge
         public int factionId { get; set; } = 0;
         public string status { get; set; } = "Offline";
         public string faction { get; set; } = "--";
-        public string role { get; set; } = "Member";
+        public string role { get; set; } = "--";
+        /// <summary>True when <see cref="role"/> was set from IPlayer.FactionRole, not the old default "Member".</summary>
+        public bool roleKnown { get; set; } = false;
         public string playfield { get; set; } = "--";
         public string solar_system { get; set; } = "Unknown";
         public string coordinates { get; set; } = "-";
@@ -277,7 +279,11 @@ namespace ZeroGBridge
             if (!string.IsNullOrEmpty(steamId) && steamId != "--") record.steamId = steamId;
             if (entityId > 0) record.entityId = entityId.ToString();
             if (!string.IsNullOrEmpty(playfield) && playfield != "--") record.playfield = playfield;
-            if (!string.IsNullOrWhiteSpace(role) && role != "None") record.role = role;
+            if (!string.IsNullOrWhiteSpace(role) && role != "None")
+            {
+                record.role = role;
+                record.roleKnown = true;
+            }
 
             if (factionId > 0)
             {
@@ -610,7 +616,29 @@ namespace ZeroGBridge
 
         #endregion
 
-        public List<PlayerRecord> GetAllPlayers() => new List<PlayerRecord>(_allPlayers.Values);
+        /// <summary>
+        /// Re-resolves each player's faction tag from the current faction list, and
+        /// clears a role that was never taken from IPlayer.FactionRole (the old default
+        /// was "Member", which hid missing ranks).
+        /// </summary>
+        public void RefreshFactionTags()
+        {
+            foreach (var record in _allPlayers.Values)
+            {
+                if (record == null) continue;
+                if (record.factionId > 0)
+                    record.faction = ResolveFactionAbbrev(record.factionId);
+                if (!record.roleKnown)
+                    record.role = "--";
+            }
+        }
+
+        public List<PlayerRecord> GetAllPlayers()
+        {
+            RefreshFactionTags();
+            return new List<PlayerRecord>(_allPlayers.Values);
+        }
+
         public List<PlayerRecord> GetOnlinePlayers() => _allPlayers.Values.Where(p => p.status == "Online").ToList();
 
 #region Database Hydration
