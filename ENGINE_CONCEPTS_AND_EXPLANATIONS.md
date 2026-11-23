@@ -489,7 +489,7 @@ The faction list, each faction's members (from the player list), and which facti
 
 Membership is the player's `factionId` from `plys`, looked up in the live `Request_Get_Factions` list. The tag string on a player row can be a leftover name from an earlier mapping (for example a player in Mechanics still tagged `[GoG]`), so the tag is not used to pick the members. The Players page FACTION column uses the same live list, so the tag you see there matches the faction the player is actually in.
 
-The Role column is the club rank from `IPlayer.FactionRole` (Founder is shown as Owner, then Admin, Member, or Guest). The old player cache defaulted every unknown rank to Member, which hid missing values. Unknown ranks now show `--`. `Request_Player_Info` is rejected for offline players (`Game_Request returned false`), so a rank is only known after that player has been seen online. Status is the same Online / Offline value the Players page uses.
+The Role column is the club rank from `IPlayer.FactionRole` (Founder is shown as Owner, then Admin, Member, or Guest). The old player cache defaulted every unknown rank to Member, which hid missing values. Unknown ranks now show `--`. `Request_Player_Info` is rejected for offline players (`Game_Request returned false`), so a rank is only known after that player has been seen online. Status is the same Online / Offline value the Players page uses. Core 1.6.8 re-resolves each player's faction tag from the live faction list when `plys` is sent, and only keeps a club rank that came from `IPlayer.FactionRole`.
 
 ### Why SET RELATION and RENAME stay off
 

@@ -30,6 +30,7 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 - Core 1.6.5 widens `AllowedFolders` in `ServerFiles.cs`: a scenario also includes `Playfields`, `RandomPresets`, `Extras`, `Sectors` and `Prefabs`, and a save also includes `PDA`. `protocol` stays 1. The same lists apply to `files:put`.
 - Core 1.6.6 adds `.epb` to `AllowedExtensions` so Prefabs blueprints can be listed and downloaded. `MaxFileBytes` stays 16 MB (local scenario `.epb` files are well under 1 MB). `protocol` stays 1.
 - Core 1.6.7 reads `CustomScenario` and `GameName` from the dedicated yaml the server was started with (`-dedicated` or `-dedicated=path`, then `dedicated.yaml` / `dedicated.yml` in the server folder). Inline `#` comments and spaces around the colon are accepted. When that yaml names a folder that exists, it wins over `GetPathFor(ActiveScenario)`, which can report `Default Multiplayer` (or nothing) while a custom scenario is running. `protocol` stays 1.
+- Core 1.6.8 re-resolves each player's faction tag from the live `Request_Get_Factions` list when `plys` is sent, so leftover tags such as `[GoG]` on a Mechanics player are not shown. A club rank is only kept when it came from `IPlayer.FactionRole`; unknown ranks are `--` instead of a default Member.
 - Core 1.6.2 adds the first two **write** commands, approved by Ray on Nov 22, 2026 ("make the changes on your own as long as the server itself doesn't need to be restarted"): `files:put` (replace one existing editable file, backup first) and `coreupload:put` (place a new core in `Updates/`). Both are core-only, so they install with a hot reload and never need a restart. See **Server write commands** below.
 - The server files download is **read-only** on both sides: the bridge only opens files with read access, and ZAH never deletes anything on this PC.
 
@@ -412,7 +413,7 @@ Empyrion loads `ZeroGBridge.Loader.ZeroGBridgeLoader`, which implements **API v2
 - It owns the TCP listener and authentication (`BridgeListener`, `AuthConfig`).
 - It hosts `CoreHost`, which loads the reloadable core (`ZeroGBridge.Core.dll`) in its own AppDomain.
 - Game-state work is marshalled onto the **game thread** (`GameThread`, `GameGateway`), never executed on the network thread.
-- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.7** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, the 1.6.3 read-only chat history `chat:recent`, the 1.6.4 read-only scenario/save catalog plus optional named `files:list` / `files:get`, the 1.6.5 wider file-folder allowlist, the 1.6.6 `.epb` extension, and the 1.6.7 dedicated-yaml current scenario). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
+- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.8** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, the 1.6.3 read-only chat history `chat:recent`, the 1.6.4 read-only scenario/save catalog plus optional named `files:list` / `files:get`, the 1.6.5 wider file-folder allowlist, the 1.6.6 `.epb` extension, the 1.6.7 dedicated-yaml current scenario, and the 1.6.8 live faction tags and known club ranks). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
 
 The auth token is read from `ZeroGBridge.json` only and is never written into log lines.
 
@@ -1135,7 +1136,7 @@ These items have UI placeholders, agreed behaviour, or both. They are **not** im
 
 ### SERVER FILES download: what is left
 
-Done: the read-only `files:` bridge commands (core 1.6.1), the working Settings download button, (core 1.6.4) the scenario/save picker plus `files:catalog`, (core 1.6.5) the wider folder allowlist, (core 1.6.6) `.epb` in `AllowedExtensions`, and (core 1.6.7) the current scenario from the started dedicated yaml. See **Server files download** and **Server file commands** above.
+Done: the read-only `files:` bridge commands (core 1.6.1), the working Settings download button, (core 1.6.4) the scenario/save picker plus `files:catalog`, (core 1.6.5) the wider folder allowlist, (core 1.6.6) `.epb` in `AllowedExtensions`, (core 1.6.7) the current scenario from the started dedicated yaml, and (core 1.6.8) live faction tags and known club ranks on `plys`. See **Server files download** and **Server file commands** above.
 
 Still to do:
 

@@ -30,7 +30,8 @@
     <!-- 1.6.5: AllowedFolders adds scenario Playfields, RandomPresets, Extras, Sectors and Prefabs, and save PDA -->
     <!-- 1.6.6: AllowedExtensions adds .epb so Prefabs blueprints can be listed and downloaded -->
     <!-- 1.6.7: current scenario/save come from CustomScenario/GameName in the started dedicated yaml -->
-    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.7</ReleaseVersion>
+    <!-- 1.6.8: plys re-resolves faction tags from the live faction list; unknown FactionRole is shown as a pair of dashes -->
+    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.8</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
     <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>
