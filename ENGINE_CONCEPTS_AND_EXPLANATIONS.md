@@ -258,7 +258,7 @@ A slip that says `../../somewhere/else` is an attempt to wander out of the shelf
 
 1. The text of the name: no `..`, no full paths from the top of the disk, no drive letters, no strange characters, no names Windows treats as devices.
 2. The kind of file: only configuration, PDA, and picture types (`.ecf`, `.yaml`, `.yml`, `.csv`, `.jpg`, `.png`). A database or a password file is never on the menu.
-3. The room: only named folders inside each shelf. Core 1.6.5 opened more of those rooms: `Playfields`, `RandomPresets`, `Extras`, `Sectors` and `Prefabs` on the scenario shelf, and `PDA` on the save shelf. Other rooms stay locked.
+3. The room: only named folders inside each shelf. Core 1.6.5 opened more of those rooms: `Playfields`, `RandomPresets`, `Extras`, `Sectors` and `Prefabs` on the scenario shelf, and `PDA` on the save shelf. Core 1.6.6 also lets the clerk hand over `.epb` blueprint files from those rooms. Other rooms stay locked.
 4. The real address: the bridge turns the name into a full address and proves it is still inside the shelf.
 5. Shortcuts: a folder or file that is really a pointer to somewhere else (a symlink) is refused.
 
@@ -347,7 +347,7 @@ A blueprint in Empyrion is an `.epb` file. The server keeps them in the scenario
 
 The file itself starts with a short header. One byte in that header says whether the blueprint is a small vessel, a capital vessel, a hover vessel, or an asteroid. Bases and world points of interest share the same header value, so ZAH then looks at the file name: a name with `BA` or `Base` stays under BA, and a name with `POI`, or with no type token, goes under POI. That is why the BLUEPRINTS tab has a POI button next to BA, CV, SV and HV.
 
-The current download may still have no `.epb` files. Core 1.6.5 already allows the `Prefabs` folder, but it does not yet list or send `.epb` files, and ZAH's download types do not include them either. Those two changes are still needed before a Settings download can fill the BLUEPRINTS tab from the server. This step did not change the core.
+Core 1.6.6 lets the bridge list and send `.epb` files, and Settings has a `Blueprints (.epb)` checkbox that is on by default (the same as the other file types, and remembered per server). A 16 MB size cap is enough: the largest `.epb` in the local scenario copy is well under 1 MB. After you run DOWNLOAD SERVER FILES again, the BLUEPRINTS tab can fill from the downloaded Prefabs folder.
 
 ### Nothing shows until you pick a category
 

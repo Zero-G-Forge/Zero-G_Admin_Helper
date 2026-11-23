@@ -200,6 +200,35 @@ def test_old_bridge_fails_closed(tmp_path, qapp):
         process.wait()
 
 
+
+@needs_dotnet
+def test_harness_lists_epb_under_prefabs(tmp_path, qapp):
+    """The local ServerFilesTest serve harness, with ZGB_TEST_MODDIR set, lists a Prefabs .epb."""
+    scenario, save = build_server_tree(tmp_path / "srv")
+    prefabs = scenario / "Prefabs"
+    prefabs.mkdir(parents=True)
+    (prefabs / "TestShip.epb").write_bytes(b"\x45\x52\x94\x78" + b"\x00" * 8)
+    (prefabs / "note.txt").write_bytes(b"not listed\n")
+    moddir = tmp_path / "moddir"
+    moddir.mkdir()
+    port = free_port()
+    env = dict(os.environ, ZGB_TEST_TOKEN=TEST_TOKEN, ZGB_TEST_MODDIR=str(moddir))
+    process = subprocess.Popen(
+        ["dotnet", TEST_DLL, "serve", str(port), str(scenario), str(save)],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+    try:
+        process.stdout.readline()
+        with ServerFilesSession(make_profile(port)) as session:
+            reply = session.request("list", {"root": "scenario", "offset": 0, "limit": 2000})
+        assert reply.get("ok") is True, reply
+        paths = [entry["path"] for entry in (reply.get("files") or [])]
+        assert "Prefabs/TestShip.epb" in paths
+        assert not any(path.endswith(".txt") for path in paths)
+    finally:
+        process.kill()
+        process.wait()
+
+
 @needs_dotnet
 def test_wrong_token_is_a_clear_error(tmp_path, qapp):
     scenario, save = build_server_tree(tmp_path / "srv")
@@ -465,6 +494,20 @@ def test_download_settings_persist_per_server(tmp_path):
     assert "scenario" not in other
     assert download_settings.save_server_download_settings("Zero-G Forge Reborn", scenario="..") is False
     assert download_settings.load_server_download_settings("Zero-G Forge Reborn")["scenario"] == "Ascension-Reborn"
+    ## A newly added type, missing from the saved file, defaults to on.
+    assert saved["types"]["blueprints"] is True
+
+
+def test_blueprints_type_defaults_on_and_maps_to_epb():
+    assert "blueprints" in download_settings.FILE_TYPE_KEYS
+    assert download_settings.FILE_TYPE_EXTENSIONS["blueprints"] == (".epb",)
+    assert download_settings.DEFAULT_TYPES["blueprints"] is True
+    assert ".epb" in download_settings.allowed_extensions({})
+    saved = download_settings.types_from_saved({"ecf": True, "yaml": True, "csv": False, "images": False})
+    assert saved["blueprints"] is True
+    off = download_settings.types_from_saved({"blueprints": False})
+    assert off["blueprints"] is False
+    assert ".epb" not in download_settings.allowed_extensions(off)
 
 
 def test_first_available_name_prefers_saved_then_origin_then_fallback():

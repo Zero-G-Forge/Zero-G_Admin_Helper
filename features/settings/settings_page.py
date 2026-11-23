@@ -1,7 +1,7 @@
 ## ==========================================
 ## ZERO-G ADMIN HELPER - SETTINGS PAGE
 ## ZAH's own options. Each change is saved right away to data/app_settings.json.
-## SERVER FILES: pulls the server's editable files (ECF, PDA, item images, save files) through ZeroGBridge,
+## SERVER FILES: pulls the server's editable files (ECF, PDA, item images, blueprints, save files) through ZeroGBridge,
 ## and the LIVE MODE switch for editing files straight on the server. The download button works (read-only,
 ## enabled only while the bridge is connected). Core 1.6.4: a scenario/save picker and file-type ticks
 ## sit above the download button. They fail closed to the old behaviour when the core is older or catalog fails.
@@ -191,7 +191,7 @@ class SettingsPage(QWidget):
         types_row.setSpacing(16)
         types_row.setContentsMargins(0, 0, 0, 0)
         self.chk_types = {}
-        type_labels = {"ecf": ".ecf", "yaml": ".yaml / .yml", "csv": ".csv", "images": "images"}
+        type_labels = {"ecf": ".ecf", "yaml": ".yaml / .yml", "csv": ".csv", "images": "images", "blueprints": "Blueprints (.epb)"}
         for key in FILE_TYPE_KEYS:
             box = QCheckBox(type_labels[key])
             box.setObjectName("SettingsCheckBox")

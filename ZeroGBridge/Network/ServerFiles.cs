@@ -17,6 +17,8 @@
 //   and ignores any extra name. ProtocolVersion stays 1 (reply shape of info/list/get is unchanged).
 // 1.6.5: AllowedFolders adds scenario Playfields, RandomPresets, Extras, Sectors and Prefabs,
 //   and save PDA. ProtocolVersion stays 1.
+// 1.6.6: AllowedExtensions adds .epb so Prefabs blueprints can be listed and downloaded.
+//   MaxFileBytes stays 16 MB; local scenario .epb files are well under 1 MB. ProtocolVersion stays 1.
 // Safety: two whitelisted roots, whitelisted sub-folders and file types, no ".." or absolute
 // paths, the resolved full path must stay under the root, no symlinks or junctions, size caps.
 // The bridge AuthToken is never read or printed here (the auth handshake already happened).
@@ -71,7 +73,8 @@ namespace ZeroGBridge
         private const int RootRefreshSeconds = 30;
 
         // File types that may be listed or sent. Everything else (.db, .json, .dll, .key and similar) is never reachable.
-        private static readonly string[] AllowedExtensions = { ".ecf", ".yaml", ".yml", ".csv", ".jpg", ".jpeg", ".png" };
+        // 1.6.6: .epb is included. MaxFileBytes (16 MB) is enough; typical .epb files are under 1 MB.
+        private static readonly string[] AllowedExtensions = { ".ecf", ".yaml", ".yml", ".csv", ".jpg", ".jpeg", ".png", ".epb" };
 
         // Root name -> sub-folders (relative to that root) that may be read. A file directly inside the
         // root folder is also allowed when its type is on the list above (for example gameoptions.yaml).

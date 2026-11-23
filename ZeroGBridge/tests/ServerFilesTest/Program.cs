@@ -155,6 +155,7 @@ namespace ServerFilesTest
                 Directory.CreateDirectory(Path.Combine(scenario, "SharedData", "Content", "Images"));
                 Directory.CreateDirectory(Path.Combine(scenario, "SharedData", "Content", "Extras", "PDA"));
                 Directory.CreateDirectory(Path.Combine(scenario, "Playfields", "Secret"));
+                Directory.CreateDirectory(Path.Combine(scenario, "Prefabs"));
                 Directory.CreateDirectory(Path.Combine(scenario, "Disabled", "Secret"));
                 Directory.CreateDirectory(Path.Combine(save, "Shared", "Content", "Configuration"));
                 Directory.CreateDirectory(Path.Combine(save, "PDA"));
@@ -184,6 +185,8 @@ namespace ServerFilesTest
                 new Random(7).NextBytes(bigBytes);
                 File.WriteAllBytes(Path.Combine(scenario, "SharedData", "Content", "Images", "Big.jpg"), bigBytes);
                 File.WriteAllBytes(Path.Combine(scenario, "SharedData", "Content", "Images", "Small.png"), new byte[] { 1, 2, 3, 4 });
+                File.WriteAllBytes(Path.Combine(scenario, "Prefabs", "TestShip.epb"), new byte[] { 0x45, 0x52, 0x94, 0x78 });
+                File.WriteAllText(Path.Combine(scenario, "Prefabs", "note.txt"), "not allowed type");
 
                 // Optional symlink checks (skipped quietly where symlinks cannot be made).
                 bool symlinkMade = false;
@@ -203,6 +206,7 @@ namespace ServerFilesTest
                 Check("info ok and read-only", (bool)info["ok"] && (bool)info["readOnly"] && (int)info["protocol"] == 1);
                 Check("info names scenario and save", (string)info["scenario"] == "TestScenario" && (string)info["saveName"] == "TestSave");
                 Check("info source is game", (string)info["source"] == "game");
+                Check("info lists the .epb extension", info["extensions"].Select(v => (string)v).Contains(".epb"));
 
                 // ---------------- list
                 JObject list = Run("files:list:{\"root\":\"scenario\",\"req_id\":\"r1\"}");
@@ -214,6 +218,7 @@ namespace ServerFilesTest
                 Check("list has top-level gameoptions.yaml", listed.Contains("gameoptions.yaml"));
                 Check("list skips .exe, .json and .txt", !listed.Any(p => p.EndsWith(".exe") || p.EndsWith(".json") || p.EndsWith(".txt")));
                 Check("list has a Playfields file", listed.Contains("Playfields/Secret/playfield_static.yaml"));
+                Check("list has a Prefabs .epb", listed.Contains("Prefabs/TestShip.epb"));
                 Check("list skips non-whitelisted Disabled folder", !listed.Any(p => p.StartsWith("Disabled")));
                 Check("list is sorted", listed.SequenceEqual(listed.OrderBy(p => p, StringComparer.Ordinal)));
                 if (symlinkMade) Check("list skips symlinked folder and file", !listed.Any(p => p.Contains("LinkToOutside") || p.Contains("Linked.ecf")));
@@ -276,6 +281,7 @@ namespace ServerFilesTest
                 Check("refused: not whitelisted extension", ServerFiles.NormalizeRelativePath("scenario", "Content/Configuration/notes.exe", out e1) == null && e1 == "not_allowed");
                 Check("refused: not whitelisted folder", ServerFiles.NormalizeRelativePath("scenario", "Disabled/Secret/hidden.yaml", out e1) == null && e1 == "not_allowed");
                 Check("Playfields folder is allowed for scenario", ServerFiles.NormalizeRelativePath("scenario", "Playfields/Secret/playfield_static.yaml", out e1) == "Playfields/Secret/playfield_static.yaml");
+                Check("Prefabs .epb is allowed for scenario", ServerFiles.NormalizeRelativePath("scenario", "Prefabs/TestShip.epb", out e1) == "Prefabs/TestShip.epb");
                 Check("PDA folder is allowed for save", ServerFiles.NormalizeRelativePath("save", "PDA/PDA.yaml", out e1) == "PDA/PDA.yaml");
                 Check("refused: folder prefix is whole segments only", ServerFiles.NormalizeRelativePath("scenario", "ContentEvil/Items.ecf", out e1) == null && e1 == "not_allowed");
                 Check("refused: unknown root", ServerFiles.NormalizeRelativePath("../x", "Content/Items.ecf", out e1) == null);

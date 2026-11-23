@@ -21,12 +21,14 @@ DOWNLOAD_SETTINGS_FILE = os.path.join(
     "data", "download_settings.json")
 
 ## File-type groups the picker can include or skip. "yaml" covers both .yaml and .yml.
-FILE_TYPE_KEYS = ("ecf", "yaml", "csv", "images")
+## "blueprints" is the Prefabs .epb files (core 1.6.6 or later).
+FILE_TYPE_KEYS = ("ecf", "yaml", "csv", "images", "blueprints")
 FILE_TYPE_EXTENSIONS = {
     "ecf": (".ecf",),
     "yaml": (".yaml", ".yml"),
     "csv": (".csv",),
     "images": (".jpg", ".jpeg", ".png"),
+    "blueprints": (".epb",),
 }
 
 DEFAULT_TYPES = {key: True for key in FILE_TYPE_KEYS}

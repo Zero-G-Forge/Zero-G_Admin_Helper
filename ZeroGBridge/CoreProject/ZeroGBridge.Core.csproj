@@ -28,7 +28,8 @@
     <!-- 1.6.3: read-only chat:recent history from Application.ChatMessageSent, Network/ChatLog.cs -->
     <!-- 1.6.4: files:catalog lists scenario and save folders; list/get can pick one; put stays on the reported pair -->
     <!-- 1.6.5: AllowedFolders adds scenario Playfields, RandomPresets, Extras, Sectors and Prefabs, and save PDA -->
-    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.5</ReleaseVersion>
+    <!-- 1.6.6: AllowedExtensions adds .epb so Prefabs blueprints can be listed and downloaded -->
+    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.6</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
     <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>

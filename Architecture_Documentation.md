@@ -28,6 +28,7 @@ Living technical contract for **Zero-G Admin Helper (ZAH)** and the **ZeroGBridg
 - New bridge commands need explicit approval before they are written. The read-only `files:` commands (`files:info`, `files:list`, `files:get`) were approved and added in core 1.6.1. They can read, never write.
 - Core 1.6.4 adds the read-only `files:catalog` command, and optional `scenario` or `save` folder names on `files:list` and `files:get`, so ZAH can list every scenario and save folder and download from a chosen pair. `files:put` still uses only the live yaml/game pair and ignores those extra names. `protocol` stays 1.
 - Core 1.6.5 widens `AllowedFolders` in `ServerFiles.cs`: a scenario also includes `Playfields`, `RandomPresets`, `Extras`, `Sectors` and `Prefabs`, and a save also includes `PDA`. `protocol` stays 1. The same lists apply to `files:put`.
+- Core 1.6.6 adds `.epb` to `AllowedExtensions` so Prefabs blueprints can be listed and downloaded. `MaxFileBytes` stays 16 MB (local scenario `.epb` files are well under 1 MB). `protocol` stays 1.
 - Core 1.6.2 adds the first two **write** commands, approved by Ray on Nov 22, 2026 ("make the changes on your own as long as the server itself doesn't need to be restarted"): `files:put` (replace one existing editable file, backup first) and `coreupload:put` (place a new core in `Updates/`). Both are core-only, so they install with a hot reload and never need a restart. See **Server write commands** below.
 - The server files download is **read-only** on both sides: the bridge only opens files with read access, and ZAH never deletes anything on this PC.
 
@@ -353,7 +354,7 @@ The Settings page also has a **SERVER FILES** section:
 
 - Status lines: `LOCAL COPY` and `LAST PULLED`. Both start from the two saved keys above.
 - Button: `DOWNLOAD SERVER FILES (READ-ONLY)`. See **Server files download** below. It is enabled only while `MainCockpit.bridge_connected` is true. The page listens to `bridge_status_changed` (connected in `showEvent`), so the button follows the connection live. With no news from the cockpit it stays disabled (fail closed).
-- Two dropdowns, Scenario and Save, plus checkboxes for file types (`.ecf`, `.yaml` / `.yml`, `.csv`, images). The lists come from the read-only `files:catalog` command when the page opens with a live connection (core 1.6.4). The two lists are independent: any scenario can be chosen with any save. A saved choice for the current server is used when it is still in the list; otherwise the page prefers the save's origin scenario when the catalog reports one, then `Ascension-Reborn` and `Zero-G Server - Season 4` when those names appear, then the live yaml/game pair, then the first name. If the catalog is missing or fails, the dropdowns stay empty and the download uses the live pair from `files:info` (fail closed). The choice is stored per server in `data/download_settings.json` (git-ignored).
+- Two dropdowns, Scenario and Save, plus checkboxes for file types (`.ecf`, `.yaml` / `.yml`, `.csv`, images, `Blueprints (.epb)`). The lists come from the read-only `files:catalog` command when the page opens with a live connection (core 1.6.4). The two lists are independent: any scenario can be chosen with any save. A saved choice for the current server is used when it is still in the list; otherwise the page prefers the save's origin scenario when the catalog reports one, then `Ascension-Reborn` and `Zero-G Server - Season 4` when those names appear, then the live yaml/game pair, then the first name. If the catalog is missing or fails, the dropdowns stay empty and the download uses the live pair from `files:info` (fail closed). The choice is stored per server in `data/download_settings.json` (git-ignored).
 - While a download runs: the button reads `DOWNLOADING` and is disabled, a thin progress bar (`SettingsProgressBar`) and a status line show `Downloading 412 of 906 files`.
 - Checkbox: `LIVE MODE: edit files directly on the server`. Layout only: always off and disabled, tooltip `Coming in a later step.`
 - Note: every live save will ask three times (changes preview, online-players warning, then typing the file name), and the bridge will back up the old file first.
@@ -407,7 +408,7 @@ Empyrion loads `ZeroGBridge.Loader.ZeroGBridgeLoader`, which implements **API v2
 - It owns the TCP listener and authentication (`BridgeListener`, `AuthConfig`).
 - It hosts `CoreHost`, which loads the reloadable core (`ZeroGBridge.Core.dll`) in its own AppDomain.
 - Game-state work is marshalled onto the **game thread** (`GameThread`, `GameGateway`), never executed on the network thread.
-- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.5** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, the 1.6.3 read-only chat history `chat:recent`, the 1.6.4 read-only scenario/save catalog plus optional named `files:list` / `files:get`, and the 1.6.5 wider file-folder allowlist). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
+- Loader release is **1.5.0**. A loader change needs a server restart. Core release is **1.6.6** (`Request_*` API, console proxy, command catalog, restart through `saveandexit`, read-only `files:` commands, the 1.6.2 write commands `files:put` and `coreupload:`, the 1.6.3 read-only chat history `chat:recent`, the 1.6.4 read-only scenario/save catalog plus optional named `files:list` / `files:get`, the 1.6.5 wider file-folder allowlist, and the 1.6.6 `.epb` extension). Core changes are installed with `coreupload:put` and `hot:reload`, never a restart.
 
 The auth token is read from `ZeroGBridge.json` only and is never written into log lines.
 
@@ -575,7 +576,7 @@ Safety checks, in order (`NormalizeRelativePath`, `ResolveUnderRoot`):
 
 1. Root name must be `scenario` or `save`.
 2. The path text is refused when empty, longer than 260, absolute, has a drive letter or `:` (this also blocks NTFS streams), `*`, `?`, quotes, `<`, `>`, `|`, control characters, an empty or `.` or `..` segment, a segment starting or ending with a space or ending with a dot, or a Windows device name (`CON`, `NUL`, `COM1` and similar).
-3. File type must be on the list: `.ecf .yaml .yml .csv .jpg .jpeg .png`. Databases, `.json`, `.dll`, `.key` and everything else are unreachable.
+3. File type must be on the list: `.ecf .yaml .yml .csv .jpg .jpeg .png .epb`. Databases, `.json`, `.dll`, `.key` and everything else are unreachable.
 4. The first folder must be on the root's whitelist (whole folder names only), or the file must sit directly in the root. Scenario: `Content`, `SharedData/Content`, `Playfields`, `RandomPresets`, `Extras`, `Sectors`, `Prefabs`. Save: `Content`, `Shared/Content`, `SharedData/Content`, `PDA`. The lists are the `AllowedFolders` table in `ServerFiles.cs`.
 5. The resolved full path must still start with the root folder.
 6. Neither the file nor any folder on the way may be a symlink or junction. The folder scan skips them too.
@@ -585,6 +586,8 @@ Safety checks, in order (`NormalizeRelativePath`, `ResolveUnderRoot`):
 Checks: `ZeroGBridge/tests/ServerFilesTest` (run `dotnet run` in that folder) compiles the real `ServerFiles.cs` and runs the read checks, including that `files:list` includes a Playfields file and a save PDA file, while a folder still off the list is skipped.
 
 - Deployed (Nov 22, 2026, 8:26 PM CST) to Zero-G Forge Reborn with `coreupload:put` (pdb, then dll) and `hot:reload`, after a read-only `plys` check showed 0 of 53 players online. `hot:status` reports core `1.6.5` (`1.6.1122.2125_a27f3d29`), loader still `1.5.0`, no restart. A named `files:list` of `Ascension-Reborn` returned 6,334 files (including 1,600 under `Playfields`, 245 under `RandomPresets`, 3 under `Extras`, and 1 under `Sectors`). The save `Zero-G Server - Season 4` still has 2 files; it has no top-level `PDA` files. Ascension-Reborn was not reloaded and stays on core 1.6.4.
+
+- Deployed (Nov 22, 2026) core **1.6.6** to both servers with `coreupload:put` (pdb, then dll) and `hot:reload`, no restart, loader still `1.5.0`. Zero-G Forge Reborn confirmed at 8:54:08 PM CST (`1.6.1122.2152_4a6e22c1`); the `hot:reload` reply timed out after a successful upload, and a fresh `hot:status` already showed 1.6.6. Ascension-Reborn confirmed at 8:54:26 PM CST, same core id. A named `files:list` of `Ascension-Reborn` on Reborn returned 13,343 files, including 7,009 `.epb` under `Prefabs` (was 6,334 before `.epb` was allowed). The save `Zero-G Server - Season 4` still has 2 files and no `.epb`. Combined total: 13,345.
 
 ### Server write commands (`files:put`, `coreupload:`)
 
@@ -626,7 +629,7 @@ Kill switch: `"FileWritesEnabled": false` in `ZeroGBridge.json` turns both comma
 
 Error codes: `writes_disabled`, `not_ready` (mod folder unknown), `bad_request`, `unknown_root`, `root_unavailable`, `bad_path`, `not_allowed`, `not_found`, `too_large`, `bad_offset`, `hash_mismatch`, `changed_on_server`, `bad_core`, `write_failed`, `exception`.
 
-Checks: the same `ServerFilesTest` program also compiles `ServerFileWrites.cs` (134 checks in total): kill switch, not-ready, a chunked put with its backup, a second put keeping both backups, stale base hash, hash mismatch, new file, `.png`, `.json`, traversal, symlink, out-of-order chunk, size caps, the save root, a non-DLL and a wrong DLL refused, and the real Release core uploaded byte for byte with its version read back. The `serve` mode answers `coreupload:` too; set `ZGB_TEST_MODDIR` to a test folder for the write commands.
+Checks: the same `ServerFilesTest` program also compiles `ServerFileWrites.cs` (137 checks in total): kill switch, not-ready, a chunked put with its backup, a second put keeping both backups, stale base hash, hash mismatch, new file, `.png`, `.json`, traversal, symlink, out-of-order chunk, size caps, the save root, a non-DLL and a wrong DLL refused, and the real Release core uploaded byte for byte with its version read back. The `serve` mode answers `coreupload:` too; set `ZGB_TEST_MODDIR` to a test folder for the write commands.
 
 ### Chat history (`chat:recent`)
 
@@ -1128,7 +1131,7 @@ These items have UI placeholders, agreed behaviour, or both. They are **not** im
 
 ### SERVER FILES download: what is left
 
-Done: the read-only `files:` bridge commands (core 1.6.1), the working Settings download button, (core 1.6.4) the scenario/save picker plus `files:catalog`, and (core 1.6.5) the wider folder allowlist. See **Server files download** and **Server file commands** above.
+Done: the read-only `files:` bridge commands (core 1.6.1), the working Settings download button, (core 1.6.4) the scenario/save picker plus `files:catalog`, (core 1.6.5) the wider folder allowlist, and (core 1.6.6) `.epb` in `AllowedExtensions`. See **Server files download** and **Server file commands** above.
 
 Still to do:
 
@@ -1137,7 +1140,7 @@ Still to do:
 - Check the real scenario's folder layout with `files:info` (`topFolders`) and adjust the `AllowedFolders` table in `ServerFiles.cs` if the real folders differ. The save game folders in particular are guesses until seen on the live server.
 - Done (Nov 22, 2026): Items, ECF Editor, and PDA Editor read from `data/server_files/<scenario>/`, **never** from local base-game Content files.
 - Done (Nov 22, 2026): the Library BLUEPRINTS tab reads `.epb` files from `Prefabs/` in that same download (save copy first). A `POI` category button sits next to `BA` / `CV` / `SV` / `HV`. Both lists stay empty until a category is clicked; more than one category is chosen only through the `FILTER` checkbox menu.
-- Still needed before those blueprints can be downloaded from a live server: add `.epb` to ZeroGBridge `AllowedExtensions` in `ServerFiles.cs`, and add a blueprints / `.epb` type to ZAH `FILE_TYPE_EXTENSIONS`. The `Prefabs` folder is already in the core 1.6.5 folder allowlist, but the current download has only preview pictures under `SharedData/Content/Prefabs` (no `.epb`). This step did not change the core.
+- Done (Nov 22, 2026): core 1.6.6 adds `.epb` to `AllowedExtensions`, and Settings has a `Blueprints (.epb)` file-type checkbox (on by default, remembered per server like the others). A named `files:list` of `Ascension-Reborn` on Reborn now returns 7,009 `.epb` files under `Prefabs`. The next Settings download with that type ticked will fill the Library BLUEPRINTS tab.
 - Done (Nov 22, 2026): CANCEL DOWNLOAD on the Settings page calls the worker's `request_stop`; the worker stops between two requests and reports `Download stopped.` Half-finished `.part` files are removed.
 - Done (Nov 22, 2026): the editors' DOWNLOAD FOLDER button runs the same read-only download. Only one download runs at a time across ZAH (`settings_page.RUNNING_DOWNLOADS`).
 
