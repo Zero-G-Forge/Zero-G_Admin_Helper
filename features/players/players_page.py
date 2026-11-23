@@ -2,7 +2,9 @@
 ## ZERO-G ADMIN HELPER - PLAYERS PAGE
 ## Layout follows .scratchpad/.conceptual/Concept_11-17/Players.jpg:
 ## PLAYER LIST on the left, PLAYER DETAIL and INVENTORY in the middle,
-## ACTIONS and LOADOUT TEMPLATES on the right.
+## LOADOUT TEMPLATES and ACTIONS on the right (LOADOUT TEMPLATES lines up with
+## PLAYER DETAIL, ACTIONS with INVENTORY). Nov 23, 2026: PLAYER DETAIL is sized
+## to its content so INVENTORY can be taller.
 ## Layout only for now: there is no player data source on this page yet, so everything shows "--" or "nothing yet".
 ## Every action button stays greyed out; each one changes something on the server and gets its own step with Ray's OK.
 ## Wired (Nov 22, 2026): the list comes from plys, the detail from api:Request_Player_Info, the inventory from
@@ -172,7 +174,7 @@ class PlayersPage(QWidget):
 
     def setup_widgets(self):
 
-        ## 3 columns: player list, detail + inventory, actions + loadouts.
+        ## 3 columns: player list, detail + inventory, loadouts + actions.
         page_grid = QGridLayout(self)
         page_grid.setContentsMargins(4, 4, 4, 4)
         page_grid.setHorizontalSpacing(14)
@@ -297,7 +299,7 @@ class PlayersPage(QWidget):
             actions_layout.addWidget(btn_action)
             self.action_buttons[action_title] = btn_action
         actions_layout.addStretch()
-        page_grid.addWidget(actions_card, 0, 2)
+        page_grid.addWidget(actions_card, 1, 2)
 
         # endregion
 
@@ -335,7 +337,7 @@ class PlayersPage(QWidget):
         pack_row.addWidget(self.cmb_custom_pack, stretch=3)
         pack_row.addWidget(self.btn_give_pack, stretch=2)
         loadout_layout.addLayout(pack_row)
-        page_grid.addWidget(loadout_card, 1, 2)
+        page_grid.addWidget(loadout_card, 0, 2)
 
         # endregion
 
@@ -344,9 +346,11 @@ class PlayersPage(QWidget):
         page_grid.setColumnStretch(1, 5)
         page_grid.setColumnStretch(2, 3)
 
-        ## Detail and actions on top take a bit more height than inventory and loadouts.
-        page_grid.setRowStretch(0, 3)
-        page_grid.setRowStretch(1, 2)
+        ## PLAYER DETAIL and LOADOUT TEMPLATES on top fit their content.
+        ## INVENTORY and ACTIONS below take the leftover height, so the two rows
+        ## line up across the middle and right columns.
+        page_grid.setRowStretch(0, 0)
+        page_grid.setRowStretch(1, 1)
 
     ## Builds one ACTIONS button with a title and a hint line inside it.
     ## The labels are children of the button, so they grey out with it when it is disabled.

@@ -574,6 +574,8 @@ The connection only notices it is dead when it tries to send something. A small 
 
 Clicking a column header sorts that column A to Z, and clicking it again sorts Z to A. PING sorts as a number, and `--` stays last either way. Server staff stay at the top: Empyrion's `PlayerInfo.permission` is 0 for a regular player, 3 for GameMaster, and 9 for Admin, so anyone at 3 or above is pinned. The faction `role` field (Owner / Admin / Member) is a club rank, not server permission, so it is not used for this. The sort and the selected row are kept when the list refreshes.
 
+The page is three columns. PLAYER LIST is on the left. In the middle, PLAYER DETAIL is only as tall as its name, info lines and health, oxygen and food bars, so INVENTORY underneath can be larger. On the right, LOADOUT TEMPLATES sits in the same row as PLAYER DETAIL, and ACTIONS sits in the same row as INVENTORY, so the two rows line up.
+
 ### Watching several servers at once
 
 Each saved server is asked the same three read-only questions on its own short connection. Nothing is kept open, so a slow or dead server cannot block the main one. A message to all servers passes the Safety Flow once, then goes to each server in turn, and each one gets its own line in the audit log.
