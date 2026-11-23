@@ -872,6 +872,9 @@ class LibraryPage(QWidget):
     def _on_tile_picked(self, item)
     def _show_item_stats(self)
 
+def make_hex_pixmap(size, group, display_name, image_path=None)
+def make_fit_pixmap(width, height, group, display_name, image_path=None)
+
 class HexTile(QAbstractButton)
 class TileFlowArea(QScrollArea):
     def set_items(self, items)
@@ -898,7 +901,7 @@ Blueprint filter groups, in button order: `BA`, `CV`, `SV`, `HV`, `POI`. `load_b
 
 Both the ITEMS and BLUEPRINTS grids stay empty until a category button is clicked. A plain click is a single choice. The only way to show more than one category at a time is the `FILTER` button, which opens a checkbox menu (`QMenu#LibraryFilterMenu`). The search box still narrows the current selection.
 
-`ItemStatsDialog` sections: **GENERAL**, one **MODE n** section per child block, **OTHER**, and collapsed **FILE DETAILS**. Inherited Ref values are marked. Units are appended from the property `formatter` (`Kilogram` to `kg`, `Liter` to `L`, `ROF` to `s`, `WattHour` to `Wh`).
+`ItemStatsDialog` header: a large full picture (180 px) on the left, and Name, FILE NAME, ID, CATEGORY and TEMPLATE on the right. The STAT / VALUE tree sits below that header, full width. Sections: **GENERAL**, one **MODE n** section per child block, **OTHER**, and collapsed **FILE DETAILS**. Inherited Ref values are marked. Units are appended from the property `formatter` (`Kilogram` to `kg`, `Liter` to `L`, `ROF` to `s`, `WattHour` to `Wh`).
 
 ### Login service
 
@@ -1144,7 +1147,7 @@ Still to do:
 - Lookup folders, once the scenario is downloaded: `SharedData/Content/Images` and `SharedData/Content/Bundles/ItemIcons` under `data/server_files/<scenario>/`. Most item pngs are in `ItemIcons`. `Images` is mostly UI and PDA jpgs, and only a few item names match there.
 - An item with no image falls back to the drawn hex tile.
 - Files in those folders that do not match an item name or `CustomIcon` (for example PDA pictures) are skipped.
-- Done (Nov 22, 2026): `local_files.build_image_index` reads both folders in the downloaded save and scenario copies (save first, Images before ItemIcons, `.jpg` / `.jpeg` before `.png`, names compared without case). The Library looks up the item `Name`, then `CustomIcon`. The tile, the detail card and the stats window draw the picture cut to the hex shape (`item_tiles.draw_hex_picture`), with the category colour as the edge. Pictures are cached by path and size (`PICTURE_CACHE`).
+- Done (Nov 22, 2026): `local_files.build_image_index` reads both folders in the downloaded save and scenario copies (save first, Images before ItemIcons, `.jpg` / `.jpeg` before `.png`, names compared without case). The Library looks up the item `Name`, then `CustomIcon`. The grid tile still draws the picture cut to the hex shape (`item_tiles.draw_hex_picture`), with the category colour as the edge. The detail card (above VIEW ALL STATS) and the Item Stats window show the **whole** picture, scaled to fit with its aspect ratio kept (`item_tiles.make_fit_pixmap`), not cropped to a hex. The stats window uses a large picture (180 px) on the left, with Name, FILE NAME, ID, CATEGORY and TEMPLATE on the right, and the STAT / VALUE tree below both, full width. Pictures are cached by path and size (`PICTURE_CACHE`).
 
 ### LIVE MODE
 

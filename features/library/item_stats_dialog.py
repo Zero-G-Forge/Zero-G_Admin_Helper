@@ -6,6 +6,8 @@
 ##   OTHER         every remaining stat
 ##   FILE DETAILS  mesh and sound paths and other file-only lines (folded shut)
 ## Values marked "(from Template)" come from the item's Ref parent, not its own block.
+## The header shows the whole item picture (about 180 px) on the left, with Name, FILE NAME,
+## ID, CATEGORY and TEMPLATE on the right. The STAT / VALUE tree sits under both, full width.
 ## Read-only.
 ## ==========================================
 
@@ -18,7 +20,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTreeWid
                              QHeaderView, QAbstractItemView)
 
 from features.dashboard.dashboard_page import make_card
-from features.library.item_tiles import make_hex_pixmap
+from features.library.item_tiles import make_fit_pixmap
 
 # endregion
 
@@ -63,29 +65,33 @@ class ItemStatsDialog(QDialog):
         ## Name that ZAH_main.css can use to style the window.
         self.setObjectName("ItemStatsDialog")
         self.setWindowTitle("Item Stats - " + item["display_name"])
-        self.resize(620, 640)
+        self.resize(700, 720)
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         stats_card, stats_layout = make_card()
 
         # region Header
 
-        ## Big hex on the left, the item's names and ID on the right.
+        ## Whole picture on the left, Name / FILE NAME / ID / CATEGORY / TEMPLATE on the right.
         header_row = QHBoxLayout()
         header_row.setSpacing(16)
-        lbl_picture = QLabel()
-        lbl_picture.setPixmap(make_hex_pixmap(84, item["filter_group"], item["display_name"], item.get("image_path")))
-        lbl_picture.setFixedSize(84, 84)
-        header_row.addWidget(lbl_picture, alignment=Qt.AlignmentFlag.AlignTop)
+        self.lbl_picture = QLabel()
+        self.lbl_picture.setObjectName("ItemStatsPicture")
+        self.lbl_picture.setFixedSize(180, 180)
+        self.lbl_picture.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_picture.setPixmap(make_fit_pixmap(176, 176, item["filter_group"], item["display_name"], item.get("image_path")))
+        header_row.addWidget(self.lbl_picture, alignment=Qt.AlignmentFlag.AlignTop)
         header_text = QVBoxLayout()
         header_text.setSpacing(4)
         lbl_name = QLabel(item["display_name"])
         lbl_name.setObjectName("PlayerNameLabel")
         header_text.addWidget(lbl_name)
-        header_lines = ["FILE NAME:  " + item["name"], "ID:  " + item["id"],
-                        "CATEGORY:  " + (item["category"] or "--")]
-        if item["ref"]:
-            header_lines.append("TEMPLATE:  " + item["ref"])
+        header_lines = [
+            "FILE NAME:  " + item["name"],
+            "ID:  " + item["id"],
+            "CATEGORY:  " + (item["category"] or "--"),
+            "TEMPLATE:  " + (item.get("ref") or "--"),
+        ]
         for header_line in header_lines:
             lbl_line = QLabel(header_line)
             lbl_line.setObjectName("PlayerInfoLabel")

@@ -959,6 +959,13 @@ QProgressBar#BackupDiskBar::chunk {
     border-radius: 10px;
 }
 
+/* Large full picture in the Item Stats window (same box, bigger) */
+#ItemStatsPicture {
+    background-color: rgba(5, 14, 24, 200);
+    border: 1px solid rgba(51, 214, 255, 120);
+    border-radius: 10px;
+}
+
 /* GIVE ITEM quantity box, same look as the file picker */
 QSpinBox#LibraryQuantityBox {
     background-color: rgba(5, 14, 24, 180);

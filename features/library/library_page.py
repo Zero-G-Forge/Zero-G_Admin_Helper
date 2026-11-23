@@ -33,7 +33,7 @@ from features.dashboard.dashboard_page import make_card, spread_letters
 ## Item data, the hex tile grid and the full stats window.
 from features.library.item_library import load_items
 from features.library.blueprint_library import load_blueprints
-from features.library.item_tiles import TileFlowArea, make_hex_pixmap
+from features.library.item_tiles import TileFlowArea, make_fit_pixmap
 from features.library.item_stats_dialog import ItemStatsDialog
 
 ## Where the downloaded server files are, and the item pictures inside them.
@@ -182,13 +182,13 @@ class LibraryPage(QWidget):
 
         # region Detail Card
 
-        ## The picked tile: a big picture on the left, NAME / ID / STACK SIZE / CATEGORY on the right.
+        ## The picked tile: the whole picture on the left (not cropped to a hex), NAME / ID / STACK SIZE / CATEGORY on the right.
         detail_card, detail_layout = make_card()
         detail_row = QHBoxLayout()
         detail_row.setSpacing(14)
         self.lbl_detail_picture = QLabel("")
         self.lbl_detail_picture.setObjectName("LibraryPictureBox")
-        self.lbl_detail_picture.setFixedSize(84, 84)
+        self.lbl_detail_picture.setFixedSize(120, 120)
         self.lbl_detail_picture.setAlignment(Qt.AlignmentFlag.AlignCenter)
         detail_row.addWidget(self.lbl_detail_picture, alignment=Qt.AlignmentFlag.AlignTop)
         detail_text = QVBoxLayout()
@@ -480,7 +480,7 @@ class LibraryPage(QWidget):
     def _on_tile_picked(self, item):
         """Fills the detail card with the picked item and turns on VIEW ALL STATS."""
         self.picked_item = item
-        self.lbl_detail_picture.setPixmap(make_hex_pixmap(80, item["filter_group"], item["display_name"], item.get("image_path")))
+        self.lbl_detail_picture.setPixmap(make_fit_pixmap(116, 116, item["filter_group"], item["display_name"], item.get("image_path")))
         self.lbl_detail_name.setText(item["display_name"])
         self.lbl_detail_id.setText("ID:  " + item["id"])
         self.lbl_detail_stack.setText("STACK SIZE:  " + item["stack_size"])

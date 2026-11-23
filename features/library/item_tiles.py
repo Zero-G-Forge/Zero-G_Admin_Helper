@@ -122,7 +122,7 @@ def draw_hex_picture(painter, center_x, center_y, radius, group, picture, lit):
 
 
 def make_hex_pixmap(size, group, display_name, image_path=None):
-    """A square picture of the hex badge, used by the detail card and the stats window."""
+    """A square picture of the hex badge, used by the tile grid when a clipped hex is needed."""
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -137,6 +137,44 @@ def make_hex_pixmap(size, group, display_name, image_path=None):
             draw_hex_badge(painter, size / 2, size / 2, size / 2 - 3, group, short_initials(display_name), True)
 
     ## finally: always runs, so the painter is closed even if drawing fails.
+    finally:
+        painter.end()
+    return pixmap
+
+
+def load_picture_fit(image_path, width, height):
+    """The item picture scaled to fit inside width x height, aspect ratio kept, or None if there is none."""
+    if not image_path:
+        return None
+    cache_key = ("fit", image_path, int(width), int(height))
+    if cache_key not in PICTURE_CACHE:
+        picture = QPixmap(image_path)
+        if picture.isNull():
+            print(f"[WARNING] ItemTiles: Could not read picture {image_path}")
+            PICTURE_CACHE[cache_key] = None
+        else:
+            PICTURE_CACHE[cache_key] = picture.scaled(
+                int(width), int(height),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation)
+    return PICTURE_CACHE[cache_key]
+
+
+def make_fit_pixmap(width, height, group, display_name, image_path=None):
+    """The whole item picture, fitted inside width x height, or the hex badge when there is no file."""
+    pixmap = QPixmap(int(width), int(height))
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    try:
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        picture = load_picture_fit(image_path, width, height)
+        if picture is not None:
+            x = int((width - picture.width()) / 2)
+            y = int((height - picture.height()) / 2)
+            painter.drawPixmap(x, y, picture)
+        else:
+            side = min(width, height)
+            draw_hex_badge(painter, width / 2, height / 2, side / 2 - 3, group, short_initials(display_name), True)
     finally:
         painter.end()
     return pixmap
