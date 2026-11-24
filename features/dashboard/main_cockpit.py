@@ -332,7 +332,7 @@ class MainCockpit(QMainWindow):
             self.lbl_app_title.setAlignment(
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
             )
-            self.lbl_app_subtitle = QLabel("ANTI-CHEAT PANEL")
+            self.lbl_app_subtitle = QLabel("DASHBOARD")
             self.lbl_app_subtitle.setObjectName("AppSubtitleLabel")
 
             self.title_block_layout.addStretch()
@@ -859,10 +859,16 @@ class MainCockpit(QMainWindow):
             ## Scroll the nav so the lit button is in view. singleShot(0) waits until Qt has
             ## finished laying out, otherwise the button's position isn't known yet.
             picked_button = self.nav_group_titles.get(self.nav_child_group.get(page_key), self.nav_buttons.get(page_key))
-            if picked_button is not None and isinstance(getattr(self, "nav_column", None), QScrollArea):
-                QTimer.singleShot(0, lambda: self.nav_column.ensureWidgetVisible(picked_button))
+            nav_column = getattr(self, "nav_column", None)
+            if picked_button is not None and isinstance(nav_column, QScrollArea):
+                QTimer.singleShot(0, lambda: nav_column.ensureWidgetVisible(picked_button))
             if getattr(self, "lbl_content_header", None) is not None:
                 self.lbl_content_header.setText(self._page_title(page_key))
+
+            ## Show the page title in the header subtitle too, so the user sees it even if the content area is scrolled down.
+            if getattr(self, "lbl_app_subtitle", None) is not None:
+                self.lbl_app_subtitle.setText(self._page_title(page_key))
+
             print(f"[INFO] MainCockpit: Page selected: {self._page_title(page_key)}")
 
             ## Load the clicked page into the content area (or an ErrorCard if it fails).
