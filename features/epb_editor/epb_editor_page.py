@@ -10,8 +10,10 @@
 
 # region Imports
 
+import os
+
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QHBoxLayout, QGridLayout, QLineEdit,
+from PyQt6.QtWidgets import (QInputDialog, QMessageBox, QWidget, QFrame, QLabel, QHBoxLayout, QGridLayout, QLineEdit,
                              QPushButton, QComboBox, QSizePolicy, QListWidget, QListWidgetItem,
                              QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 
@@ -20,6 +22,9 @@ from features.dashboard.dashboard_page import make_card
 
 ## Read-only device list from a .epb file.
 from features.epb_editor.epb_core import (list_device_records, format_fields)
+
+## Writes one field, always with a backup first.
+from features.epb_editor.epb_core import (set_field_value, TYPE_STRING, TYPE_FLOAT, TYPE_COLOR)
 
 ## The downloaded server files on this PC
 ## (never the local base game).
@@ -137,6 +142,9 @@ class EpbEditorPage(QWidget):
         self.tbl_devices.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_devices.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
 
+        ## Double-click a row to pick a field and type a new value.
+        self.tbl_devices.cellDoubleClicked.connect(self._on_device_double_clicked)
+
         ## Columns fit their text; FIELDS takes the spare width.
         header = self.tbl_devices.horizontalHeader()
         if header is not None:
@@ -198,6 +206,10 @@ class EpbEditorPage(QWidget):
     def _fill_device_table(self, path):
         ## Read-only: lists records, never writes.
         self.tbl_devices.setRowCount(0)
+
+        ## Remember what is open, for editing.
+        self.current_path = path
+        self.records = []
         if not path:
             self.lbl_details_empty.show()
             return
@@ -212,6 +224,7 @@ class EpbEditorPage(QWidget):
             self.lbl_details_empty.show()
             return
         self.lbl_details_empty.hide()
+        self.records = records
         self.tbl_devices.setRowCount(len(records))
         for row, rec in enumerate(records):
             offset_item = QTableWidgetItem(str(rec["offset"]))
@@ -276,6 +289,73 @@ class EpbEditorPage(QWidget):
             print("[ERROR] EpbEditorPage: Could not list the downloaded blueprints: " + str(exc))
             self.lbl_blueprints_empty.setText(NO_FILES_TEXT)
             self.lbl_blueprints_empty.show()
+
+    # endregion
+
+    # region Editing
+
+    def _can_edit(self, path):
+        ## Only files inside the downloaded server
+        ## folder, never the local base game.
+        folder = getattr(self, "server_folder", None)
+        if not path or not folder:
+            return False
+        root = os.path.realpath(folder) + os.sep
+        return os.path.realpath(path).startswith(root)
+
+    def _on_device_double_clicked(self, row, column):
+        ## Pick a field, type a value, confirm, save.
+        records = getattr(self, "records", [])
+        if row < 0 or row >= len(records):
+            return
+        path = self.current_path
+        if not self._can_edit(path):
+            QMessageBox.warning(self, "EPB Editor", "Only the downloaded server files can be edited.")
+            return
+        rec = records[row]
+
+        ## Colors can't be typed, so they are skipped.
+        by_key = {}
+        for field in rec["fields"]:
+            if field["type"] != TYPE_COLOR:
+                by_key[field["key"]] = field
+        if not by_key:
+            return
+        key, ok = QInputDialog.getItem(self, "Edit field", "Field:", list(by_key), 0, False)
+        if not ok:
+            return
+        field = by_key[key]
+
+        ## Show floats short, e.g. 0.3 not 0.30000001.
+        if field["type"] == TYPE_FLOAT:
+            old_text = f"{field['value']:.6g}"
+        else:
+            old_text = str(field["value"])
+
+        ## Text can have several lines (LCD screens).
+        if field["type"] == TYPE_STRING:
+            new_text, ok = QInputDialog.getMultiLineText(self, "Edit field", key + " =", old_text)
+        else:
+            new_text, ok = QInputDialog.getText(self, "Edit field", key + " =", text=old_text)
+        if not ok or new_text == old_text:
+            return
+
+        ## Before/after check before anything is written.
+        message = "File: " + os.path.basename(path) + "\n" + "Field: " + key + "\n\n" + "Before: " + old_text + "\n" + "After:  " + new_text + "\n\n" + "A backup is made first. Only the local copy changes."
+        buttons = QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Cancel
+        answer = QMessageBox.question(self, "Save change?", message, buttons)
+        if answer != QMessageBox.StandardButton.Save:
+            return
+        try:
+            result = set_field_value(path, rec["offset"], key, new_text)
+        except Exception as exc:
+            QMessageBox.warning(self, "EPB Editor", "Could not save: " + str(exc))
+            return
+
+        ## Show the backup name, then reload the table.
+        self.lbl_backup.setText("Backup:  " + os.path.basename(result["backup"]) + "     |     Local copy only - server unchanged")
+        self._fill_device_table(path)
+        self.tbl_devices.selectRow(row)
 
     # endregion
 

@@ -3,11 +3,14 @@
 ## Read-only helpers for .epb blueprint files.
 ## Unpacks the ZIP payload and lists device
 ## records (portal pads, LCD text, names).
-## Does not write or change any file.
+## Only set_field_value writes (backup first).
 ## ==========================================
 
 # region Imports
 
+import os
+import shutil
+import time
 import struct
 import zipfile
 from io import BytesIO
@@ -237,5 +240,102 @@ def list_device_records(path):
             used[i] = 1
         pos = cur
     return records
+
+# endregion
+
+
+# region Write
+
+## Write a 7-bit length (reverse of read_varint).
+def write_varint(n):
+    out = bytearray()
+    while n > 0x7F:
+        out.append((n & 0x7F) | 0x80)
+        n >>= 7
+    out.append(n)
+    return bytes(out)
+
+
+## Turn typed text into the bytes of one value.
+def encode_value(typ, text):
+    if typ == TYPE_INT32:
+        return struct.pack("<I", int(text, 0))
+    if typ == TYPE_STRING:
+        raw = text.encode("utf-8")
+        return write_varint(len(raw)) + raw
+    if typ == TYPE_BYTE:
+        return bytes([int(text, 0)])
+    if typ == TYPE_FLOAT:
+        return struct.pack("<f", float(text))
+    raise ValueError("this field type can't be edited")
+
+
+## Pack the payload as ZIP member "0" again,
+## with the same date and settings as before.
+def zip_payload(payload, info):
+    new_info = zipfile.ZipInfo("0", info.date_time)
+    new_info.compress_type = zipfile.ZIP_DEFLATED
+    new_info.create_system = info.create_system
+    stream = BytesIO()
+    with zipfile.ZipFile(stream, "w") as zf:
+        zf.writestr(new_info, payload)
+
+        ## writestr adds file rights; put the old back.
+        new_info.external_attr = info.external_attr
+    return stream.getvalue()
+
+
+## Change ONE field in ONE record and save the file.
+## A timestamped backup is always written first and
+## nothing is ever deleted. Returns old, new, backup.
+def set_field_value(path, record_offset, key, new_text):
+    data = open(path, "rb").read()
+    header, zip_bytes, trailer = split_epb(data)
+    payload, info = unzip_payload(zip_bytes)
+    if payload[record_offset] != 0x01:
+        raise ValueError("no record at that offset")
+    count = struct.unpack_from("<H", payload, record_offset + 1)[0]
+
+    ## Walk the record's fields to find the key.
+    pos = record_offset + 3
+    found = None
+    for _ in range(count):
+        start = pos
+        name, typ, old, pos = parse_field(payload, pos)
+        if name == key:
+            found = (start, typ, old, pos)
+            break
+    if found is None:
+        raise ValueError("no field named " + key)
+    start, typ, old, end = found
+
+    ## Swap only the value bytes; the key stays.
+    value_at = start + 2 + len(key)
+    value = encode_value(typ, new_text)
+    new_payload = payload[:value_at] + value + payload[end:]
+
+    ## Rebuild: header, ZIP size, 00 01, ZIP, trailer.
+    new_zip = zip_payload(new_payload, info)
+    size = struct.pack("<I", len(new_zip))
+    new_data = header + size + b"\x00\x01" + new_zip + trailer
+
+    ## Re-read the new bytes before saving them.
+    check, _ = unzip_payload(split_epb(new_data)[1])
+    if check != new_payload:
+        raise ValueError("rebuilt file did not check out")
+    new = parse_field(new_payload, start)[2]
+
+    ## Backup next to the file, for example
+    ## name.epb.bak_20261127_143000
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    backup = path + ".bak_" + stamp
+    n = 1
+    while os.path.exists(backup):
+        n += 1
+        backup = path + ".bak_" + stamp + "_" + str(n)
+    shutil.copy2(path, backup)
+    with open(path, "wb") as f:
+        f.write(new_data)
+    return {"old": old, "new": new, "backup": backup}
 
 # endregion
