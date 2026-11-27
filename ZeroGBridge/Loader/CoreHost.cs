@@ -931,7 +931,9 @@ namespace ZeroGBridge.Hosting
                 else if (parts.Length > 1) version = parts[1];
             }
 
-            HostLog.Write($"[ZGB] -INFO- Hot-reload command from ZAH: {cmd}{(force ? " (force)" : "")}{(version != null ? " " + version : "")}");
+            // status is polled often by ZAH; reload/rollback stay at INFO.
+            string hotTag = cmd == "status" ? "DEBUG" : "INFO";
+            HostLog.Write($"[ZGB] -{hotTag}- Hot-reload command from ZAH: {cmd}{(force ? " (force)" : "")}{(version != null ? " " + version : "")}");
             switch (cmd)
             {
                 case "status":

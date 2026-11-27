@@ -70,6 +70,12 @@ namespace ZeroGBridge
         private int _authGeneration;
         public int AuthGeneration => Volatile.Read(ref _authGeneration);
 
+        // Last INFO auth line, keyed by remote address without the ephemeral port.
+        // ZAH opens a new TCP session per request, so a per-connection log is too noisy.
+        private static readonly ConcurrentDictionary<string, DateTime> _lastAuthInfoUtc =
+            new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+        private static readonly TimeSpan AuthInfoInterval = TimeSpan.FromMinutes(5);
+
         /// <param name="tokenProvider">Returns the current auth token (ZeroGBridge.json AuthToken or the fallback).
         /// Called on every auth attempt so a changed token applies without a restart. Never logged.</param>
         /// <param name="lineHandler">Authenticated non-hot lines (commands and alert:). Exactly one reply per line.</param>
@@ -214,7 +220,7 @@ namespace ZeroGBridge
                                 {
                                     session.IsAuthenticated = true;
                                     Interlocked.Increment(ref _authGeneration);
-                                    HostLog.Write($"[ZGB] -INFO- Client ZAH successfully authenticated on Port {_port}.");
+                                    LogAuthSuccess(session);
                                     var authSuccess = new { type = "AUTH", status = "Authenticated", message = "Access Granted" };
                                     SendToClient(session, JsonConvert.SerializeObject(authSuccess));
                                     continue;
@@ -374,6 +380,29 @@ namespace ZeroGBridge
         {
             try { client?.GetStream()?.Close(); } catch { }
             try { client?.Close(); } catch { }
+        }
+
+        private static string AuthClientKey(ClientSession session)
+        {
+            string ep = session != null ? session.RemoteEndpoint : null;
+            if (string.IsNullOrEmpty(ep)) return "unknown";
+            int colon = ep.LastIndexOf(':');
+            return colon > 0 ? ep.Substring(0, colon) : ep;
+        }
+
+        // INFO the first time (and again after AuthInfoInterval); repeats go to DEBUG.
+        private void LogAuthSuccess(ClientSession session)
+        {
+            string key = AuthClientKey(session);
+            DateTime now = DateTime.UtcNow;
+            DateTime last;
+            if (_lastAuthInfoUtc.TryGetValue(key, out last) && (now - last) < AuthInfoInterval)
+            {
+                HostLog.Write($"[ZGB] -DEBUG- Client ZAH successfully authenticated on Port {_port}.");
+                return;
+            }
+            _lastAuthInfoUtc[key] = now;
+            HostLog.Write($"[ZGB] -INFO- Client ZAH successfully authenticated on Port {_port}.");
         }
     }
 }

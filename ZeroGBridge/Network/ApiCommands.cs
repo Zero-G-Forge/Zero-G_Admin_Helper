@@ -109,7 +109,9 @@ namespace ZeroGBridge
                 int? asked = controls["timeout_ms"]?.Type == JTokenType.Integer ? (int?)controls["timeout_ms"] : null;
                 int timeout = EleonReplies.ReplyTimeout(def, asked);
                 var res = EleonReplies.Run(def, param, timeout);
-                ZgbLog.Write($"[ZGB] -ACTION- api: {def.Name} seq {res.Seq} -> {res.Status}{(res.Event != null ? " (" + res.Event + ")" : "")} in {res.ElapsedMs} ms");
+                // Request_Dedi_Stats is polled for uptime/fps; other api: calls stay ACTION.
+                string apiTag = def.Name == "Request_Dedi_Stats" ? "DEBUG" : "ACTION";
+                ZgbLog.Write($"[ZGB] -{apiTag}- api: {def.Name} seq {res.Seq} -> {res.Status}{(res.Event != null ? " (" + res.Event + ")" : "")} in {res.ElapsedMs} ms");
 
                 return JsonConvert.SerializeObject(new
                 {

@@ -18,7 +18,7 @@ namespace ZeroGBridge.Loader
     public class ZeroGBridgeLoader : IMod, ModInterface
     {
         /// <summary>Loader release. A loader change needs a server restart; core changes do not.</summary>
-        public const string Release = "1.5.0";
+        public const string Release = "1.5.1";
 
         /// <summary>For tests: use this folder instead of the DLL's folder for Core/, Updates/ and the json.</summary>
         public static string ModDirectoryOverride;

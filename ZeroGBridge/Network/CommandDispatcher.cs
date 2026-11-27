@@ -80,8 +80,13 @@ namespace ZeroGBridge
                 // 1.6.4: files:catalog and optional scenario/save names on files:list and files:get live in ServerFiles.cs.
                 if (ChatLog.IsChatLine(lowerCmd)) return ChatLog.Handle(cleanCmd);
 
-                // Live server console trace
-                ZgbLog.Write($"[ZGB] -INFO- Received command from ZAH: \"{cleanCmd}\"");
+                // Live server console trace. Routine polls (plys, Request_Dedi_Stats) are DEBUG.
+                bool routinePoll = lowerCmd == "plys"
+                    || lowerCmd == "api:request_dedi_stats"
+                    || lowerCmd.StartsWith("api:request_dedi_stats ")
+                    || lowerCmd.StartsWith("api:request_dedi_stats{");
+                string recvTag = routinePoll ? "DEBUG" : "INFO";
+                ZgbLog.Write($"[ZGB] -{recvTag}- Received command from ZAH: \"{cleanCmd}\"");
 
                 // 1.6.0: command catalog, full Eleon API (api:) and server console (con: / cmd: / exec:)
                 if (ApiCommands.IsCatalogLine(lowerCmd)) return ApiCommands.Catalog();

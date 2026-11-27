@@ -19,8 +19,9 @@
     <!-- Dynamic 16-bit Valid UTC-5 (CDT) Version Generation -->
     <MajorVersion>1</MajorVersion>
     <MinorVersion>5</MinorVersion>
-    <!-- Human release name (1.5.0). The numeric version stays Major.Minor.MMDD.HHmm. -->
-    <ReleaseVersion>1.5.0</ReleaseVersion>
+    <!-- Human release name (1.5.1). The numeric version stays Major.Minor.MMDD.HHmm. -->
+    <!-- 1.5.1: quieter routine logs (auth once per client / 5 min; hot:status is DEBUG) -->
+    <ReleaseVersion>1.5.1</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
 

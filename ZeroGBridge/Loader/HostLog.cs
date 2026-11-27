@@ -27,6 +27,9 @@ namespace ZeroGBridge
         public static void Write(string message)
         {
             if (message == null) message = string.Empty;
+            // -DEBUG- / -TRACE- are off unless ZeroGBridge.json has "LogLevel": "Debug" (or "Trace").
+            // They used to go to Console.WriteLine, which still showed up in the dedicated server log.
+            if (IsDebugOrTrace(message) && !DebugEnabled()) return;
             var sink = Sink;
             if (sink != null)
             {
@@ -49,6 +52,24 @@ namespace ZeroGBridge
             {
                 Console.WriteLine(message);
             }
+        }
+
+        private static bool IsDebugOrTrace(string message)
+        {
+            return message.IndexOf("-DEBUG-", StringComparison.Ordinal) >= 0
+                || message.IndexOf("-TRACE-", StringComparison.Ordinal) >= 0;
+        }
+
+        // Reads the existing AuthConfig.GetString helper. Missing or any other value means off.
+        private static bool DebugEnabled()
+        {
+            try
+            {
+                string level = AuthConfig.GetString("LogLevel", "Info");
+                return level.Equals("Debug", StringComparison.OrdinalIgnoreCase)
+                    || level.Equals("Trace", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
         }
     }
 }
