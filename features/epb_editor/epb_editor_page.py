@@ -11,7 +11,7 @@
 # region Imports
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QHBoxLayout, QGridLayout,
+from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QHBoxLayout, QGridLayout, QLineEdit,
                              QPushButton, QComboBox, QSizePolicy, QListWidget, QListWidgetItem,
                              QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 
@@ -96,6 +96,14 @@ class EpbEditorPage(QWidget):
 
         ## Each blueprint will be a row with its name and type (BA, CV, SV, HV, POI).
         blueprints_card, blueprints_layout = make_card("BLUEPRINTS")
+
+        ## Type part of a name to narrow the list.
+        self.txt_blueprint_search = QLineEdit()
+        self.txt_blueprint_search.setObjectName("EcfSearchBox")
+        self.txt_blueprint_search.setPlaceholderText("Search blueprints")
+        self.txt_blueprint_search.setClearButtonEnabled(True)
+        self.txt_blueprint_search.textChanged.connect(self._filter_blueprints)
+        blueprints_layout.addWidget(self.txt_blueprint_search)
 
         ## Click a name to show its device records.
         self.lst_blueprints = QListWidget()
@@ -217,6 +225,18 @@ class EpbEditorPage(QWidget):
         ## Open the clicked blueprint in the table.
         path = item.data(Qt.ItemDataRole.UserRole)
         self._fill_device_table(path or "")
+
+    def _filter_blueprints(self, text):
+        ## Hide rows whose name doesn't match.
+        needle = text.strip().lower()
+        for row in range(self.lst_blueprints.count()):
+            item = self.lst_blueprints.item(row)
+            if item is None:
+                continue
+
+            ## An empty box shows every row.
+            match = needle in item.text().lower()
+            item.setHidden(not match)
 
     # endregion
 
