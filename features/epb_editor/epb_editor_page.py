@@ -106,14 +106,21 @@ class EpbEditorPage(QWidget):
         self.tbl_devices = QTableWidget(0, 3)
         self.tbl_devices.setObjectName("DashTable")
         self.tbl_devices.setHorizontalHeaderLabels(["OFFSET", "TYPE", "FIELDS"])
-        self.tbl_devices.verticalHeader().setVisible(False)
+
+        ## Hide the row numbers (the check keeps VS Code happy).
+        row_header = self.tbl_devices.verticalHeader()
+        if row_header is not None:
+            row_header.setVisible(False)
         self.tbl_devices.setShowGrid(False)
         self.tbl_devices.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl_devices.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_devices.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+
+        ## Columns fit their text; FIELDS takes the spare width.
         header = self.tbl_devices.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         details_layout.addWidget(self.tbl_devices, stretch=1)
         self.lbl_details_empty = QLabel("Pick a blueprint to see its details.")
         self.lbl_details_empty.setObjectName("DashEmptyLabel")
