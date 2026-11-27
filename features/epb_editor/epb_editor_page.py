@@ -12,7 +12,7 @@
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QHBoxLayout, QGridLayout,
-                             QPushButton, QComboBox, QSizePolicy,
+                             QPushButton, QComboBox, QSizePolicy, QListWidget, QListWidgetItem,
                              QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
@@ -20,6 +20,10 @@ from features.dashboard.dashboard_page import make_card
 
 ## Read-only device list from a .epb file.
 from features.epb_editor.epb_core import (list_device_records, format_fields)
+
+## The downloaded server files on this PC
+## (never the local base game).
+from features.server_files.local_files import (NO_FILES_TEXT, current_scenario_folder, list_files)
 
 # endregion
 
@@ -44,6 +48,9 @@ class EpbEditorPage(QWidget):
         ## Name that ZAH_main.css can use to style the page.
         self.setObjectName("EpbEditorPage")
         self.setup_widgets()
+
+        ## Fill the blueprint list from the downloaded files, if any.
+        self.load_server_files()
 
         ## When a file is picked, fill the device table.
         self.cmb_file.currentIndexChanged.connect(self._on_file_picked)
@@ -89,10 +96,16 @@ class EpbEditorPage(QWidget):
 
         ## Each blueprint will be a row with its name and type (BA, CV, SV, HV, POI).
         blueprints_card, blueprints_layout = make_card("BLUEPRINTS")
+
+        ## Click a name to show its device records.
+        self.lst_blueprints = QListWidget()
+        self.lst_blueprints.setObjectName("EcfTraderList")
+        self.lst_blueprints.itemClicked.connect(self._on_blueprint_clicked)
+        blueprints_layout.addWidget(self.lst_blueprints, stretch=1)
+
         self.lbl_blueprints_empty = QLabel("No blueprints loaded yet.")
         self.lbl_blueprints_empty.setObjectName("DashEmptyLabel")
         blueprints_layout.addWidget(self.lbl_blueprints_empty)
-        blueprints_layout.addStretch()
         page_grid.addWidget(blueprints_card, 1, 0)
 
         # endregion
@@ -199,6 +212,50 @@ class EpbEditorPage(QWidget):
             self.tbl_devices.setItem(row, 0, offset_item)
             self.tbl_devices.setItem(row, 1, kind_item)
             self.tbl_devices.setItem(row, 2, fields_item)
+
+    def _on_blueprint_clicked(self, item):
+        ## Open the clicked blueprint in the table.
+        path = item.data(Qt.ItemDataRole.UserRole)
+        self._fill_device_table(path or "")
+
+    # endregion
+
+    # region Server Files
+
+    def load_server_files(self, folder=None):
+        ## Lists .epb files under Prefabs in the local copy.
+        try:
+            if folder is None:
+                folder = current_scenario_folder()
+            self.server_folder = folder
+            entries = list_files(folder, (".epb",), under=("Prefabs",))
+            self.lst_blueprints.clear()
+            prefix = "Prefabs/"
+            for entry in entries:
+                rel = entry["path"]
+
+                ## Hide the Prefabs/ part of the name.
+                if rel.lower().startswith(prefix.lower()):
+                    rel = rel[len(prefix):]
+                item = QListWidgetItem(rel)
+
+                ## The full path rides along, hidden.
+                item.setData(Qt.ItemDataRole.UserRole, entry["full"])
+                item.setToolTip(entry["root"] + "/" + entry["path"])
+                self.lst_blueprints.addItem(item)
+            if entries:
+                self.lbl_blueprints_empty.hide()
+            else:
+                if folder is None:
+                    text = NO_FILES_TEXT
+                else:
+                    text = "No blueprints in the downloaded files."
+                self.lbl_blueprints_empty.setText(text)
+                self.lbl_blueprints_empty.show()
+        except Exception as exc:
+            print("[ERROR] EpbEditorPage: Could not list the downloaded blueprints: " + str(exc))
+            self.lbl_blueprints_empty.setText(NO_FILES_TEXT)
+            self.lbl_blueprints_empty.show()
 
     # endregion
 
