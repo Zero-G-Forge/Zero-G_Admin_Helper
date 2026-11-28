@@ -14,7 +14,7 @@ import re
 
 from PyQt6.QtCore import Qt, QRect, QSize
 from PyQt6.QtGui import (QColor, QFont, QFontDatabase, QPainter, QSyntaxHighlighter,
-                         QTextCharFormat, QTextFormat, QTextCursor)
+                         QTextCharFormat, QTextFormat, QTextCursor, QPen)
 from PyQt6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit
 
 # endregion
@@ -39,6 +39,7 @@ EDITOR_LINE_NUMBER_TEXT = QColor("#4f6a80")
 EDITOR_LINE_NUMBER_CURRENT = QColor("#33d6ff")
 EDITOR_CURRENT_LINE = QColor(51, 214, 255, 18)
 EDITOR_BRACE_MATCH = QColor(51, 214, 255, 70)
+EDITOR_CURRENT_LINE_OUTLINE = QColor("#33d6ff")
 
 # endregion
 
@@ -250,6 +251,7 @@ class EcfCodeEditor(QPlainTextEdit):
 
         ## Repaint the numbers so the cyan current-line number follows the cursor.
         self.line_number_area.update()
+        self.viewport().update()
 
     def _matching_brace_positions(self):
         """Returns [brace, match] positions if the cursor is right before or after a brace, otherwise []."""
@@ -262,6 +264,24 @@ class EcfCodeEditor(QPlainTextEdit):
                     return [brace_position, match_position]
                 return []
         return []
+
+    def paintEvent(self, event):
+        ## After the text is drawn, a 1px cyan box around
+        ## the cursor's line, the full width of the view.
+        super().paintEvent(event)
+        block = self.textCursor().block()
+        area = self.blockBoundingGeometry(block)
+        area = area.translated(self.contentOffset())
+        area.setX(0)
+        area.setWidth(self.viewport().width())
+        painter = QPainter(self.viewport())
+        try:
+            color = EDITOR_CURRENT_LINE_OUTLINE
+            painter.setPen(QPen(color, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(area.adjusted(0, 0, -1, -1))
+        finally:
+            painter.end()
 
     # endregion
 
