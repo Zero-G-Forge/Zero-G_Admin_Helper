@@ -17,6 +17,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QFileDialog, QInputDialog, QMessageBox, QWidget, QFrame, QLabel, QHBoxLayout, QGridLayout, QLineEdit,
                              QPushButton, QComboBox, QSizePolicy, QListWidget, QListWidgetItem,
                              QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
+from PyQt6.QtWidgets import QStyledItemDelegate
+from PyQt6.QtGui import QColor, QPen
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card
@@ -62,6 +64,57 @@ PATCHED_FOLDER = "patched_prefabs"
 
 ## Bottom line text after an upload that did not go through.
 FAILED_TEXT = "Upload failed     |     server unchanged"
+
+## Marks a device row whose fields no longer
+## match the file as it was first opened (or
+## the oldest .bak_ copy next to it).
+EDITED_ROLE = int(Qt.ItemDataRole.UserRole) + 1
+EDITED_OUTLINE = QColor(51, 214, 255, 120)
+
+# endregion
+
+
+# region Edited Rows
+
+def _oldest_epb_backup(path):
+    ## The first backup made before an edit,
+    ## e.g. name.epb.bak_20261127_143000.
+    folder = os.path.dirname(path)
+    prefix = os.path.basename(path) + ".bak_"
+    matches = []
+    try:
+        for name in os.listdir(folder or "."):
+            if name.startswith(prefix):
+                matches.append(
+                    os.path.join(folder, name))
+    except OSError:
+        return None
+    if not matches:
+        return None
+    return min(matches)
+
+
+class EditedRowDelegate(QStyledItemDelegate):
+    """Draws a dim cyan box around an edited row."""
+
+    def paint(self, painter, option, index):
+        super().paint(painter, option, index)
+        if index.column() != 0:
+            return
+        if not index.data(EDITED_ROLE):
+            return
+        table = self.parent()
+        rect = option.rect
+        if table is not None:
+            rect.setLeft(0)
+            rect.setWidth(
+                table.viewport().width())
+        painter.save()
+        painter.setPen(QPen(EDITED_OUTLINE, 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(
+            rect.adjusted(0, 0, -1, -1))
+        painter.restore()
 
 # endregion
 
@@ -174,6 +227,8 @@ class EpbEditorPage(QWidget):
         self.tbl_devices.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl_devices.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_devices.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.tbl_devices.setItemDelegate(
+            EditedRowDelegate(self.tbl_devices))
 
         ## Double-click a row to pick a field and type a new value.
         self.tbl_devices.cellDoubleClicked.connect(self._on_device_double_clicked)
@@ -262,10 +317,45 @@ class EpbEditorPage(QWidget):
         for row, rec in enumerate(records):
             offset_item = QTableWidgetItem(str(rec["offset"]))
             kind_item = QTableWidgetItem(rec["kind"])
-            fields_item = QTableWidgetItem(format_fields(rec["fields"]))
+            fields_text = format_fields(rec["fields"])
+            fields_item = QTableWidgetItem(fields_text)
             self.tbl_devices.setItem(row, 0, offset_item)
             self.tbl_devices.setItem(row, 1, kind_item)
             self.tbl_devices.setItem(row, 2, fields_item)
+            if self._row_is_edited(
+                path, row, records, fields_text):
+                offset_item.setData(
+                    EDITED_ROLE, True)
+
+    def _original_field_rows(self, path, records):
+        ## One fields string per row, from the first
+        ## look at this file, or from its oldest
+        ## backup if the file was already edited.
+        stored = getattr(
+            self, "_original_fields", None)
+        if stored is None:
+            stored = {}
+            self._original_fields = stored
+        if path not in stored:
+            source = _oldest_epb_backup(path)
+            if source:
+                try:
+                    records = list_device_records(
+                        source)
+                except Exception:
+                    pass
+            stored[path] = [
+                format_fields(rec["fields"])
+                for rec in records]
+        return stored[path]
+
+    def _row_is_edited(self, path, row,
+                      records, fields_text):
+        original = self._original_field_rows(
+            path, records)
+        if row >= len(original):
+            return True
+        return fields_text != original[row]
 
     def _on_blueprint_clicked(self, item):
         ## Open the clicked blueprint in the table.
