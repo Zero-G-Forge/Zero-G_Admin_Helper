@@ -38,6 +38,30 @@ QLabel {
 
 /* endregion */
 
+/* region: Selected Rows */
+
+/* A 1px cyan box around the picked row in every
+   list, tree and table. A transparent border on
+   ordinary rows keeps the same size, so the box
+   does not clip or jump. Menus are left as they
+   are: they already use a cyan fill. */
+QListWidget::item, QTreeWidget::item,
+QTableWidget::item, QTableView::item,
+QListView::item, QTreeView::item {
+    border: 1px solid transparent;
+}
+
+QListWidget::item:selected,
+QTreeWidget::item:selected,
+QTableWidget::item:selected,
+QTableView::item:selected,
+QListView::item:selected,
+QTreeView::item:selected {
+    border: 1px solid #33d6ff;
+}
+
+/* endregion */
+
 /* region: Shell Panels */
 
 /* Shell panels */
