@@ -38,6 +38,13 @@ from features.server_files import edit_store, upload_flow
 ## The thread and the step that send a file to the server.
 from features.server_files.write_worker import (ServerWriteWorker, put_file, start_write_worker)
 
+## The Wipe playfields button: which playfields use the
+## uploaded prefabs, and the steps that wipe their POIs.
+from features.epb_editor import wipe_flow, wipe_lookup
+
+## The role check, Safety Flow and audit log the wipe uses.
+from features.shared import server_actions
+
 # endregion
 
 
@@ -416,6 +423,9 @@ class EpbEditorPage(QWidget):
     upload_worker = None
     pending_jobs = None
 
+    ## The playfields ticked for a wipe, until it is sent.
+    pending_wipe = None
+
     def showEvent(self, event):
         ## Each time the page appears, UPLOAD follows the
         ## latest bridge state and role.
@@ -591,12 +601,18 @@ class EpbEditorPage(QWidget):
             print("[SUCCESS] EpbEditor: Uploaded " + ", ".join(names))
 
             ## Show every picked file and how it went.
-            self._show_upload_results(result)
+            wipe_asked = self._show_upload_results(result)
             error = result["error"]
             if error:
                 if not names:
                     self.lbl_backup.setText(FAILED_TEXT)
                 self._show_upload_error(error[1], error[2], error[0])
+
+            ## The Wipe playfields button was clicked: start
+            ## it now, after any error popup is closed.
+            if wipe_asked:
+                self._start_wipe(names)
+
         except Exception as exc:
             print("[ERROR] EpbEditor: Uploaded, but the local copy was not updated: " + str(exc))
 
@@ -616,7 +632,7 @@ class EpbEditorPage(QWidget):
             path = job["entry"]["path"]
             sent.append(path)
             backup = os.path.basename(backup_path) or "--"
-            lines.append("UPLOADED   " + path + "   (server backup: " + backup + ")")
+            lines.append("SUCCESS File uploaded   " + path + "   (server backup: " + backup + ")")
 
         ## Files that were picked but did not go up.
         error = result["error"]
@@ -625,11 +641,15 @@ class EpbEditorPage(QWidget):
             if path in sent:
                 continue
             if error and path == error[0]:
-                lines.append("FAILED     " + path)
+                lines.append("UPLOAD FAILED     " + path)
             else:
-                lines.append("NOT SENT   " + path)
-        QMessageBox.information(self, "Upload results", "\n".join(lines))
+                lines.append("UPLOAD NOT SENT   " + path)
 
+        ## The popup has a Wipe playfields button when at
+        ## least one file went up. True = it was clicked.
+        text = "\n".join(lines)
+        return wipe_flow.ask_results(self, text, bool(sent))
+    
     def _show_upload_error(self, code, message, name=""):
         if code == "changed_on_server":
             prefix = ""
@@ -637,6 +657,69 @@ class EpbEditorPage(QWidget):
                 prefix = name + ": "
             message = (prefix + "the server's copy changed since it was downloaded, so nothing was replaced. Download the file again, then redo the edit.")
         QMessageBox.warning(self, "Upload failed", message)
+
+    # endregion
+
+    # region Wipe Playfields
+
+    def _start_wipe(self, names):
+        ## names: the uploaded prefab file names. Finds the
+        ## playfields that use them, then shows their list.
+        action = wipe_flow.WIPE_ACTION
+        reason = server_actions.block_reason(self, action)
+        if reason:
+            title = "Wipe playfields"
+            QMessageBox.information(self, title, reason)
+            return
+        folder = self.server_folder or ""
+        scenario = os.path.join(folder, "scenario")
+        lookup = wipe_lookup.playfields_for_prefabs
+        rows, missing = lookup(scenario, names)
+        ask = wipe_flow.ask_playfields
+        picked = ask(self, rows, missing)
+        if not picked:
+            return
+        self.pending_wipe = picked
+
+        ## A fresh, read-only player list for step 2.
+        from features.zgb_portal import live_client
+        read = upload_flow.fetch_players_for_upload
+
+        def no_players(kind, message):
+            self._continue_wipe(None)
+
+        live_client.run_async(read, self._continue_wipe, no_players)
+
+    def _continue_wipe(self, players_payload):
+        ## Step 2 (players on those playfields), then the
+        ## Safety Flow and the send.
+        try:
+            picked = self.pending_wipe or []
+            self.pending_wipe = None
+            if not picked:
+                return
+            flow = wipe_flow
+            online = flow.online_on_playfields
+            found = online(players_payload, picked)
+            if not flow.ask_wipe_players(self, found):
+                print("[INFO] EpbEditor: Wipe stopped (2).")
+                return
+            done = self._on_wipe_done
+            flow.start_wipes(self, picked, done)
+        except Exception as exc:
+            text = str(exc)
+            print("[ERROR] EpbEditor: Wipe failed: " + text)
+
+    def _on_wipe_done(self, results):
+        ## Every playfield and how it went.
+        try:
+            wipe_flow.show_results(self, results)
+            count = str(len(results))
+            note = "[INFO] EpbEditor: Wiped " + count
+            print(note + " playfield(s).")
+        except Exception as exc:
+            text = str(exc)
+            print("[ERROR] EpbEditor: Wipe: " + text)
 
     # endregion
 
