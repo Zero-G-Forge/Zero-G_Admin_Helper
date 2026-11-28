@@ -60,6 +60,28 @@ QTreeView::item:selected {
     border: 1px solid #33d6ff;
 }
 
+/* Dropdown lists (QComboBox popups). Qt only
+   honours these ::item rules when the combo
+   uses a QStyledItemDelegate, which
+   features/shared/combo_popup.py installs. */
+QComboBox QAbstractItemView {
+    background-color: #08121e;
+    border: 1px solid rgba(40, 170, 215, 90);
+    color: #dcebf5;
+    outline: 0;
+    selection-background-color: rgba(18, 90, 125, 170);
+    selection-color: #ffffff;
+}
+
+QComboBox QAbstractItemView::item {
+    border: 1px solid transparent;
+}
+
+QComboBox QAbstractItemView::item:selected,
+QComboBox QAbstractItemView::item:hover {
+    border: 1px solid #33d6ff;
+}
+
 /* endregion */
 
 /* region: Shell Panels */

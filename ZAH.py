@@ -85,6 +85,11 @@ def main():
     else:
         print(f"[WARNING] Local asset missing at: {css_path}. Using default system styles.")
 
+    ## So dropdown lists honour the cyan ::item box.
+    from features.shared.combo_popup import (
+        install_combo_popup_outline)
+    install_combo_popup_outline(app)
+
     ## Without the main window class there is nothing to open, so the program stops here.
     if MainCockpit is None:
         print("[ERROR] MainCockpit not found. Halting.")
