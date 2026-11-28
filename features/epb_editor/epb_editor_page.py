@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (QFileDialog, QInputDialog, QMessageBox, QWidget, QF
                              QPushButton, QComboBox, QSizePolicy, QListWidget, QListWidgetItem,
                              QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 from PyQt6.QtWidgets import QStyledItemDelegate
-from PyQt6.QtGui import QColor, QPen
+from PyQt6.QtGui import QColor, QPainter, QPen
 
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card
@@ -46,6 +46,9 @@ from features.epb_editor import wipe_flow, wipe_lookup
 
 ## The role check, Safety Flow and audit log the wipe uses.
 from features.shared import server_actions
+
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import viewport_of
 
 # endregion
 
@@ -97,7 +100,7 @@ def _oldest_epb_backup(path):
 class EditedRowDelegate(QStyledItemDelegate):
     """Draws a dim cyan box around an edited row."""
 
-    def paint(self, painter, option, index):
+    def paint(self, painter: QPainter, option, index):
         super().paint(painter, option, index)
         if index.column() != 0:
             return
@@ -105,10 +108,12 @@ class EditedRowDelegate(QStyledItemDelegate):
             return
         table = self.parent()
         rect = option.rect
-        if table is not None:
+
+        ## The delegate's parent is the table; isinstance lets the type checker see that.
+        if isinstance(table, QTableWidget):
             rect.setLeft(0)
             rect.setWidth(
-                table.viewport().width())
+                viewport_of(table).width())
         painter.save()
         painter.setPen(QPen(EDITED_OUTLINE, 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)

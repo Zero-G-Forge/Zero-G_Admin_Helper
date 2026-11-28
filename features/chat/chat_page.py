@@ -277,7 +277,7 @@ class ChatPage(QWidget):
                 self.lbl_messages_empty.setText("Connect to the server to see chat.")
                 return
             command = 'chat:recent:{"since":%d}' % chat_store.LAST_SEQ["value"]
-            chat_items = [(command, ("CHAT_LOG", "ERROR", "RESPONSE"), self._on_chat_read,
+            chat_items: list = [(command, ("CHAT_LOG", "ERROR", "RESPONSE"), self._on_chat_read,
                            lambda message: print(f"[ERROR] ChatPage: chat:recent failed: {message}"))]
             if not self.player_names or len(chat_store.CHAT_HISTORY) % 20 == 0:
                 chat_items.append(("plys", "PLAYER_CACHE", self._on_players_read, lambda message: None))

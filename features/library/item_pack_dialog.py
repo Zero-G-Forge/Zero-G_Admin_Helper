@@ -20,7 +20,7 @@ from features.library.item_library import FILTER_ORDER
 from features.shared import loadouts
 
 ## Qt calls that may return None, wrapped once.
-from features.shared.qt_types import horizontal_header, vertical_header
+from features.shared.qt_types import horizontal_header, vertical_header, not_none
 
 # endregion
 
@@ -197,9 +197,9 @@ class ItemPackDialog(QDialog):
             item_name = self.picked_item.get("display_name") or self.picked_item.get("name") or str(item_id)
             count = int(self.spn_quantity.value())
             for row_number in range(self.tbl_rows.rowCount()):
-                if int(self.tbl_rows.item(row_number, 1).text()) == item_id:
-                    current = int(self.tbl_rows.item(row_number, 2).text())
-                    self.tbl_rows.item(row_number, 2).setText(str(current + count))
+                if int(not_none(self.tbl_rows.item(row_number, 1)).text()) == item_id:
+                    current = int(not_none(self.tbl_rows.item(row_number, 2)).text())
+                    not_none(self.tbl_rows.item(row_number, 2)).setText(str(current + count))
                     self.tbl_rows.selectRow(row_number)
                     return
             self._append_row({"id": item_id, "name": item_name, "count": count})
@@ -230,9 +230,9 @@ class ItemPackDialog(QDialog):
         rows = []
         for row_number in range(self.tbl_rows.rowCount()):
             rows.append({
-                "id": int(self.tbl_rows.item(row_number, 1).text()),
-                "name": self.tbl_rows.item(row_number, 0).text(),
-                "count": int(self.tbl_rows.item(row_number, 2).text()),
+                "id": int(not_none(self.tbl_rows.item(row_number, 1)).text()),
+                "name": not_none(self.tbl_rows.item(row_number, 0)).text(),
+                "count": int(not_none(self.tbl_rows.item(row_number, 2)).text()),
             })
         return rows
 

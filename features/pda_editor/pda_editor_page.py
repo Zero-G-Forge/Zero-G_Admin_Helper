@@ -33,6 +33,9 @@ from features.shared.editor_actions import EditorActions
 from features.ecf_editor.ecf_code_editor import EcfCodeEditor
 from features.pda_editor.pda_yaml_highlighter import PdaYamlHighlighter
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import not_none
+
 # endregion
 
 
@@ -332,7 +335,7 @@ class PdaEditorPage(EditorActions, QWidget):
         """Hides chapters that don't contain the search text (upper/lower case doesn't matter)."""
         search_text = search_text.strip().lower()
         for row in range(self.lst_chapters.count()):
-            chapter_item = self.lst_chapters.item(row)
+            chapter_item = not_none(self.lst_chapters.item(row))
 
             ## Search finds a chapter by its name or by its pda_ id.
             searchable_text = (chapter_item.text() + " " + chapter_item.toolTip()).lower()
@@ -360,13 +363,13 @@ class PdaEditorPage(EditorActions, QWidget):
     def _on_chapter_clicked(self, chapter_item):
         """Moves the editor's cursor to the chapter's line and scrolls it near the top."""
         line_number = chapter_item.data(Qt.ItemDataRole.UserRole)
-        block = self.code_editor.document().findBlockByNumber(line_number)
+        block = not_none(self.code_editor.document()).findBlockByNumber(line_number)
         if not block.isValid():
             return
         cursor = self.code_editor.textCursor()
         cursor.setPosition(block.position())
         self.code_editor.setTextCursor(cursor)
-        self.code_editor.verticalScrollBar().setValue(max(0, line_number - 2))
+        not_none(self.code_editor.verticalScrollBar()).setValue(max(0, line_number - 2))
         self.code_editor.setFocus()
 
     # endregion

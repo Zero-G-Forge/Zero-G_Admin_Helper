@@ -246,7 +246,7 @@ def write_audit(widget, action_key, command, result_ok, detail):
         cockpit = find_cockpit(widget)
         entry = {
             "time": datetime.now().astimezone().isoformat(timespec="seconds"),
-            "user": str(getattr(cockpit, "lbl_admin_name", None).text()) if getattr(cockpit, "lbl_admin_name", None) else "--",
+            "user": str(getattr(cockpit, "lbl_admin_name", None).text()) if getattr(cockpit, "lbl_admin_name", None) else "--",  # pyright: ignore[reportOptionalMemberAccess]
             "role": getattr(cockpit, "signed_in_role", None),
             "server": getattr(cockpit, "bridge_server_name", None),
             "action": action_key,

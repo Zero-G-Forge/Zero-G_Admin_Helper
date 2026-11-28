@@ -17,6 +17,9 @@ from PyQt6.QtCore import Qt, QPointF, QRectF, QSize, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PyQt6.QtWidgets import QAbstractButton, QButtonGroup, QFrame, QGridLayout, QScrollArea, QWidget
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import viewport_of
+
 # endregion
 
 
@@ -294,7 +297,7 @@ class TileFlowArea(QScrollArea):
 
     def _reflow(self):
         """Places the visible tiles in as many columns as fit the current width."""
-        usable_width = self.viewport().width()
+        usable_width = viewport_of(self).width()
         column_count = max(1, (usable_width + TILE_SPACING) // (TILE_WIDTH + TILE_SPACING))
         if column_count == self.column_count:
             return

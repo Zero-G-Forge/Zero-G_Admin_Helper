@@ -15,6 +15,9 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout,
 
 from features.library.item_tiles import TileFlowArea
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import not_none
+
 # endregion
 
 
@@ -131,7 +134,7 @@ class ItemBrowser(QWidget):
         self.filter_menu = QMenu(self)
         self.filter_menu.setObjectName("LibraryFilterMenu")
         for filter_text in filter_names:
-            action = self.filter_menu.addAction(filter_text)
+            action = not_none(self.filter_menu.addAction(filter_text))
             action.setCheckable(True)
             action.toggled.connect(self._on_filter_menu_toggled)
             self.filter_actions[filter_text] = action

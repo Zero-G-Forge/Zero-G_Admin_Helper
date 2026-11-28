@@ -12,6 +12,8 @@
 
 # region Imports
 
+from typing import Any
+
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QLabel, QCheckBox, QVBoxLayout, QHBoxLayout, QPushButton, QProgressBar,
@@ -325,7 +327,7 @@ class SettingsPage(QWidget):
     ## The tick itself lives on the cockpit (live_mode) and is never saved.
     def _refresh_live_mode_state(self):
         try:
-            cockpit = self.window()
+            cockpit: Any = self.window()
             check = getattr(cockpit, "can_edit_live_files", None)
             allowed = bool(check()) if callable(check) else False
             connected = getattr(cockpit, "bridge_connected", None) is True
@@ -349,7 +351,7 @@ class SettingsPage(QWidget):
     ## Turning LIVE MODE on asks first (No is the default); turning it off never asks.
     def _on_live_mode_toggled(self, is_checked):
         try:
-            cockpit = self.window()
+            cockpit: Any = self.window()
             if is_checked:
                 check = getattr(cockpit, "can_edit_live_files", None)
                 allowed = bool(check()) if callable(check) else False

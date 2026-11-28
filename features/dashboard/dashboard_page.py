@@ -13,6 +13,7 @@
 # region Imports
 
 from datetime import datetime
+from typing import Any
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
@@ -72,7 +73,8 @@ def spread_letters(widget, spacing_px):
 
 ## One rounded navy glass card with an optional title, styled by DashCard in ZAH_main.css.
 ## Returns (card, layout) so the caller can add its own widgets under the title.
-def make_card(title_text=""):
+## The card is typed Any because pages hang their own attributes on it (e.g. the server cards).
+def make_card(title_text="") -> tuple[Any, QVBoxLayout]:
     card = QFrame()
     card.setObjectName("DashCard")
     card_layout = QVBoxLayout(card)

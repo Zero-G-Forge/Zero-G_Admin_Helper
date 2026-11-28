@@ -22,6 +22,9 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTreeWid
 from features.dashboard.dashboard_page import make_card
 from features.library.item_tiles import make_fit_pixmap
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import not_none
+
 # endregion
 
 
@@ -118,8 +121,8 @@ class ItemStatsDialog(QDialog):
         self.tree_stats.setHeaderLabels(["STAT", "VALUE"])
         self.tree_stats.setRootIsDecorated(True)
         self.tree_stats.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.tree_stats.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.tree_stats.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        not_none(self.tree_stats.header()).setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        not_none(self.tree_stats.header()).setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         stats_layout.addWidget(self.tree_stats, stretch=1)
 
         ## own_keys = the item's own lines; anything else was inherited from its Ref template.

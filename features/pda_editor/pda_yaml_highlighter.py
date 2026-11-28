@@ -48,7 +48,7 @@ class PdaYamlHighlighter(QSyntaxHighlighter):
         ]
         self.comment_format = _make_format("comment", italic=True)
 
-    def highlightBlock(self, text):
+    def highlightBlock(self, text: str):
         for pattern, text_format, group in self.rules:
             for match in pattern.finditer(text):
                 start, end = match.span(group)

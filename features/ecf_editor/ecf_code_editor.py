@@ -18,6 +18,9 @@ from PyQt6.QtGui import (QColor, QFont, QFontDatabase, QPainter, QSyntaxHighligh
                          QTextCharFormat, QTextFormat, QTextCursor, QPen)
 from PyQt6.QtWidgets import QPlainTextEdit, QWidget, QTextEdit
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import viewport_of
+
 # endregion
 
 
@@ -91,7 +94,7 @@ class EcfHighlighter(QSyntaxHighlighter):
         ]
         self.comment_format = _make_format("comment", italic=True)
 
-    def highlightBlock(self, text):
+    def highlightBlock(self, text: str):
         for pattern, text_format, group in self.rules:
             for match in pattern.finditer(text):
                 start, end = match.span(group)
@@ -198,7 +201,7 @@ class EcfCodeEditor(QPlainTextEdit):
             self.line_number_area.scroll(0, scrolled_by)
         else:
             self.line_number_area.update(0, rect.y(), self.line_number_area.width(), rect.height())
-        if rect.contains(self.viewport().rect()):
+        if rect.contains(viewport_of(self).rect()):
             self._update_line_number_width()
 
     def resizeEvent(self, event):
@@ -263,7 +266,7 @@ class EcfCodeEditor(QPlainTextEdit):
 
         ## Repaint the numbers so the cyan current-line number follows the cursor.
         self.line_number_area.update()
-        self.viewport().update()
+        viewport_of(self).update()
 
     def _matching_brace_positions(self):
         """Returns [brace, match] positions if the cursor is right before or after a brace, otherwise []."""
@@ -281,7 +284,7 @@ class EcfCodeEditor(QPlainTextEdit):
         ## After the text is drawn, a 1px cyan box around
         ## the cursor's line, the full width of the view.
         super().paintEvent(event)
-        painter = QPainter(self.viewport())
+        painter = QPainter(viewport_of(self))
         try:
             painter.setBrush(Qt.BrushStyle.NoBrush)
             self._paint_line_outlines(painter)
@@ -293,9 +296,9 @@ class EcfCodeEditor(QPlainTextEdit):
         ## the bright box on the cursor's line when
         ## this editor is set to show it.
         current = self.textCursor().block()
-        view_w = self.viewport().width()
+        view_w = viewport_of(self).width()
         block = self.firstVisibleBlock()
-        bottom = self.viewport().height()
+        bottom = viewport_of(self).height()
         while block.isValid():
             area = self.blockBoundingGeometry(
                 block)
@@ -352,7 +355,7 @@ class EcfCodeEditor(QPlainTextEdit):
             if tag in ("replace", "insert"):
                 dirty.update(range(j1, j2))
         self._edited_lines = dirty
-        self.viewport().update()
+        viewport_of(self).update()
 
     # endregion
 

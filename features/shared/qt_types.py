@@ -8,14 +8,22 @@
 
 # region Imports
 
-from typing import cast
+from typing import Optional, TypeVar, cast
 
+from PyQt6.QtCore import QThreadPool
 from PyQt6.QtWidgets import QHeaderView, QWidget
 
 # endregion
 
 
 # region Helpers
+
+T = TypeVar("T")
+
+
+def not_none(value: Optional[T]) -> T:
+    """Hands back the very same object; only tells the type checker it is not None, e.g. table.item(row, col)."""
+    return cast(T, value)
 
 def horizontal_header(table) -> QHeaderView:
     """The table's column header (same object as table.horizontalHeader())."""
@@ -30,6 +38,11 @@ def vertical_header(table) -> QHeaderView:
 def layout_item_widget(item) -> QWidget | None:
     """The widget inside a layout item, or None for a spacer (same as item.widget())."""
     return item.widget()
+
+
+def global_thread_pool() -> QThreadPool:
+    """Qt's shared thread pool (same object as QThreadPool.globalInstance())."""
+    return cast(QThreadPool, QThreadPool.globalInstance())
 
 
 def viewport_of(area) -> QWidget:

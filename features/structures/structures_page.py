@@ -310,7 +310,7 @@ class StructuresPage(QWidget):
                 self.lbl_structure_devices.setText(f"DEVICES:  {structure.get('devices') if structure.get('devices') is not None else '--'}")
             for action_key, action_text in (("structure_teleport", "TELEPORT TO"), ("structure_destroy", "DESTROY")):
                 reason = server_actions.block_reason(self, action_key) or ("" if structure is not None else "Pick a structure first.")
-                if not reason and action_text == "TELEPORT TO" and parse_position(structure.get("pos")) is None:
+                if not reason and action_text == "TELEPORT TO" and parse_position(structure.get("pos")) is None:  # pyright: ignore[reportOptionalMemberAccess]
                     reason = "The bridge did not send this structure's position."
                 self.action_buttons[action_text].setEnabled(reason == "")
                 self.action_buttons[action_text].setToolTip(reason or ("Moves a player next to it (Safety Flow)." if action_text == "TELEPORT TO" else "Destroys it for good (Safety Flow)."))
@@ -345,7 +345,7 @@ class StructuresPage(QWidget):
             if not accepted or label not in labels:
                 return
             player = online[labels.index(label)]
-            x, y, z = parse_position(structure.get("pos"))
+            x, y, z = parse_position(structure.get("pos"))  # pyright: ignore[reportGeneralTypeIssues]
             position = f'"pos":{{"x":{x},"y":{y + TELEPORT_LIFT},"z":{z}}},"rot":{{"x":0,"y":0,"z":0}}'
             playfield = str(structure.get("playfield", "")).replace('"', "")
             if str(player.get("playfield", "")) == playfield:

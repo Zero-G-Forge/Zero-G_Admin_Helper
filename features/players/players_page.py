@@ -115,7 +115,7 @@ def format_ping(player):
 def is_staff(player):
     """True when PlayerInfo.permission is GameMaster (3) or Admin (9). Faction 'Admin' role is ignored."""
     try:
-        return int((player or {}).get("permission")) >= STAFF_PERMISSION
+        return int((player or {}).get("permission")) >= STAFF_PERMISSION  # pyright: ignore[reportArgumentType]
     except (TypeError, ValueError):
         return False
 
@@ -514,7 +514,7 @@ class PlayersPage(QWidget):
             if str(player.get("status") or "") != "Online":
                 continue
             try:
-                entity_id = int(player.get("entityId"))
+                entity_id = int(player.get("entityId"))  # pyright: ignore[reportArgumentType]
             except (TypeError, ValueError):
                 continue
             server_actions.read_bridge(
@@ -643,7 +643,7 @@ class PlayersPage(QWidget):
 
     def _entity_id(self):
         try:
-            return int((self.selected_player or {}).get("entityId"))
+            return int((self.selected_player or {}).get("entityId"))  # pyright: ignore[reportArgumentType]
         except (TypeError, ValueError):
             return None
 
