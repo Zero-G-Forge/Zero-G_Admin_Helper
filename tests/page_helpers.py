@@ -46,6 +46,10 @@ class FakeCockpit(QMainWindow):
 
 class FakeBridge:
     ## Records every command and answers from a table: {command prefix: reply dict}.
+
+    ## Declared for the type checker only (install() fills it in); nothing is created here.
+    asked: list
+
     def __init__(self, replies=None):
         self.sent = []
         self.replies = replies or {}

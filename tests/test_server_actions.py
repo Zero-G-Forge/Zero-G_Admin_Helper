@@ -931,7 +931,7 @@ def test_cockpit_reconnects_after_a_drop_but_not_after_a_user_stop(monkeypatch):
     class FakePipe:
         def stop(self):
             pass
-    cockpit.command_pipe = FakePipe()
+    cockpit.command_pipe = FakePipe()  # pyright: ignore[reportAttributeAccessIssue]
     cockpit.disconnect_bridge()
     assert not cockpit.reconnect_timer.isActive() and cockpit.bridge_user_stopped
     cockpit.update_server_status("Alpha", False)

@@ -253,9 +253,9 @@ def test_library_uses_only_the_selected_scenario_and_blocks_ungiveable_ids(tmp_p
     monkeypatch.setattr(download_settings, "load_server_download_settings",
                         lambda name: {"scenario": "Ascension-Reborn"})
     folder = local_files.current_scenario_folder()
-    assert os.path.abspath(folder) == os.path.abspath(chosen_folder)
+    assert os.path.abspath(folder) == os.path.abspath(chosen_folder)  # pyright: ignore[reportArgumentType, reportCallIssue]
     root, items_path = local_files.find_file(folder, local_files.ITEMS_FILE)
-    text = open(items_path, encoding="utf-8").read()
+    text = open(items_path, encoding="utf-8").read()  # pyright: ignore[reportArgumentType]
     assert "OnlyInAscension" in text and "OnlyInDefault" not in text
     items = load_items(None, items_path=items_path, names_path="")
     names = {item["name"] for item in items}

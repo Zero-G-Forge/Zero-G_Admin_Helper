@@ -14,6 +14,7 @@ import json
 import os
 import struct
 import sys
+from typing import Any
 
 import pytest
 from PyQt6.QtCore import Qt
@@ -118,7 +119,7 @@ def test_nothing_shows_until_a_category_is_clicked(tmp_path, qapp):
     qapp.processEvents()
     assert page.lbl_grid_empty.isVisible()
     assert page.lbl_grid_empty.alignment() == Qt.AlignmentFlag.AlignCenter
-    grid_box = page.lbl_grid_empty.parent()
+    grid_box: Any = page.lbl_grid_empty.parent()
     margins = grid_box.layout().contentsMargins()
     inner_h = grid_box.height() - margins.top() - margins.bottom()
     assert page.lbl_grid_empty.height() >= inner_h - 8
@@ -176,7 +177,7 @@ def test_switching_tabs_removes_old_category_buttons(tmp_path, qapp):
     assert [btn.text() for btn in page.filter_buttons] == ["BA", "CV", "SV", "HV", "POI"]
     row_texts = []
     for index in range(page.filter_row.count()):
-        widget = page.filter_row.itemAt(index).widget()
+        widget: Any = page.filter_row.itemAt(index).widget()
         if widget is not None:
             row_texts.append(widget.text())
     assert row_texts == ["BA", "CV", "SV", "HV", "POI", "FILTER"]

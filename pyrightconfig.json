@@ -19,5 +19,19 @@
         ".scratchpad",
         "**/bin",
         "**/__pycache__"
+    ],
+    "executionEnvironments": [
+        {
+            "root": "tests",
+            "extraPaths": [
+                ".",
+                "login_service"
+            ],
+            "reportOptionalMemberAccess": "none",
+            "reportOptionalSubscript": "none"
+        },
+        {
+            "root": "."
+        }
     ]
 }

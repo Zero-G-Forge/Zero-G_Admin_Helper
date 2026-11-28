@@ -11,6 +11,7 @@
 import json
 import os
 import sys
+from typing import Any
 
 import pytest
 
@@ -110,7 +111,7 @@ def test_detail_card_and_stats_use_the_full_picture(tmp_path, qapp):
     dialog.resize(800, 720)
     qapp.processEvents()
     ## Top half is 50/50: the picture box and the details box share the header width.
-    header_box = dialog.lbl_picture.parent()
+    header_box: Any = dialog.lbl_picture.parent()
     text_box = header_box.layout().itemAt(1).widget()
     assert abs(dialog.lbl_picture.width() - text_box.width()) < 40
     assert dialog.lbl_picture.width() > 250
