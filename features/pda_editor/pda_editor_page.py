@@ -45,7 +45,7 @@ LATER_TIP = "Coming in a later step."
 PDA_FILE_TYPES = (".yaml", ".csv")
 
 ## Where the PDA files sit inside a downloaded root (the game uses SharedData; older scenarios use Content).
-PDA_FOLDERS = ("SharedData/Content/Extras/PDA", "Content/Extras/PDA")
+PDA_FOLDERS = ("SharedData/Content/Extras/PDA", "Content/Extras/PDA", "Extras/PDA")
 
 ## Finds chapter lines like '  - ChapterTitle: pda_uW0W4W4' and keeps the title.
 CHAPTER_PATTERN = re.compile(r"^\s*-\s*ChapterTitle:\s*(.+?)\s*$")
@@ -120,7 +120,7 @@ class PdaEditorPage(EditorActions, QWidget):
         toolbar_layout.addStretch(1)
 
         ## DOWNLOAD only reads from the server; VALIDATE and SAVE work on the local copy.
-        self.btn_download = self._make_tool_button("DOWNLOAD FOLDER FROM SERVER (READ-ONLY)", "DashActionButton")
+        self.btn_download = self._make_tool_button("FROM SERVER", "DashActionButton")
         self.btn_validate = self._make_tool_button("VALIDATE", "DashActionButton")
 
         ## CHANGES PREVIEW only shows the local edits, so it works now (it opens its own window).
