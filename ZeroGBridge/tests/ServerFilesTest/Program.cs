@@ -407,6 +407,8 @@ namespace ServerFilesTest
                 Check("file unchanged after hash mismatch", File.ReadAllBytes(itemsPath).SequenceEqual(newer));
                 Check("put refuses a new file", (string)SendInChunks("scenario", "Content/Configuration/New.ecf", newItems, new string('0', 64), 64)["error"] == "not_found");
                 Check("put refuses .png", (string)SendInChunks("scenario", "SharedData/Content/Images/Small.png", newItems, new string('0', 64), 64)["error"] == "not_allowed");
+                byte[] epbNow = File.ReadAllBytes(Path.Combine(scenario, "Prefabs", "TestShip.epb"));
+                Check("put of Prefabs/TestShip.epb is accepted", (bool)SendInChunks("scenario", "Prefabs/TestShip.epb", new byte[] { 0x45, 0x52, 0x94, 0x78, 0x01 }, Sha(epbNow), 64)["ok"]);
                 Check("put refuses .json", SendInChunks("scenario", "Content/Configuration/secrets.json", newItems, new string('0', 64), 64)["ok"].Value<bool>() == false);
                 Check("put refuses traversal", SendInChunks("scenario", "../outside/stolen.ecf", newItems, new string('0', 64), 64)["ok"].Value<bool>() == false
                     && File.ReadAllText(Path.Combine(outside, "stolen.ecf")) == "must never be readable\n");

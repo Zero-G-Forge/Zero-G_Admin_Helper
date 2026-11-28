@@ -17,7 +17,7 @@
 //   - The new file is written next to the target as a temp file, then swapped in with File.Replace
 //     (one step, so the game never sees a half-written file).
 //   - files:put uses the same path checks as files:get, only replaces files that already exist,
-//     only .ecf .yaml .yml .csv, and refuses when the server copy changed since ZAH downloaded it.
+//     only .ecf .yaml .yml .csv .epb, and refuses when the server copy changed since ZAH downloaded it.
 //   - coreupload only ever writes the two fixed names ZeroGBridge.Core.dll / ZeroGBridge.Core.pdb.
 //   - "FileWritesEnabled": false in ZeroGBridge.json turns both commands off (read on every call, no restart).
 // =====================================================================
@@ -54,7 +54,8 @@ namespace ZeroGBridge
         private const int StaleUploadMinutes = 30;
 
         // File types files:put may replace. Smaller than the read list on purpose: no pictures, and never .json/.dll/.key.
-        private static readonly string[] WritableExtensions = { ".ecf", ".yaml", ".yml", ".csv" };
+        // 1.6.13: .epb prefabs
+        private static readonly string[] WritableExtensions = { ".ecf", ".yaml", ".yml", ".csv", ".epb" };
 
         // Error codes only used by the write commands (the path codes come from ServerFiles).
         public const string ErrDisabled = "writes_disabled";
@@ -120,7 +121,7 @@ namespace ZeroGBridge
             string error;
             string relative = ServerFiles.NormalizeRelativePath(rootName, (string)request["path"], out error);
             if (relative == null) return Fail("put", reqId, error, "The path was refused.");
-            if (!WritableExtensions.Contains(Path.GetExtension(relative).ToLowerInvariant())) return Fail("put", reqId, ServerFiles.ErrNotAllowed, "Only .ecf, .yaml, .yml and .csv files can be replaced.");
+            if (!WritableExtensions.Contains(Path.GetExtension(relative).ToLowerInvariant())) return Fail("put", reqId, ServerFiles.ErrNotAllowed, "Only .ecf, .yaml, .yml, .csv and .epb files can be replaced.");
 
             // The file must already exist (no new files), stay inside the root, and not be a symlink.
             string target = ServerFiles.ResolveUnderRoot(rootFolder, relative, out error);
