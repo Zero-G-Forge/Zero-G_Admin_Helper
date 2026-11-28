@@ -79,6 +79,22 @@ namespace ZeroGBridge
         private static bool _loggedFactionSchema;
         private const int DbScanIntervalSeconds = 15;
 
+        // 1.6.15: location/config lines repeat on every 15s scan. Each one is INFO/SUCCESS only when its
+        // text differs from the last time that key printed; identical repeats go to DEBUG.
+        private static readonly ConcurrentDictionary<string, string> _lastLoggedByKey = new ConcurrentDictionary<string, string>();
+
+        private static void LogOnChange(string key, string message)
+        {
+            string prev;
+            if (_lastLoggedByKey.TryGetValue(key, out prev) && prev == message)
+            {
+                ZgbLog.Write("[ZGB] -DEBUG- " + message);
+                return;
+            }
+            _lastLoggedByKey[key] = message;
+            ZgbLog.Write(message);
+        }
+
         public PlayerCache()
         {
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
@@ -741,7 +757,7 @@ namespace ZeroGBridge
                     tried.Add(p);
                     if (File.Exists(p))
                     {
-                        ZgbLog.Write($"[ZGB] -SUCCESS- Located database at: {p} (config, GlobalDbPath)");
+                        LogOnChange("db", $"[ZGB] -SUCCESS- Located database at: {p} (config, GlobalDbPath)");
                         return p;
                     }
                 }
@@ -766,7 +782,7 @@ namespace ZeroGBridge
                     tried.Add(liveDb);
                     if (File.Exists(liveDb))
                     {
-                        ZgbLog.Write($"[ZGB] -SUCCESS- Located database at: {liveDb} (live save \"{ServerFiles.CurrentSaveName}\")");
+                        LogOnChange("db", $"[ZGB] -SUCCESS- Located database at: {liveDb} (live save \"{ServerFiles.CurrentSaveName}\")");
                         return liveDb;
                     }
                 }
@@ -785,7 +801,7 @@ namespace ZeroGBridge
                     tried.Add(p);
                     if (File.Exists(p))
                     {
-                        ZgbLog.Write($"[ZGB] -SUCCESS- Located database at: {p} (config, SaveGameName=\"{name}\")");
+                        LogOnChange("db", $"[ZGB] -SUCCESS- Located database at: {p} (config, SaveGameName=\"{name}\")");
                         return p;
                     }
                 }
@@ -836,7 +852,7 @@ namespace ZeroGBridge
 
             if (!string.IsNullOrEmpty(newest))
             {
-                ZgbLog.Write($"[ZGB] -SUCCESS- Located database at: {newest} (auto-detect, newest global.db)");
+                LogOnChange("db", $"[ZGB] -SUCCESS- Located database at: {newest} (auto-detect, newest global.db)");
                 return newest;
             }
 
@@ -850,7 +866,7 @@ namespace ZeroGBridge
                 }
                 if (File.Exists(p))
                 {
-                    ZgbLog.Write($"[ZGB] -SUCCESS- Located database at: {p} (fallback, SaveGameName=\"{fallbackName}\")");
+                    LogOnChange("db", $"[ZGB] -SUCCESS- Located database at: {p} (fallback, SaveGameName=\"{fallbackName}\")");
                     return p;
                 }
             }
@@ -881,7 +897,7 @@ namespace ZeroGBridge
             string configPath = Path.Combine(modDir, "ZeroGBridge.json");
             if (!File.Exists(configPath))
             {
-                ZgbLog.Write($"[ZGB] -INFO- No ZeroGBridge.json at {configPath}; using auto-detect.");
+                LogOnChange("cfgmissing", $"[ZGB] -INFO- No ZeroGBridge.json at {configPath}; using auto-detect.");
                 return null;
             }
 
@@ -889,7 +905,7 @@ namespace ZeroGBridge
             {
                 string json = File.ReadAllText(configPath);
                 var cfg = JsonConvert.DeserializeObject<BridgeConfig>(json) ?? new BridgeConfig();
-                ZgbLog.Write($"[ZGB] -INFO- Loaded config from {configPath} (SaveGameName=\"{cfg.SaveGameName}\", GlobalDbPath=\"{cfg.GlobalDbPath}\")");
+                LogOnChange("cfg", $"[ZGB] -INFO- Loaded config from {configPath} (SaveGameName=\"{cfg.SaveGameName}\", GlobalDbPath=\"{cfg.GlobalDbPath}\")");
                 return cfg;
             }
             catch (Exception ex)
@@ -922,7 +938,7 @@ namespace ZeroGBridge
             {
                 try
                 {
-                    ZgbLog.Write("[ZGB] -INFO- Executing SafeScanDatabase...");
+                    ZgbLog.Write("[ZGB] -DEBUG- Executing SafeScanDatabase...");
                     ScanSaveGameDatabase(baseDir);
                 }
                 catch (Exception ex)
@@ -951,6 +967,8 @@ namespace ZeroGBridge
                 {
                     return;
                 }
+                // 1.6.15: the scan runs only when global.db changed, so this is the one INFO line per real scan.
+                ZgbLog.Write("[ZGB] -INFO- Executing SafeScanDatabase (global.db changed)...");
 
 
                 string tempDir = Path.Combine(currentDir, "Logs", "ZeroGBridge");

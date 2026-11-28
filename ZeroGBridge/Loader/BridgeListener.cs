@@ -75,6 +75,7 @@ namespace ZeroGBridge
         private static readonly ConcurrentDictionary<string, DateTime> _lastAuthInfoUtc =
             new ConcurrentDictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan AuthInfoInterval = TimeSpan.FromMinutes(5);
+        private static readonly object _authInfoLock = new object();
 
         /// <param name="tokenProvider">Returns the current auth token (ZeroGBridge.json AuthToken or the fallback).
         /// Called on every auth attempt so a changed token applies without a restart. Never logged.</param>
@@ -395,13 +396,20 @@ namespace ZeroGBridge
         {
             string key = AuthClientKey(session);
             DateTime now = DateTime.UtcNow;
-            DateTime last;
-            if (_lastAuthInfoUtc.TryGetValue(key, out last) && (now - last) < AuthInfoInterval)
+            // 1.5.1: the check and the update are one locked step, so parallel logins from the same
+            // address (ZAH opens several at once) print one INFO line, not one each.
+            bool printInfo;
+            lock (_authInfoLock)
+            {
+                DateTime last;
+                printInfo = !(_lastAuthInfoUtc.TryGetValue(key, out last) && (now - last) < AuthInfoInterval);
+                if (printInfo) _lastAuthInfoUtc[key] = now;
+            }
+            if (!printInfo)
             {
                 HostLog.Write($"[ZGB] -DEBUG- Client ZAH successfully authenticated on Port {_port}.");
                 return;
             }
-            _lastAuthInfoUtc[key] = now;
             HostLog.Write($"[ZGB] -INFO- Client ZAH successfully authenticated on Port {_port}.");
         }
     }

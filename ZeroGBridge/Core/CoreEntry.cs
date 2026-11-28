@@ -129,7 +129,8 @@ namespace ZeroGBridge
                 lastAlertExecThreadId = LegacyApi.LastExecThreadId,
                 factionRequestPending = LegacyApi.FactionRequestPending,
                 playerFactions = cache?.PlayerFactionCount ?? 0,
-                players = cache?.GetAllPlayers()?.Count ?? 0,
+                // 1.6.15: in-memory count (GetAllPlayers would re-scan global.db on every hot:status)
+                players = cache?.TotalCount ?? 0,
                 online = cache?.GetOnlinePlayers()?.Count ?? 0,
                 serverView = view == null ? null : new { enabled = view.Enabled, driver = view.LastDriver, online = view.OnlineCount, runningPlayfields = view.RunningPlayfieldCount },
                 structures = ModMain.CachedEntityRecords.Count + (view?.Structures?.Count ?? 0),
