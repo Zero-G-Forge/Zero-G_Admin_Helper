@@ -90,6 +90,23 @@ def ask_changes(parent, file_name, diff_lines):
     return box.clickedButton() is btn_continue
 
 
+def ask_files(parent, file_names, skipped):
+    ## Confirmation 1 for blueprints: the file names.
+    ## True = Continue.
+    count = str(len(file_names))
+    text = ("Upload " + count + " file(s) to the server?\n\n" + "\n".join(file_names) + "\n\nEach one differs from the server copy.")
+    if skipped:
+        text += "\n\nSkipped:\n" + "\n".join(skipped)
+    box = QMessageBox(QMessageBox.Icon.Question, "Upload step 1 of 3: files", text, parent=parent)
+    accept = QMessageBox.ButtonRole.AcceptRole
+    reject = QMessageBox.ButtonRole.RejectRole
+    btn_continue = box.addButton("Continue", accept)
+    btn_cancel = box.addButton("Cancel", reject)
+    box.setDefaultButton(btn_cancel)
+    box.exec()
+    return box.clickedButton() is btn_continue
+
+
 def ask_players(parent, online_count, names):
     """Confirmation 2: the online-players warning. True = Continue. None count = stop."""
     if online_count is None:

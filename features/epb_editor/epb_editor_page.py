@@ -10,10 +10,11 @@
 
 # region Imports
 
+import hashlib
 import os
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import (QInputDialog, QMessageBox, QWidget, QFrame, QLabel, QHBoxLayout, QGridLayout, QLineEdit,
+from PyQt6.QtWidgets import (QFileDialog, QInputDialog, QMessageBox, QWidget, QFrame, QLabel, QHBoxLayout, QGridLayout, QLineEdit,
                              QPushButton, QComboBox, QSizePolicy, QListWidget, QListWidgetItem,
                              QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView)
 
@@ -30,6 +31,13 @@ from features.epb_editor.epb_core import (set_field_value, TYPE_STRING, TYPE_FLO
 ## (never the local base game).
 from features.server_files.local_files import (NO_FILES_TEXT, current_scenario_folder, list_files)
 
+## Edited-copy bookkeeping and the three upload questions,
+## shared with the ECF and PDA Editors.
+from features.server_files import edit_store, upload_flow
+
+## The thread and the step that send a file to the server.
+from features.server_files.write_worker import (ServerWriteWorker, put_file, start_write_worker)
+
 # endregion
 
 
@@ -37,6 +45,16 @@ from features.server_files.local_files import (NO_FILES_TEXT, current_scenario_f
 
 ## Tooltip for every button that isn't wired up yet.
 LATER_TIP = "Coming in a later step."
+
+## Builds the upload thread. A test can swap in a fake one.
+CREATE_WRITE_WORKER = ServerWriteWorker
+
+## The folder UPLOAD opens first, inside the downloaded
+## files (where the patched prefabs are kept).
+PATCHED_FOLDER = "patched_prefabs"
+
+## Bottom line text after an upload that did not go through.
+FAILED_TEXT = "Upload failed     |     server unchanged"
 
 # endregion
 
@@ -59,6 +77,9 @@ class EpbEditorPage(QWidget):
 
         ## When a file is picked, fill the device table.
         self.cmb_file.currentIndexChanged.connect(self._on_file_picked)
+
+        ## UPLOAD picks the edited files and sends them.
+        self.btn_upload.clicked.connect(self._on_upload_clicked)
 
     def setup_widgets(self):
 
@@ -93,6 +114,11 @@ class EpbEditorPage(QWidget):
         self.btn_save = self._make_tool_button("SAVE", "DashActionButton")
         toolbar_layout.addWidget(self.btn_validate)
         toolbar_layout.addWidget(self.btn_save)
+
+        ## Sends edited prefabs to the server
+        ## (see the Upload region).
+        self.btn_upload = self._make_tool_button("🔒  UPLOAD TO SERVER", "AlertBanButton")
+        toolbar_layout.addWidget(self.btn_upload)
         page_grid.addWidget(toolbar_card, 0, 0, 1, 2)
 
         # endregion
@@ -303,6 +329,23 @@ class EpbEditorPage(QWidget):
         root = os.path.realpath(folder) + os.sep
         return os.path.realpath(path).startswith(root)
 
+    def _entry_for(self, path):
+        ## Where a downloaded scenario file lives on the
+        ## server, e.g. root scenario, path Prefabs/Name.epb.
+        ## None if the file is outside the scenario folder.
+        folder = getattr(self, "server_folder", None)
+        if not path or not folder:
+            return None
+        base = os.path.join(folder, "scenario")
+        try:
+            rel = os.path.relpath(path, base)
+            rel = rel.replace(os.sep, "/")
+        except ValueError:
+            return None
+        if rel.split("/")[0] == "..":
+            return None
+        return {"root": "scenario", "path": rel, "full": path}
+
     def _on_device_double_clicked(self, row, column):
         ## Pick a field, type a value, confirm, save.
         records = getattr(self, "records", [])
@@ -347,6 +390,14 @@ class EpbEditorPage(QWidget):
         if answer != QMessageBox.StandardButton.Save:
             return
         try:
+            ## Remember the server's version of the file, once, before the first edit changes it (for upload).
+            entry = self._entry_for(path)
+            if entry is not None:
+                folder = self.server_folder
+                edit_store.remember_original(folder, entry)
+
+            ## Write the new value, always with a backup first. The backup name is returned.
+            ## The table is reloaded to show the new value, and the backup name is shown.
             result = set_field_value(path, rec["offset"], key, new_text)
         except Exception as exc:
             QMessageBox.warning(self, "EPB Editor", "Could not save: " + str(exc))
@@ -356,6 +407,210 @@ class EpbEditorPage(QWidget):
         self.lbl_backup.setText("Backup:  " + os.path.basename(result["backup"]) + "     |     Local copy only - server unchanged")
         self._fill_device_table(path)
         self.tbl_devices.selectRow(row)
+
+    # endregion
+
+    # region Upload
+
+    ## The sending thread, and the files it will send.
+    upload_worker = None
+    pending_jobs = None
+
+    def showEvent(self, event):
+        ## Each time the page appears, UPLOAD follows the
+        ## latest bridge state and role.
+        super().showEvent(event)
+        self._refresh_upload_button()
+
+    def _upload_block_reason(self):
+        ## Why UPLOAD is off right now,
+        ## or "" when it may be used.
+        if not getattr(self, "server_folder", None):
+            return "Download the server files first."
+        if not upload_flow.user_can_write_server_files(self):
+            return ("Uploads are for developer and owner, or Live file editing.")
+        if not upload_flow.bridge_is_connected(self):
+            return "Connect to the server first."
+        if self.upload_worker is not None:
+            return "An upload is running."
+        return ""
+
+    def _refresh_upload_button(self):
+        reason = self._upload_block_reason()
+        self.btn_upload.setEnabled(reason == "")
+        if reason == "":
+            reason = ("Replace server prefabs with edited copies (backed up first).")
+        self.btn_upload.setToolTip(reason)
+
+    def _check_upload_file(self, path):
+        ## Returns (job, "") for a file worth sending,
+        ## or (None, the reason it was skipped).
+        name = os.path.basename(path)
+
+        ## The page only gets here with a server folder ("" keeps Pylance happy).
+        folder = self.server_folder or ""
+        downloaded = os.path.join(folder, "scenario", "Prefabs", name)
+        entry = self._entry_for(downloaded)
+        if entry is None or not os.path.isfile(downloaded):
+            return None, name + ": not in the downloaded Prefabs."
+        try:
+            ## An unreadable blueprint never goes up.
+            list_device_records(path)
+            with open(path, "rb") as file_handle:
+                data = file_handle.read()
+        except Exception:
+            return None, name + ": not a readable blueprint."
+
+        ## Same as the server's version: nothing to send.
+        base = edit_store.base_sha256(folder, entry)
+        if hashlib.sha256(data).hexdigest() == base:
+            return None, name + ": same as the server copy."
+        return {"entry": entry, "data": data, "base": base}, ""
+
+    def _on_upload_clicked(self):
+        try:
+            self._pick_and_confirm()
+        except Exception as exc:
+            print("[ERROR] EpbEditor: Upload did not start: " + str(exc))
+            self._refresh_upload_button()
+
+    def _pick_and_confirm(self):
+        ## Gates, pick files, confirmation 1, then a
+        ## read-only player count for confirmation 2.
+        reason = self._upload_block_reason()
+        if reason:
+            QMessageBox.information(self, "Upload", reason)
+            return
+        folder = self.server_folder or ""
+        start = os.path.join(folder, PATCHED_FOLDER)
+        if not os.path.isdir(start):
+            start = folder
+        paths, _ = QFileDialog.getOpenFileNames(self, "Pick the edited blueprints", start, "Blueprints (*.epb)")
+        if not paths:
+            return
+        jobs = []
+        skipped = []
+        for path in paths:
+            job, why = self._check_upload_file(path)
+            if job is None:
+                skipped.append(why)
+            else:
+                jobs.append(job)
+        if not jobs:
+            QMessageBox.information(self, "Upload", "Nothing to upload:\n" + "\n".join(skipped))
+            return
+        names = [job["entry"]["path"] for job in jobs]
+        if not upload_flow.ask_files(self, names, skipped):
+            print("[INFO] EpbEditor: Cancelled at step 1.")
+            return
+        self.pending_jobs = jobs
+        self.btn_upload.setEnabled(False)
+        self.btn_upload.setToolTip("Reading the online players.")
+        from features.zgb_portal.live_client import run_async
+        run_async(upload_flow.fetch_players_for_upload, self._continue_upload, lambda kind, message: self._continue_upload(None))
+
+    
+    def _continue_upload(self, players_payload):
+        try:
+            self._confirm_and_send(players_payload)
+        except Exception as exc:
+            print("[ERROR] EpbEditor: Upload failed: " + str(exc))
+            self.upload_worker = None
+            self._refresh_upload_button()
+
+    def _confirm_and_send(self, players_payload):
+        ## Confirmation 2 (players), 3 (type the name),
+        ## then send.
+        self._refresh_upload_button()
+        jobs = self.pending_jobs
+        if not jobs:
+            return
+        found = upload_flow.count_online(players_payload)
+        if not upload_flow.ask_players(self, found[0], found[1]):
+            print("[INFO] EpbEditor: Cancelled at step 2.")
+            return
+
+        ## One file: type its name.
+        ## Several: type UPLOAD 3 FILES (the number).
+        if len(jobs) == 1:
+            label = jobs[0]["entry"]["path"].split("/")[-1]
+        else:
+            label = "UPLOAD " + str(len(jobs)) + " FILES"
+        if not upload_flow.ask_type_name(self, label):
+            print("[INFO] EpbEditor: Cancelled at step 3.")
+            return
+
+        ## Last line of defense: the gates are asked
+        ## again right before sending.
+        if self._upload_block_reason():
+            return
+        worker = CREATE_WRITE_WORKER(lambda s, report: self._send_jobs(s, jobs, report))
+        worker.finished_ok.connect(self._on_upload_done)
+        worker.failed.connect(self._on_upload_failed)
+        self.upload_worker = worker
+        self._refresh_upload_button()
+        self.lbl_backup.setText("Uploading " + str(len(jobs)) + " file(s)     |     do not close ZAH")
+        start_write_worker(worker)
+
+    def _send_jobs(self, session, jobs, report):
+        ## Runs on the worker thread: one file at a time,
+        ## stops at the first problem.
+        done = []
+        error = None
+        for job in jobs:
+            entry = job["entry"]
+            try:
+                reply = put_file(session, entry["root"], entry["path"], job["data"], job["base"], report)
+            except Exception as exc:
+                code = getattr(exc, "code", "") or ""
+                error = (entry["path"], code, str(exc))
+                break
+            backup = str(reply.get("backup") or "")
+            done.append((job, backup))
+        return {"done": done, "error": error}
+
+    def _on_upload_done(self, result):
+        ## The server has the files: each downloaded copy
+        ## and its base follow it (the old copy is
+        ## backed up first).
+        try:
+            self.upload_worker = None
+            names = []
+            backup = "--"
+            for job, backup_path in result["done"]:
+                entry = job["entry"]
+                edit_store.record_upload(self.server_folder, entry, job["data"])
+                names.append(entry["path"].split("/")[-1])
+                backup = os.path.basename(backup_path) or "--"
+            self._refresh_upload_button()
+            bar = "     |     "
+            if len(names) == 1:
+                self.lbl_backup.setText("Server backup:  " + backup + bar + "Uploaded " + names[0])
+            elif names:
+                self.lbl_backup.setText("Server backups made" + bar + "Uploaded " + str(len(names)) + " files")
+            print("[SUCCESS] EpbEditor: Uploaded " + ", ".join(names))
+            error = result["error"]
+            if error:
+                if not names:
+                    self.lbl_backup.setText(FAILED_TEXT)
+                self._show_upload_error(error[1], error[2], error[0])
+        except Exception as exc:
+            print("[ERROR] EpbEditor: Uploaded, but the local copy was not updated: " + str(exc))
+
+    def _on_upload_failed(self, kind, code, message):
+        ## The thread itself stopped: nothing was replaced.
+        self.upload_worker = None
+        self._refresh_upload_button()
+        self.lbl_backup.setText(FAILED_TEXT)
+        self._show_upload_error(code, message)
+
+    def _show_upload_error(self, code, message, name=""):
+        if code == "changed_on_server":
+            prefix = ""
+            if name:
+                prefix = name + ": "
+            message = (prefix + "the server's copy changed since it was downloaded, so nothing was replaced. Download the file again, then redo the edit.")
+        QMessageBox.warning(self, "Upload failed", message)
 
     # endregion
 

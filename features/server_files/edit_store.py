@@ -164,6 +164,15 @@ def record_upload(folder, entry, uploaded_bytes):
     manifest["files"][entry_key(entry)] = {"size": len(uploaded_bytes), "mtime": ""}
     save_manifest(folder, manifest)
 
+## Before an editor changes a downloaded file in place, this
+## remembers the server's version of it (its sha256), once.
+## UPLOAD later uses it as the base the server
+## must still match.
+def remember_original(folder, entry):
+    if entry_key(entry) not in _load_bases(folder):
+        sha = file_sha256(entry["full"])
+        _remember_base(folder, entry, sha)
+
 
 def _load_bases(folder):
     try:
