@@ -11,6 +11,7 @@
 # region Imports
 
 import re
+import difflib
 
 from PyQt6.QtCore import Qt, QRect, QSize
 from PyQt6.QtGui import (QColor, QFont, QFontDatabase, QPainter, QSyntaxHighlighter,
@@ -40,6 +41,7 @@ EDITOR_LINE_NUMBER_CURRENT = QColor("#33d6ff")
 EDITOR_CURRENT_LINE = QColor(51, 214, 255, 18)
 EDITOR_BRACE_MATCH = QColor(51, 214, 255, 70)
 EDITOR_CURRENT_LINE_OUTLINE = QColor("#33d6ff")
+EDITOR_EDITED_LINE_OUTLINE = QColor(51, 214, 255, 120)
 
 # endregion
 
@@ -160,12 +162,22 @@ class EcfCodeEditor(QPlainTextEdit):
 
         ## Which colour rules to use. .ecf by default; the PDA Editor passes its YAML highlighter instead.
         self.highlighter = (highlighter_class or EcfHighlighter)(self.document())
+
+        ## Current-line box is on by default. The PDA
+        ## Editor turns it off. Edited-line boxes
+        ## compare against the last loaded or saved
+        ## text. Set these before the number strip
+        ## is built, in case a paint runs early.
+        self.show_line_outline = True
+        self._baseline_lines = []
+        self._edited_lines = set()
         self.line_number_area = LineNumberArea(self)
 
         ## Keep the line numbers and highlights in step with typing and scrolling.
         self.blockCountChanged.connect(self._update_line_number_width)
         self.updateRequest.connect(self._update_line_number_area)
         self.cursorPositionChanged.connect(self._update_highlights)
+        self.textChanged.connect(self._refresh_edited_lines)
         self._update_line_number_width()
         self._update_highlights()
 
@@ -269,19 +281,48 @@ class EcfCodeEditor(QPlainTextEdit):
         ## After the text is drawn, a 1px cyan box around
         ## the cursor's line, the full width of the view.
         super().paintEvent(event)
-        block = self.textCursor().block()
-        area = self.blockBoundingGeometry(block)
-        area = area.translated(self.contentOffset())
-        area.setX(0)
-        area.setWidth(self.viewport().width())
         painter = QPainter(self.viewport())
         try:
-            color = EDITOR_CURRENT_LINE_OUTLINE
-            painter.setPen(QPen(color, 1))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRect(area.adjusted(0, 0, -1, -1))
+            self._paint_line_outlines(painter)
         finally:
             painter.end()
+
+    def _paint_line_outlines(self, painter):
+        ## Dim cyan box on every edited line, plus
+        ## the bright box on the cursor's line when
+        ## this editor is set to show it.
+        current = self.textCursor().block()
+        view_w = self.viewport().width()
+        block = self.firstVisibleBlock()
+        bottom = self.viewport().height()
+        while block.isValid():
+            area = self.blockBoundingGeometry(
+                block)
+            area = area.translated(
+                self.contentOffset())
+            if area.top() > bottom:
+                break
+            is_current = block == current
+            is_edited = (
+                block.blockNumber()
+                in self._edited_lines)
+            show_current = (
+                is_current
+                and self.show_line_outline)
+            if show_current:
+                color = EDITOR_CURRENT_LINE_OUTLINE
+            elif is_edited:
+                color = EDITOR_EDITED_LINE_OUTLINE
+            else:
+                block = block.next()
+                continue
+            area.setX(0)
+            area.setWidth(view_w)
+            painter.setPen(QPen(color, 1))
+            painter.drawRect(
+                area.adjusted(0, 0, -1, -1))
+            block = block.next()
 
     # endregion
 
@@ -290,7 +331,28 @@ class EcfCodeEditor(QPlainTextEdit):
     def load_text(self, file_text):
         """Puts a whole .ecf file into the editor and moves to the top."""
         self.setPlainText(file_text)
+        self.set_baseline(file_text)
         self.moveCursor(QTextCursor.MoveOperation.Start)
+
+    def set_baseline(self, file_text):
+        ## Treat this text as the saved or loaded
+        ## copy. Outlines only appear on lines
+        ## that no longer match it.
+        self._baseline_lines = file_text.splitlines()
+        self._refresh_edited_lines()
+
+    def _refresh_edited_lines(self):
+        current = self.toPlainText().splitlines()
+        baseline = self._baseline_lines
+        dirty = set()
+        matcher = difflib.SequenceMatcher(
+            a=baseline, b=current, autojunk=False)
+        opcodes = matcher.get_opcodes()
+        for tag, i1, i2, j1, j2 in opcodes:
+            if tag in ("replace", "insert"):
+                dirty.update(range(j1, j2))
+        self._edited_lines = dirty
+        self.viewport().update()
 
     # endregion
 

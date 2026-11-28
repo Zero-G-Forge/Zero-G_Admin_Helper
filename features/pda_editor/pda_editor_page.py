@@ -164,6 +164,7 @@ class PdaEditorPage(EditorActions, QWidget):
         ## The whole PDA file, editable, coloured like code. It stays a local copy until SAVE.
         code_card, code_layout = make_card("CODE")
         self.code_editor = EcfCodeEditor(highlighter_class=PdaYamlHighlighter)
+        self.code_editor.show_line_outline = False
         code_layout.addWidget(self.code_editor, stretch=1)
         page_grid.addWidget(code_card, 1, 1)
 

@@ -271,6 +271,7 @@ class EditorActions:
             backup_name = os.path.basename(result["backup"]) if result["backup"] else "-- (first save)"
             self.lbl_backup.setText("Backup:  " + backup_name + "     |     Saved " + file_name + "     |     " + LOCAL_ONLY_TEXT)
             print(f"[SUCCESS] EditorActions: Saved edit of {entry['root']}/{entry['path']}, backup {backup_name}")
+            self.code_editor.set_baseline(text)
 
             ## LIVE MODE: the local save is followed by the same three-step upload.
             if upload_flow.live_mode_on(self):
@@ -384,6 +385,7 @@ class EditorActions:
             edit_store.record_upload(self.server_folder, entry, data)
             if entry is self.current_entry:
                 self.original_text = text
+                self.code_editor.set_baseline(text)
                 self._refresh_changes()
             backup = os.path.basename(str(reply.get("backup") or "")) or "--"
             self.lbl_backup.setText("Server backup:  " + backup + "     |     Uploaded " + entry["path"].split("/")[-1])
