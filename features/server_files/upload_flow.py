@@ -133,6 +133,9 @@ def ask_type_name(parent, file_name):
     typed, accepted = QInputDialog.getText(parent, "Upload step 3 of 3: confirm",
                                            f"Type the file name to upload it to the server:\n{file_name}",
                                            QLineEdit.EchoMode.Normal, "")
-    return bool(accepted) and typed.strip() == file_name
+    ## Capitals and extra spaces don't matter.
+    wanted = " ".join(file_name.split()).upper()
+    given = " ".join(typed.split()).upper()
+    return bool(accepted) and given == wanted
 
 # endregion

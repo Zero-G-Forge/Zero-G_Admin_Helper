@@ -589,6 +589,9 @@ class EpbEditorPage(QWidget):
             elif names:
                 self.lbl_backup.setText("Server backups made" + bar + "Uploaded " + str(len(names)) + " files")
             print("[SUCCESS] EpbEditor: Uploaded " + ", ".join(names))
+
+            ## Show every picked file and how it went.
+            self._show_upload_results(result)
             error = result["error"]
             if error:
                 if not names:
@@ -603,6 +606,29 @@ class EpbEditorPage(QWidget):
         self._refresh_upload_button()
         self.lbl_backup.setText(FAILED_TEXT)
         self._show_upload_error(code, message)
+
+    def _show_upload_results(self, result):
+        ## One line per picked file: its status and the
+        ## server backup made for it.
+        lines = []
+        sent = []
+        for job, backup_path in result["done"]:
+            path = job["entry"]["path"]
+            sent.append(path)
+            backup = os.path.basename(backup_path) or "--"
+            lines.append("UPLOADED   " + path + "   (server backup: " + backup + ")")
+
+        ## Files that were picked but did not go up.
+        error = result["error"]
+        for job in self.pending_jobs or []:
+            path = job["entry"]["path"]
+            if path in sent:
+                continue
+            if error and path == error[0]:
+                lines.append("FAILED     " + path)
+            else:
+                lines.append("NOT SENT   " + path)
+        QMessageBox.information(self, "Upload results", "\n".join(lines))
 
     def _show_upload_error(self, code, message, name=""):
         if code == "changed_on_server":
