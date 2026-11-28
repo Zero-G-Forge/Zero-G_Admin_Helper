@@ -62,6 +62,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import horizontal_header, vertical_header
+
 # Colors stay in lockstep with hot_reload_panel.py
 COLOR_OK = "#00ff88"
 COLOR_FAIL = "#ff3355"
@@ -1076,8 +1079,8 @@ class BridgePanel(QWidget):
         self.script_list = QTableWidget(0, 3)
         self.script_list.setObjectName("PlayerRegistryTable")
         self.script_list.setHorizontalHeaderLabels(["Script", "State", "Limit"])
-        self.script_list.verticalHeader().setVisible(False)
-        self.script_list.verticalHeader().setDefaultSectionSize(32)
+        vertical_header(self.script_list).setVisible(False)
+        vertical_header(self.script_list).setDefaultSectionSize(32)
         self.script_list.setAlternatingRowColors(True)
         self.script_list.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.script_list.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
@@ -1085,7 +1088,7 @@ class BridgePanel(QWidget):
         self.script_list.setShowGrid(False)
         self.script_list.setCornerButtonEnabled(False)
         self.script_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        hdr = self.script_list.horizontalHeader()
+        hdr = horizontal_header(self.script_list)
         hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)

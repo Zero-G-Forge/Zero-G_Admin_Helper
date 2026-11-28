@@ -39,6 +39,9 @@ from features.shared.loadouts import load_templates, list_template_names, TEMPLA
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import horizontal_header, vertical_header
+
 # endregion
 
 
@@ -221,14 +224,14 @@ class PlayersPage(QWidget):
         self.tbl_players = QTableWidget(0, len(PLAYER_COLUMNS))
         self.tbl_players.setObjectName("DashTable")
         self.tbl_players.setHorizontalHeaderLabels(PLAYER_COLUMNS)
-        self.tbl_players.verticalHeader().setVisible(False)
+        vertical_header(self.tbl_players).setVisible(False)
         self.tbl_players.setShowGrid(False)
         self.tbl_players.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl_players.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_players.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.tbl_players.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.tbl_players.horizontalHeader().setSortIndicatorShown(True)
-        self.tbl_players.horizontalHeader().setSectionsClickable(True)
+        horizontal_header(self.tbl_players).setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        horizontal_header(self.tbl_players).setSortIndicatorShown(True)
+        horizontal_header(self.tbl_players).setSectionsClickable(True)
         list_layout.addWidget(self.tbl_players, stretch=1)
         self.lbl_players_empty = QLabel("No player data yet.")
         self.lbl_players_empty.setObjectName("DashEmptyLabel")
@@ -296,9 +299,9 @@ class PlayersPage(QWidget):
         self.tbl_inventory = QTableWidget(0, len(INVENTORY_COLUMNS))
         self.tbl_inventory.setObjectName("DashTable")
         self.tbl_inventory.setHorizontalHeaderLabels(INVENTORY_COLUMNS)
-        self.tbl_inventory.verticalHeader().setVisible(False)
+        vertical_header(self.tbl_inventory).setVisible(False)
         self.tbl_inventory.setShowGrid(False)
-        self.tbl_inventory.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        horizontal_header(self.tbl_inventory).setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.tbl_inventory.setVisible(False)
         self.inventory_box_layout.addWidget(self.tbl_inventory, stretch=1)
         self.inventory_box_layout.addStretch()
@@ -417,7 +420,7 @@ class PlayersPage(QWidget):
         """Connects the table and buttons, and starts the read-only refresh timer."""
         try:
             self.tbl_players.itemSelectionChanged.connect(self._on_player_picked)
-            self.tbl_players.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
+            horizontal_header(self.tbl_players).sectionClicked.connect(self._on_header_clicked)
             self.action_buttons["MESSAGE"].clicked.connect(self._on_message_clicked)
             self.action_buttons["WARP"].clicked.connect(self._on_warp_clicked)
             self.action_buttons["KICK"].clicked.connect(self._on_kick_clicked)
@@ -595,7 +598,7 @@ class PlayersPage(QWidget):
                 self.tbl_players.setItem(row_number, column, QTableWidgetItem(str(cell)))
             if picked_id is not None and str(player.get("entityId")) == str(picked_id):
                 picked_row = row_number
-        header = self.tbl_players.horizontalHeader()
+        header = horizontal_header(self.tbl_players)
         if self._sort_column is not None:
             order = Qt.SortOrder.DescendingOrder if self._sort_descending else Qt.SortOrder.AscendingOrder
             header.setSortIndicator(self._sort_column, order)

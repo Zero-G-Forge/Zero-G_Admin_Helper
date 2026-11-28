@@ -27,6 +27,9 @@ from features.dashboard.dashboard_page import format_uptime
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import layout_item_widget
+
 # endregion
 
 
@@ -339,8 +342,9 @@ class MultiServerPage(QWidget):
         try:
             while self.alerts_rows_layout.count():
                 old_item = self.alerts_rows_layout.takeAt(0)
-                if old_item.widget() is not None:
-                    old_item.widget().deleteLater()
+                old_widget = layout_item_widget(old_item)
+                if old_widget is not None:
+                    old_widget.deleteLater()
             lines = []
             for result in self.results:
                 if not result.get("online"):

@@ -64,6 +64,9 @@ from .data_source import (
 )
 from .live_client import run_async
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import horizontal_header, vertical_header
+
 LIVE_UPLOAD_TIP = (
     "Not available on live data: the bridge has no upload command. "
     "Drop the new ZeroGBridge.Core.dll into the server's Mods/ZeroGBridge/Updates/ "
@@ -1127,19 +1130,19 @@ class HotReloadPanel(QWidget):
         self.history = QTableWidget(0, 4)
         self.history.setObjectName("PlayerRegistryTable")
         self.history.setHorizontalHeaderLabels(["Version", "Time (CST)", "Result", "Notes"])
-        self.history.verticalHeader().setVisible(False)
+        vertical_header(self.history).setVisible(False)
         self.history.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.history.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.history.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.history.setAlternatingRowColors(True)
-        hdr_view = self.history.horizontalHeader()
+        hdr_view = horizontal_header(self.history)
         hdr_view.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         hdr_view.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         hdr_view.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         hdr_view.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         self.history.itemSelectionChanged.connect(self._on_history_selection)
         self.history.setMinimumHeight(154)
-        self.history.verticalHeader().setDefaultSectionSize(27)
+        vertical_header(self.history).setDefaultSectionSize(27)
         self.history.setCornerButtonEnabled(False)
         self.history.setShowGrid(True)
         layout.addWidget(self.history)

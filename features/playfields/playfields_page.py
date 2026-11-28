@@ -23,6 +23,9 @@ from features.shared import server_actions
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import layout_item_widget
+
 # endregion
 
 
@@ -243,8 +246,9 @@ class PlayfieldsPage(QWidget):
                                        "The star map needs sector coordinates, which the bridge does not send." if self.playfields else "No playfield data yet.")
             while self.cards_row.count():
                 old_item = self.cards_row.takeAt(0)
-                if old_item.widget() is not None and old_item.widget() is not self.lbl_cards_empty:
-                    old_item.widget().deleteLater()
+                old_widget = layout_item_widget(old_item)
+                if old_widget is not None and old_widget is not self.lbl_cards_empty:
+                    old_widget.deleteLater()
             self.card_checks = {}
             for row in loaded[:MAX_CARDS]:
                 name = str(row["name"])

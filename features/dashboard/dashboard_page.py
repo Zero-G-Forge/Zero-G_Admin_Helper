@@ -22,6 +22,9 @@ from PyQt6.QtWidgets import (QWidget, QFrame, QLabel, QVBoxLayout, QHBoxLayout, 
 ## Read-only bridge reads and the Safety Flow for ANNOUNCE.
 from features.shared import server_actions
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import horizontal_header, vertical_header, layout_item_widget
+
 # endregion
 
 
@@ -144,11 +147,11 @@ class DashboardPage(QWidget):
         self.tbl_players = QTableWidget(0, len(PLAYER_COLUMNS))
         self.tbl_players.setObjectName("DashTable")
         self.tbl_players.setHorizontalHeaderLabels(PLAYER_COLUMNS)
-        self.tbl_players.verticalHeader().setVisible(False)
+        vertical_header(self.tbl_players).setVisible(False)
         self.tbl_players.setShowGrid(False)
         self.tbl_players.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl_players.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self.tbl_players.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        horizontal_header(self.tbl_players).setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         players_layout.addWidget(self.tbl_players)
         self.lbl_players_empty = QLabel("No player data yet.")
         self.lbl_players_empty.setObjectName("DashEmptyLabel")
@@ -353,8 +356,9 @@ class DashboardPage(QWidget):
             ## The layout holds the event labels plus one stretch at the end, so count only the labels.
             while self.events_box_layout.count() - 1 > RECENT_EVENT_LIMIT:
                 oldest_item = self.events_box_layout.takeAt(self.events_box_layout.count() - 2)
-                if oldest_item.widget() is not None:
-                    oldest_item.widget().deleteLater()
+                old_widget = layout_item_widget(oldest_item)
+                if old_widget is not None:
+                    old_widget.deleteLater()
         except Exception as e:
             print(f"[ERROR] DashboardPage: Could not add event: {e}")
 

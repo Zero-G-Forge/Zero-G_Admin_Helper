@@ -19,6 +19,9 @@ from features.library.item_browser import ItemBrowser
 from features.library.item_library import FILTER_ORDER
 from features.shared import loadouts
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import horizontal_header, vertical_header
+
 # endregion
 
 
@@ -126,10 +129,10 @@ class ItemPackDialog(QDialog):
         self.tbl_rows.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_rows.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tbl_rows.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.tbl_rows.verticalHeader().setVisible(False)
-        self.tbl_rows.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.tbl_rows.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.tbl_rows.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        vertical_header(self.tbl_rows).setVisible(False)
+        horizontal_header(self.tbl_rows).setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        horizontal_header(self.tbl_rows).setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        horizontal_header(self.tbl_rows).setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         table_layout.addWidget(self.tbl_rows, stretch=1)
         self.btn_remove = QPushButton("REMOVE")
         self.btn_remove.setObjectName("DashActionButton")

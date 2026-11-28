@@ -27,6 +27,9 @@ from features.shared.faction_display import format_faction_role
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import horizontal_header, vertical_header, layout_item_widget
+
 # endregion
 
 
@@ -125,11 +128,11 @@ class FactionsPage(QWidget):
         self.tbl_members = QTableWidget(0, len(MEMBER_COLUMNS))
         self.tbl_members.setObjectName("DashTable")
         self.tbl_members.setHorizontalHeaderLabels(MEMBER_COLUMNS)
-        self.tbl_members.verticalHeader().setVisible(False)
+        vertical_header(self.tbl_members).setVisible(False)
         self.tbl_members.setShowGrid(False)
         self.tbl_members.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl_members.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self.tbl_members.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        horizontal_header(self.tbl_members).setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         detail_layout.addWidget(self.tbl_members, stretch=2)
         page_grid.addWidget(detail_card, 0, 1)
 
@@ -265,8 +268,9 @@ class FactionsPage(QWidget):
         try:
             while self.relations_rows_layout.count():
                 old_item = self.relations_rows_layout.takeAt(0)
-                if old_item.widget() is not None:
-                    old_item.widget().deleteLater()
+                old_widget = layout_item_widget(old_item)
+                if old_widget is not None:
+                    old_widget.deleteLater()
             faction = self._picked_faction()
             self.tbl_members.setRowCount(0)
             if faction is None:

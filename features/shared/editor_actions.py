@@ -16,6 +16,7 @@
 # region Imports
 
 import os
+from typing import TYPE_CHECKING, Any, Callable, cast
 
 from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import QMessageBox
@@ -27,6 +28,12 @@ from features.server_files import download_manager
 from features.server_files import edit_store, upload_flow
 from features.server_files.write_worker import ServerWriteWorker, fetch_file, put_file, start_write_worker
 from features.shared.edit_tools import validate_text, has_errors, format_problems, make_diff, diff_counts
+
+## Only the type checker reads these (they are never run), so the mixin's attribute types can be named.
+if TYPE_CHECKING:
+    from PyQt6.QtGui import QTextDocument
+    from PyQt6.QtWidgets import QComboBox, QLabel, QPlainTextEdit, QPushButton, QWidget
+    from features.ecf_editor.ecf_code_editor import EcfCodeEditor
 
 # endregion
 
@@ -50,7 +57,37 @@ CREATE_WRITE_WORKER = ServerWriteWorker
 
 # region EditorActions Class
 
-class EditorActions:
+## The type checker treats the mixin as a QWidget (so self.window(), self.showEvent and the QMessageBox parent
+## are known); when ZAH runs, the base is plain object, exactly as before.
+if TYPE_CHECKING:
+    EditorActionsBase = QWidget
+else:
+    EditorActionsBase = object
+
+
+class EditorActions(EditorActionsBase):
+
+    # region Attributes From The Page
+
+    ## Declarations only, nothing is created here: the page class makes each of these in its own __init__.
+    btn_validate: "QPushButton"
+    btn_save: "QPushButton"
+    btn_upload: "QPushButton"
+    btn_download: "QPushButton"
+    code_editor: "EcfCodeEditor"
+    txt_changes: "QPlainTextEdit"
+    lbl_backup: "QLabel"
+    cmb_file: "QComboBox"
+    current_entry: Any
+    original_text: str
+    server_folder: "str | None"
+    upload_worker: Any
+    download_worker: Any
+    create_download_worker: Any
+    load_server_files: Callable[[], None]
+
+    # endregion
+
 
     # region Setup
 
@@ -215,7 +252,9 @@ class EditorActions:
 
     def _jump_to_line(self, line_number):
         """Moves the editor's cursor to a line (1 = first line)."""
-        block = self.code_editor.document().findBlockByNumber(max(0, line_number - 1))
+        ## document() is never None for an editor that has text; cast tells the type checker so.
+        document = cast("QTextDocument", self.code_editor.document())
+        block = document.findBlockByNumber(max(0, line_number - 1))
         if block.isValid():
             cursor = self.code_editor.textCursor()
             cursor.setPosition(block.position())

@@ -22,6 +22,9 @@ from features.cheat_checker.cheat_checker_settings import (
 )
 from features.dashboard.dashboard_page import make_card
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import layout_item_widget
+
 # endregion
 
 
@@ -388,8 +391,9 @@ class CheatCheckerPage(QWidget):
     def _fill_watch_words(self, rows):
         while self.watch_boxes_layout.count():
             item = self.watch_boxes_layout.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
+            old_widget = layout_item_widget(item)
+            if old_widget is not None:
+                old_widget.deleteLater()
         for row in rows:
             box = QCheckBox(str(row.get("word", "")))
             box.setObjectName("SettingsCheckBox")
@@ -400,7 +404,7 @@ class CheatCheckerPage(QWidget):
     def _watch_rows_from_widgets(self):
         rows = []
         for index in range(self.watch_boxes_layout.count()):
-            box = self.watch_boxes_layout.itemAt(index).widget()
+            box = layout_item_widget(self.watch_boxes_layout.itemAt(index))
             if isinstance(box, QCheckBox) and box.text().strip():
                 rows.append({"word": box.text().strip(), "on": box.isChecked()})
         return rows

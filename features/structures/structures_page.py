@@ -24,6 +24,9 @@ from features.shared import server_actions
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import horizontal_header, vertical_header
+
 # endregion
 
 
@@ -122,12 +125,12 @@ class StructuresPage(QWidget):
         self.tbl_structures = QTableWidget(0, len(STRUCTURE_COLUMNS))
         self.tbl_structures.setObjectName("DashTable")
         self.tbl_structures.setHorizontalHeaderLabels(STRUCTURE_COLUMNS)
-        self.tbl_structures.verticalHeader().setVisible(False)
+        vertical_header(self.tbl_structures).setVisible(False)
         self.tbl_structures.setShowGrid(False)
         self.tbl_structures.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl_structures.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_structures.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.tbl_structures.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        horizontal_header(self.tbl_structures).setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         table_layout.addWidget(self.tbl_structures, stretch=1)
         self.lbl_structures_empty = QLabel("No structure data yet.")
         self.lbl_structures_empty.setObjectName("DashEmptyLabel")

@@ -33,6 +33,9 @@ from features.cheat_checker.cheat_checker_settings import (
 ## The card and letter-spacing helpers are shared with the dashboard, so every page looks the same.
 from features.dashboard.dashboard_page import make_card, spread_letters
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import horizontal_header, vertical_header
+
 # endregion
 
 
@@ -125,11 +128,11 @@ class AlertsPage(QWidget):
         self.tbl_detail = QTableWidget(0, len(DETAIL_COLUMNS))
         self.tbl_detail.setObjectName("DashTable")
         self.tbl_detail.setHorizontalHeaderLabels(DETAIL_COLUMNS)
-        self.tbl_detail.verticalHeader().setVisible(False)
+        vertical_header(self.tbl_detail).setVisible(False)
         self.tbl_detail.setShowGrid(False)
         self.tbl_detail.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl_detail.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
-        self.tbl_detail.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        horizontal_header(self.tbl_detail).setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         detail_layout.addWidget(self.tbl_detail)
         self.lbl_detail_empty = QLabel("Pick an alert to see its details.")
         self.lbl_detail_empty.setObjectName("DashEmptyLabel")

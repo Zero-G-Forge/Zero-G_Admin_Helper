@@ -10,6 +10,8 @@
 
 # region Imports
 
+from typing import Any
+
 from PyQt6.QtCore import QObject, pyqtSignal
 
 # endregion
@@ -33,7 +35,7 @@ class DownloadManager(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.worker = None
+        self.worker: Any = None
         self.workers = []
         self.last_progress_values = None
         self.last_status_text = ""
