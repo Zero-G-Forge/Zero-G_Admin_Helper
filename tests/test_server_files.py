@@ -21,6 +21,8 @@ import subprocess
 import sys
 import time
 
+from typing import Any
+
 import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -273,7 +275,7 @@ class FakeCockpit(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.bridge_connected = None
+        self.bridge_connected: bool | None = None
         self.bridge_server_name = None
 
 
@@ -283,7 +285,7 @@ class FakeWorker(QThread):
     finished_ok = pyqtSignal(dict)
     failed = pyqtSignal(str)
     outcome = {"downloaded": 3, "skipped": 2, "failed": [], "folder": "/tmp/zah_fake_folder"}
-    fail_message = None
+    fail_message: str | None = None
     last_selection = None
 
     def __init__(self, parent=None, selection=None, **kwargs):
@@ -300,7 +302,7 @@ class FakeWorker(QThread):
 
 def build_page(qapp):
     cockpit = FakeCockpit()
-    page = settings_page.SettingsPage()
+    page: Any = settings_page.SettingsPage()
     cockpit.setCentralWidget(page)
     cockpit.show()
     qapp.processEvents()
@@ -474,7 +476,7 @@ class HoldWorker(QThread):
     progress = pyqtSignal(int, int, str)
     finished_ok = pyqtSignal(dict)
     failed = pyqtSignal(str)
-    release = None
+    release: threading.Event | None = None
     outcome = {"downloaded": 3, "skipped": 2, "failed": [], "folder": "/tmp/zah_fake_folder"}
 
     def __init__(self, parent=None, selection=None, **kwargs):
@@ -489,7 +491,8 @@ class HoldWorker(QThread):
 
 
 def test_finished_download_shows_last_pulled_on_a_new_page(qapp):
-    HoldWorker.release = threading.Event()
+    release = threading.Event()
+    HoldWorker.release = release
     cockpit, page = build_page(qapp)
     page.create_download_worker = HoldWorker
     cockpit.bridge_connected = True
@@ -501,7 +504,7 @@ def test_finished_download_shows_last_pulled_on_a_new_page(qapp):
     cockpit.close()
     qapp.processEvents()
     assert download_manager.is_running()
-    HoldWorker.release.set()
+    release.set()
     assert wait_until(qapp, lambda: not download_manager.is_running() and download_manager.current_worker() is None)
     cockpit2, page2 = build_page(qapp)
     cockpit2.bridge_connected = True
@@ -552,7 +555,7 @@ def test_editor_download_folder_runs_the_read_only_download(qapp, tmp_path):
     from features.ecf_editor.ecf_editor_page import EcfEditorPage
     FakeWorker.fail_message = None
     cockpit = FakeCockpit()
-    page = EcfEditorPage()
+    page: Any = EcfEditorPage()
     cockpit.setCentralWidget(page)
     cockpit.show()
     qapp.processEvents()
@@ -565,7 +568,7 @@ def test_editor_download_folder_runs_the_read_only_download(qapp, tmp_path):
     page.load_server_files = lambda folder=None: reloaded.append(folder)
     page.btn_download.click()
     assert wait_until(qapp, lambda: page.download_worker is None)
-    assert reloaded == [None] and page.btn_download.text() == "DOWNLOAD FOLDER FROM SERVER (READ-ONLY)"
+    assert reloaded == [None] and page.btn_download.text() == "FROM SERVER (READ-ONLY)"
     assert app_settings.load_app_settings()["server_files_local_folder"] == "/tmp/zah_fake_folder"
     cockpit.close()
 

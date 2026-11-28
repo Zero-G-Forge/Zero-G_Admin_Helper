@@ -33,6 +33,9 @@ from features.shared.editor_actions import EditorActions
 ## The code-style editor (line numbers, colours, brace matching) for the CODE view.
 from features.ecf_editor.ecf_code_editor import EcfCodeEditor
 
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import horizontal_header, vertical_header
+
 # endregion
 
 
@@ -113,7 +116,7 @@ class EcfEditorPage(EditorActions, QWidget):
 
         ## DOWNLOAD only reads from the server; VALIDATE and SAVE work on the local copy.
         ## It copies the whole folder of .ecf files down, so any of them can be picked and edited here.
-        self.btn_download = self._make_tool_button("DOWNLOAD FOLDER FROM SERVER (READ-ONLY)", "DashActionButton")
+        self.btn_download = self._make_tool_button("FROM SERVER", "DashActionButton")
         self.btn_validate = self._make_tool_button("VALIDATE", "DashActionButton")
 
         ## CHANGES PREVIEW only shows the local edits, so it works now (it opens its own window).
@@ -187,15 +190,15 @@ class EcfEditorPage(EditorActions, QWidget):
         self.tbl_items = QTableWidget(0, len(ITEM_COLUMNS))
         self.tbl_items.setObjectName("DashTable")
         self.tbl_items.setHorizontalHeaderLabels(ITEM_COLUMNS)
-        self.tbl_items.verticalHeader().setVisible(False)
+        vertical_header(self.tbl_items).setVisible(False)
         self.tbl_items.setShowGrid(False)
         self.tbl_items.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tbl_items.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tbl_items.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.tbl_items.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        horizontal_header(self.tbl_items).setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
         ## ITEM NAME takes the spare width; the number columns fit their header text (so STOCK MIN-MAX isn't cut off).
-        self.tbl_items.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        horizontal_header(self.tbl_items).setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         table_layout.addWidget(self.tbl_items, stretch=1)
         self.lbl_items_empty = QLabel("Pick a trader to see its items.")
         self.lbl_items_empty.setObjectName("DashEmptyLabel")
