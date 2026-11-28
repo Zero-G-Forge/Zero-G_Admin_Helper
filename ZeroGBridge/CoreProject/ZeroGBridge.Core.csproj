@@ -36,7 +36,8 @@
     <!-- 1.6.11: drop leftover cache membership and read offline ranks from Players ply files -->
     <!-- 1.6.12: quieter routine logs (plys / Request_Dedi_Stats at DEBUG; DEBUG off unless LogLevel is Debug) -->
     <!-- 1.6.13: files:put may replace .epb prefabs -->
-    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.13</ReleaseVersion>
+    <!-- 1.6.14: quieter Uptime console line (every 120s) and Faction INFO (on change or 10 min) -->
+    <ReleaseVersion Condition="'$(ReleaseVersion)' == ''">1.6.14</ReleaseVersion>
     <BuildDate>$([System.DateTime]::UtcNow.AddHours(-5).ToString("MMdd"))</BuildDate>
     <BuildTime>$([System.DateTime]::UtcNow.AddHours(-5).ToString("HHmm"))</BuildTime>
     <Version>$(MajorVersion).$(MinorVersion).$(BuildDate).$(BuildTime)</Version>

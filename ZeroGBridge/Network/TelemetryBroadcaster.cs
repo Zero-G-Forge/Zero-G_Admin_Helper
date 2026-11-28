@@ -28,6 +28,12 @@ namespace ZeroGBridge
         private readonly object _fileLock = new object();
         private int _logCounter = 0;
 
+        // 1.6.14: console/server-log of the Uptime line is at most once per 120s.
+        // The 14s _logCounter check and the client broadcast are unchanged.
+        // 0 = never logged, so the first check after load always prints.
+        private long _lastUptimeLogTicks;
+        private const long UptimeLogIntervalTicks = 120L * TimeSpan.TicksPerSecond;
+
         // METRIC roster throttling (see TelemetryLoop)
         public const int RosterResyncTicks = 15; // 15 x 2s = 30s keep-alive resync
         private string _lastRosterSignature = null;
@@ -243,15 +249,21 @@ namespace ZeroGBridge
                     if (_logCounter >= 7)
                     {
                         _logCounter = 0;
-                        string formattedLog = $"-LOG- INFO: Uptime={uptimeStr} heap={heapStr} fps={fpsVal:0.0} cpu={cpuPercent}% ram={ramFormatted} ({ram.Source}) players={onlineCount} pfs={pfsCount} ticks={tickCount} nwqueue={nwQueueVal}";
+                        long nowTicks = DateTime.UtcNow.Ticks;
+                        long last = Interlocked.Read(ref _lastUptimeLogTicks);
+                        if (last == 0 || nowTicks - last >= UptimeLogIntervalTicks)
+                        {
+                            Interlocked.Exchange(ref _lastUptimeLogTicks, nowTicks);
+                            string formattedLog = $"-LOG- INFO: Uptime={uptimeStr} heap={heapStr} fps={fpsVal:0.0} cpu={cpuPercent}% ram={ramFormatted} ({ram.Source}) players={onlineCount} pfs={pfsCount} ticks={tickCount} nwqueue={nwQueueVal}";
 
-                        if (_modApi != null)
-                        {
-                            _modApi.Log(formattedLog);
-                        }
-                        else
-                        {
-                            ZgbLog.Write($"{preciseTimestamp} [ZGB] {formattedLog}");
+                            if (_modApi != null)
+                            {
+                                _modApi.Log(formattedLog);
+                            }
+                            else
+                            {
+                                ZgbLog.Write($"{preciseTimestamp} [ZGB] {formattedLog}");
+                            }
                         }
                     }
                 }

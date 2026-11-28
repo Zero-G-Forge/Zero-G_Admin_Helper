@@ -72,6 +72,8 @@ namespace ZeroGBridge
         private static int _lastFactionSeq = -1;         // seq of the last Request_Get_Factions we sent
         private static int _factionRequestsSent;
         private static string _lastFactionLogKey;
+        private static long _lastFactionInfoTicks; // 0 = never printed INFO
+        private const long FactionInfoIntervalTicks = 10L * TimeSpan.TicksPerMinute;
         public static int LastFactionRequestThreadId { get; private set; }
         public static int GameStartThreadId { get; private set; }
         public static int FactionRequestsSent => Volatile.Read(ref _factionRequestsSent);
@@ -188,7 +190,7 @@ namespace ZeroGBridge
         /// Merges one Event_Get_Factions reply (ours or another mod's). Stores origin 0/1 only;
         /// NPC origins are dropped (1.5.1: classified by origin first, so id-0 NPC rows count as
         /// dropped, not skipped). Logs the incoming count and seqNr (DEBUG every time, plus counts
-        /// by origin and a sample of dropped/skipped rows; INFO when the numbers change).
+        /// by origin and a sample of dropped/skipped rows; INFO when the numbers change, or every 10 min).
         /// </summary>
         internal static void HandleFactionList(ushort seqNr, FactionInfoList list)
         {
@@ -237,8 +239,17 @@ namespace ZeroGBridge
             string key = received + "/" + stored + "/" + npc + "/" + playerFactions;
             string prevKey = Interlocked.Exchange(ref _lastFactionLogKey, key);
             Interlocked.Exchange(ref _loggedFactionCount, playerFactions);
-            if (prevKey != key)
+            // 1.6.14: INFO when the counts change, or if 10 minutes have passed; otherwise skip
+            // (the DEBUG lines above already record every reply, and ZgbLog gates them).
+            long nowTicks = DateTime.UtcNow.Ticks;
+            long lastInfo = Interlocked.Read(ref _lastFactionInfoTicks);
+            bool changed = prevKey != key;
+            bool due = lastInfo == 0 || nowTicks - lastInfo >= FactionInfoIntervalTicks;
+            if (changed || due)
+            {
+                Interlocked.Exchange(ref _lastFactionInfoTicks, nowTicks);
                 ZgbLog.Write($"[ZGB] -INFO- Legacy Event_Get_Factions (seqNr {seqNr}, {whose}): {received} received, {stored} player faction(s) stored, {npc} NPC dropped; {playerFactions} with a real player available for alert targeting.");
+            }
             _playerCache.RefreshFactionTags();
         }
 
