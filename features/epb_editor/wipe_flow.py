@@ -145,3 +145,135 @@ def ask_playfields(parent, rows, missing):
     return [name for box, name in boxes if box.isChecked()]
 
 # endregion
+
+
+# region Players Warning
+
+## Step 2: the online-players warning. True = Continue.
+## found is None when the player list could not be read.
+def ask_wipe_players(parent, found):
+    if found is None:
+        text = ("The online player count could not be read, so nothing was sent.")
+        QMessageBox.warning(parent, "Wipe stopped", text)
+        return False
+    if not found:
+        text = "No players are online on those playfields."
+        icon = QMessageBox.Icon.Question
+    else:
+        lines = []
+        for name, who in found.items():
+            lines.append(name + ": " + ", ".join(who))
+        text = ("WARNING: players are online on these playfields:\n" + "\n".join(lines) + "\n\nContinue anyway?")
+        icon = QMessageBox.Icon.Warning
+    title = "Wipe step 2: players"
+    box = QMessageBox(icon, title, text, parent=parent)
+    accept = QMessageBox.ButtonRole.AcceptRole
+    reject = QMessageBox.ButtonRole.RejectRole
+    btn_continue = box.addButton("Continue", accept)
+    btn_cancel = box.addButton("Cancel", reject)
+    box.setDefaultButton(btn_cancel)
+    box.exec()
+    return box.clickedButton() is btn_continue
+
+# endregion
+
+
+# region Sending
+
+## Runs on the background thread: one command per
+## playfield. A refusal on one does not stop the rest.
+## Returns [(playfield name, reply)].
+def send_all(names):
+    results = []
+    types = server_actions.WRITE_REPLY_TYPES
+    for number, name in enumerate(names):
+        if number:
+            time.sleep(GAP_SEC)
+        command = wipe_command(name)
+        send = server_actions.SEND_FUNCTION
+        try:
+            reply = send(command, types, None)
+        except Exception as exc:
+            reply = {"type": "ERROR", "message": str(exc)}
+        results.append((name, reply))
+    return results
+
+# endregion
+
+
+# region Audit
+
+## One audit line per playfield (data/audit).
+def audit_results(widget, results):
+    key = WIPE_ACTION
+    for name, reply in results:
+        command = wipe_command(name)
+        ok = server_actions.reply_ok(reply)
+        detail = server_actions.reply_text(reply)
+        write = server_actions.write_audit
+        write(widget, key, command, ok, detail)
+
+# endregion
+
+
+# region Start
+
+## Steps 3 and 4. Role and bridge are checked before and
+## after the Safety Flow. on_done gets the results list.
+## Returns False when it stopped before sending.
+def start_wipes(widget, names, on_done):
+    key = WIPE_ACTION
+    if server_actions.block_reason(widget, key):
+        return False
+    commands = [wipe_command(name) for name in names]
+    title = "Wipe playfields (POIs only)"
+    note = ("Wipes the POIs on: " + ", ".join(names) + ". It happens when each playfield next loads." + " ZAH does not restart anything.")
+    preview = "\n".join(commands)
+    ask = server_actions.ask_safety_flow
+    if not ask(widget, title, preview, note):
+        text = "cancelled before sending"
+        server_actions.write_audit(widget, key, commands, False, text)
+        return False
+
+    ## Asked again: the role or bridge may change meanwhile.
+    if server_actions.block_reason(widget, key):
+        return False
+
+    def finished(results):
+        audit_results(widget, results)
+        on_done(results)
+
+    def failed(kind, message):
+        reply = {"type": "ERROR", "message": message}
+        results = [(name, reply) for name in names]
+        audit_results(widget, results)
+        on_done(results)
+
+    run_async(lambda: send_all(names), finished, failed)
+    return True
+
+# endregion
+
+
+# region Results
+
+## One line per playfield.
+def result_lines(results):
+    lines = []
+    for name, reply in results:
+        if server_actions.reply_ok(reply):
+            start = "SENT      "
+        else:
+            start = "FAILED    "
+        detail = server_actions.reply_text(reply)
+        lines.append(start + name + "   (" + detail + ")")
+    return lines
+
+
+## The last popup: what was sent and how it went.
+def show_results(parent, results):
+    text = "\n".join(result_lines(results))
+    text += ("\n\nEach wipe runs the next time that playfield loads. No server restart was sent.")
+    QMessageBox.information(parent, "Wipe results", text)
+
+# endregion
