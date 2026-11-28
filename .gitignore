@@ -25,6 +25,8 @@ git_token.txt
 !ZeroGBridge/ZeroGBridge.json
 !.instructions/Examples/**/*.json
 !.instructions/.markdownlint.json
+## The Pylance / pyright settings for this project.
+!pyrightconfig.json
 # endregion
 
 # region: Scratch and AI notes

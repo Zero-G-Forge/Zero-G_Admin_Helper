@@ -1,0 +1,23 @@
+{
+    "typeCheckingMode": "basic",
+    "pythonVersion": "3.12",
+    "pythonPlatform": "Linux",
+    "extraPaths": [
+        "login_service"
+    ],
+    "include": [
+        "features",
+        "tests",
+        "tools",
+        "login_service",
+        "ZAH.py"
+    ],
+    "exclude": [
+        "ZAH_Legacy",
+        ".venv",
+        "ZeroGBridge",
+        ".scratchpad",
+        "**/bin",
+        "**/__pycache__"
+    ]
+}
