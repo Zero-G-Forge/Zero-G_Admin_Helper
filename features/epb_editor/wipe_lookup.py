@@ -84,3 +84,59 @@ def read_group_of_prefab(path, known_groups):
     return best[1]
 
 # endregion
+
+
+# region Sector Names
+
+## {template: [playfield names]} from Sectors.yaml.
+## The game's playfield name is the sector name, not the
+## template folder name.
+def read_sector_playfields(scenario_folder):
+    names = {}
+    path = os.path.join(scenario_folder, "Sectors", "Sectors.yaml")
+    if not os.path.isfile(path):
+        return names
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            found = SECTOR_LINE.match(line)
+            if not found:
+                continue
+            name = found.group(1) or found.group(2) or ""
+            name = name.strip()
+            template = found.group(3).strip("'\" ")
+            if name:
+                where = names.setdefault(template, [])
+                where.append(name)
+    return names
+
+# endregion
+
+
+# region Prefab Lookup
+
+## ([(playfield name, [prefab file names])],
+##  [prefabs with no playfield found]),
+## sorted by playfield name.
+## prefab_names are file names like Manta_POI.epb.
+def playfields_for_prefabs(scenario_folder, prefab_names):
+    users = read_group_users(scenario_folder)
+    sectors = read_sector_playfields(scenario_folder)
+    prefab_dir = os.path.join(scenario_folder, "Prefabs")
+    found = {}
+    missing = []
+    for prefab in prefab_names:
+        path = os.path.join(prefab_dir, prefab)
+        group = read_group_of_prefab(path, users)
+        names = []
+        for template in users.get(group, []):
+            names.extend(sectors.get(template, []))
+        if not names:
+            missing.append(prefab)
+        for name in names:
+            found.setdefault(name, []).append(prefab)
+    rows = []
+    for name in sorted(found, key=str.lower):
+        rows.append((name, found[name]))
+    return rows, missing
+
+# endregion
