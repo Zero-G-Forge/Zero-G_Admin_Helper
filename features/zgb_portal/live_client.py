@@ -25,7 +25,7 @@ from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
 
 from .bridge_session import (
     BridgeAuthError,
-    close_bridge_socket,
+    close_short_socket,
     note_session_drop,
     open_authenticated_socket,
     send_bridge_command,
@@ -116,7 +116,101 @@ def bridge_request(profile: dict, command: str, want_type: str, req_id: str | No
         note_session_drop(host, port)
         raise PortalBridgeError("offline", _scrub(f"Connection to {host}:{port} failed ({err.__class__.__name__}).", token)) from None
     finally:
-        close_bridge_socket(sock)
+        close_short_socket(sock)
+
+
+def bridge_request_many(profile: dict, requests: list, timeout: float = DEFAULT_TIMEOUT) -> list:
+    """
+    Several commands over ONE authenticated session. requests is a list of
+    (command, want_type) or (command, want_type, req_id), asked one after the other.
+    Returns a list in the same order: each item is the reply dict, or the PortalBridgeError
+    for that command (so one failed command does not hide the others). A login failure
+    raises PortalBridgeError, like bridge_request. Run it from a worker thread.
+    """
+    host, port = profile_endpoint(profile)
+    token = str((profile or {}).get("input_pass", "") or "")
+    if not host:
+        raise PortalBridgeError("config", "No active server is set in ZAH.")
+    if not token:
+        raise PortalBridgeError("config", "The active server has no bridge password saved.")
+
+    try:
+        sock = open_authenticated_socket(host, port, token, timeout=min(timeout, 8.0))
+    except BridgeAuthError:
+        raise PortalBridgeError("auth", f"Auth failed on {host}:{port}.") from None
+    except (TimeoutError, socket.timeout):
+        raise PortalBridgeError("timeout", f"{host}:{port} did not answer in time.") from None
+    except OSError as err:
+        raise PortalBridgeError("offline", f"Could not reach {host}:{port} ({err.__class__.__name__}).") from None
+
+    results: list = []
+    ## Own line reader: a makefile() reader refuses every read after one timeout, but here a command
+    ## that never answers must not stop the next command from being read.
+    pending = bytearray()
+
+    def read_line() -> bytes:
+        while b"\n" not in pending:
+            chunk = sock.recv(65536)
+            if not chunk:
+                return b""
+            pending.extend(chunk)
+        end = pending.index(b"\n") + 1
+        line = bytes(pending[:end])
+        del pending[:end]
+        return line
+
+    try:
+        for request in requests:
+            command, want_type = request[0], request[1]
+            req_id = request[2] if len(request) > 2 else None
+            wanted = want_type if isinstance(want_type, tuple) else (want_type,)
+            try:
+                send_bridge_command(sock, command)
+                deadline = time.monotonic() + timeout
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise PortalBridgeError("timeout", f"No {wanted[0]} reply from {host}:{port}.")
+                    sock.settimeout(max(0.2, min(remaining, 5.0)))
+                    try:
+                        raw = read_line()
+                    except (TimeoutError, socket.timeout):
+                        continue
+                    if not raw:
+                        note_session_drop(host, port)
+                        raise PortalBridgeError("closed", f"{host}:{port} closed the connection.")
+                    try:
+                        payload = json.loads(raw.decode("utf-8-sig").strip())
+                    except (ValueError, UnicodeDecodeError):
+                        continue
+                    if not isinstance(payload, dict) or payload.get("type") not in wanted:
+                        continue
+                    if req_id is not None and payload.get("req_id") not in (None, req_id):
+                        continue
+                    results.append(payload)
+                    break
+            except PortalBridgeError as err:
+                results.append(err)
+                if err.kind == "closed":
+                    break
+            except OSError as err:
+                note_session_drop(host, port)
+                results.append(PortalBridgeError("offline", _scrub(f"Connection to {host}:{port} failed ({err.__class__.__name__}).", token)))
+                break
+        ## A session that ended early leaves the rest with the same error.
+        while len(results) < len(requests):
+            results.append(results[-1])
+        return results
+    finally:
+        close_short_socket(sock)
+
+
+## One hot: request for bridge_request_many: (command, "HOT", req_id).
+def hot_item(cmd: str, **extra) -> tuple:
+    req_id = f"zah-{cmd}-{uuid.uuid4().hex[:8]}"
+    body = {"cmd": cmd, "req_id": req_id}
+    body.update(extra)
+    return ("hot:" + json.dumps(body), "HOT", req_id)
 
 
 def hot_request(profile: dict, cmd: str, timeout: float = DEFAULT_TIMEOUT, **extra) -> dict:

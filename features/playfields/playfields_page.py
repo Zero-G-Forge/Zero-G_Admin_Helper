@@ -179,20 +179,25 @@ class PlayfieldsPage(QWidget):
             if not server_actions.bridge_is_connected(self):
                 self.lbl_map_empty.setText("Connect to the server to see playfields.")
                 return
-            server_actions.read_bridge("getplayfields:all", ("PLAYFIELD_LIST", "ERROR"), self._on_playfields_read,
-                                       lambda message: print(f"[ERROR] PlayfieldsPage: getplayfields failed: {message}"))
-            server_actions.read_bridge("plys", "PLAYER_CACHE", self._on_players_read,
-                                       lambda message: print(f"[ERROR] PlayfieldsPage: plys failed: {message}"))
+            server_actions.read_bridge_many([
+                ("getplayfields:all", ("PLAYFIELD_LIST", "ERROR"), self._on_playfields_read,
+                 lambda message: print(f"[ERROR] PlayfieldsPage: getplayfields failed: {message}")),
+                ("plys", "PLAYER_CACHE", self._on_players_read,
+                 lambda message: print(f"[ERROR] PlayfieldsPage: plys failed: {message}"))])
         except Exception as e:
             print(f"[ERROR] PlayfieldsPage: Refresh failed: {e}")
 
     def _on_playfields_read(self, reply):
         try:
             self.playfields = [row for row in ((reply or {}).get("playfields") or []) if isinstance(row, dict) and row.get("name")]
+            ## One bridge session for every playfield's stats, not one login each.
+            stats_items = []
             for row in self.loaded_playfields()[:MAX_CARDS]:
                 name = str(row["name"])
-                server_actions.read_bridge(server_actions.api_command("Request_Playfield_Stats", {"pstr": name}), ("API_RESULT", "ERROR"),
-                                           lambda answer, pf_name=name: self._on_stats_read(pf_name, answer), lambda message: None)
+                stats_items.append((server_actions.api_command("Request_Playfield_Stats", {"pstr": name}), ("API_RESULT", "ERROR"),
+                                    lambda answer, pf_name=name: self._on_stats_read(pf_name, answer), lambda message: None))
+            if stats_items:
+                server_actions.read_bridge_many(stats_items)
             self.show_playfields()
         except Exception as e:
             print(f"[ERROR] PlayfieldsPage: Could not read playfields: {e}")

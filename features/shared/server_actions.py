@@ -2,6 +2,7 @@
 ## MODULE: features/shared/server_actions.py
 ## DESCRIPTION: The one path every page uses to talk to ZeroGBridge outside the cockpit's own pipe.
 ##   read_bridge          read-only commands (lists, stats, inventories): no confirmation, run in the background.
+##   read_bridge_many     several read-only commands over ONE bridge session (pages that ask for more than one at once).
 ##   run_server_action    anything that changes the game or the server:
 ##                          1. role check (fail closed) and a connected bridge
 ##                          2. for a major live change (MAJOR_ACTIONS): the ZAH Safety Flow
@@ -136,6 +137,28 @@ def _live_send(command, want_types, profile=None):
 SEND_FUNCTION = _live_send
 
 
+## The real send for several commands: ONE bridge session (live_client.bridge_request_many).
+## requests is a list of (command, want_types). Returns one reply (or an Exception) per command.
+def _live_send_many(requests, profile=None):
+    from features.bridge.server_settings import get_active_profile
+    from features.zgb_portal.live_client import bridge_request_many
+    return bridge_request_many(profile or get_active_profile(), requests)
+
+
+## Several commands in one session. When SEND_FUNCTION has been replaced (tests), each command goes
+## through it one at a time, so those stand-ins keep working and no test can reach the live server.
+def send_many(requests, profile=None):
+    if SEND_FUNCTION is not _live_send:
+        results = []
+        for command, want_types in requests:
+            try:
+                results.append(SEND_FUNCTION(command, want_types, profile))
+            except Exception as e:
+                results.append(e)
+        return results
+    return _live_send_many(requests, profile)
+
+
 ## One Eleon request line, e.g. api:Request_InGameMessage_AllPlayers {"msg": "Hi"}.
 ## json.dumps keeps quotes and backslashes in the text safe.
 ## Messages use these real requests, not the old msg: / msgfaction: / broadcast: / destroystruct: shorthands,
@@ -182,6 +205,35 @@ def read_bridge(command, want_types, on_ok, on_error, profile=None):
     except Exception as e:
         print(f"[ERROR] ServerActions: Read {command.split(':')[0]} failed to start: {e}")
         on_error(str(e))
+
+
+## Runs several read-only commands in the background over ONE bridge session.
+## items is a list of (command, want_types, on_ok, on_error); each answer goes to its own
+## on_ok(reply) or on_error(message) on the window thread, like read_bridge does one at a time.
+def read_bridge_many(items, profile=None):
+    from features.zgb_portal.live_client import run_async
+    items = list(items)
+
+    def finished(results):
+        for item, result in zip(items, results):
+            try:
+                if isinstance(result, Exception):
+                    item[3](str(result))
+                else:
+                    item[2](result)
+            except Exception as e:
+                print(f"[ERROR] ServerActions: Read {item[0].split(':')[0]} handler failed: {e}")
+
+    def failed(kind, message):
+        for item in items:
+            item[3](message)
+
+    try:
+        run_async(lambda: send_many([(item[0], item[1]) for item in items], profile), finished, failed)
+    except Exception as e:
+        print(f"[ERROR] ServerActions: Reads failed to start: {e}")
+        for item in items:
+            item[3](str(e))
 
 # endregion
 

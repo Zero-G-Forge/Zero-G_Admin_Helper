@@ -296,8 +296,9 @@ class DashboardPage(QWidget):
             self.quick_action_buttons[0].setToolTip(reason or "HUD message to every player (Safety Flow).")
             if not server_actions.bridge_is_connected(self):
                 return
-            server_actions.read_bridge("plys", "PLAYER_CACHE", self._on_players_read, lambda message: None)
-            server_actions.read_bridge("api:Request_Dedi_Stats", ("API_RESULT", "ERROR"), self._on_stats_read, lambda message: None)
+            server_actions.read_bridge_many([
+                ("plys", "PLAYER_CACHE", self._on_players_read, lambda message: None),
+                ("api:Request_Dedi_Stats", ("API_RESULT", "ERROR"), self._on_stats_read, lambda message: None)])
         except Exception as e:
             print(f"[ERROR] DashboardPage: Live refresh failed: {e}")
 

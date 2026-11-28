@@ -193,12 +193,13 @@ class FactionsPage(QWidget):
             if not server_actions.bridge_is_connected(self):
                 self.lbl_factions_empty.setText("Connect to the server to see factions.")
                 return
-            server_actions.read_bridge('api:Request_Get_Factions {"id":1}', ("API_RESULT", "ERROR"), self._on_factions_read,
-                                       lambda message: print(f"[ERROR] FactionsPage: Factions read failed: {message}"))
-            server_actions.read_bridge("plys", "PLAYER_CACHE", self._on_players_read,
-                                       lambda message: print(f"[ERROR] FactionsPage: plys failed: {message}"))
-            server_actions.read_bridge("api:Request_AlliancesAll", ("API_RESULT", "ERROR"), self._on_alliances_read,
-                                       lambda message: print(f"[ERROR] FactionsPage: Alliances read failed: {message}"))
+            server_actions.read_bridge_many([
+                ('api:Request_Get_Factions {"id":1}', ("API_RESULT", "ERROR"), self._on_factions_read,
+                 lambda message: print(f"[ERROR] FactionsPage: Factions read failed: {message}")),
+                ("plys", "PLAYER_CACHE", self._on_players_read,
+                 lambda message: print(f"[ERROR] FactionsPage: plys failed: {message}")),
+                ("api:Request_AlliancesAll", ("API_RESULT", "ERROR"), self._on_alliances_read,
+                 lambda message: print(f"[ERROR] FactionsPage: Alliances read failed: {message}"))])
         except Exception as e:
             print(f"[ERROR] FactionsPage: Refresh failed: {e}")
 

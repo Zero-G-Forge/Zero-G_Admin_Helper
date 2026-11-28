@@ -73,6 +73,16 @@ def close_bridge_socket(sock):
         pass
 
 
+def close_short_socket(sock):
+    """Closes a short-lived request socket with close() only (no shutdown), so the bridge sees a plain close."""
+    if sock is None:
+        return
+    try:
+        sock.close()
+    except Exception:
+        pass
+
+
 def send_bridge_command(sock, command_str):
     """Sends one command with the \\r\\n line ending the bridge's reader expects."""
     if not sock:

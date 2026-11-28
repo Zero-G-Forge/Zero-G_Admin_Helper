@@ -1,7 +1,7 @@
 ## =====================================================================
 ## MODULE: features/multi_server/server_monitor.py
 ## DESCRIPTION: Read-only poll of every saved server (data/server_config.json) for the SERVERS page.
-## Each poll asks hot:status, plys and api:Request_Dedi_Stats on a short connection of its own.
+## Each poll asks hot:status, plys and api:Request_Dedi_Stats over ONE short connection (bridge_request_many).
 ## Nothing here changes a server, and input_pass (the auth token) is never printed.
 ## =====================================================================
 
@@ -31,8 +31,17 @@ def _fetch_status(profile):
     return fetch_status(profile)
 
 
+## The three polls over one login. Used only while STATUS_FUNCTION and SEND_FUNCTION are the real ones.
+def _ask_all(profile):
+    from features.zgb_portal import live_client
+    return live_client.bridge_request_many(profile, [live_client.hot_item("status"),
+                                                     ("plys", "PLAYER_CACHE"),
+                                                     ("api:Request_Dedi_Stats", ("API_RESULT", "ERROR"))])
+
+
 LIST_PROFILES = _list_profiles
 STATUS_FUNCTION = _fetch_status
+MANY_FUNCTION = _ask_all
 
 # endregion
 
@@ -43,16 +52,33 @@ STATUS_FUNCTION = _fetch_status
 def poll_server(profile):
     result = {"name": str(profile.get("server_name", "?")), "profile": profile, "online": False, "core": "--",
               "players_online": None, "players_total": None, "fps": None, "mem": None, "uptime": None, "flagged": []}
+    ## One login for all three reads, unless a test replaced the hooks (then each goes through its own hook).
+    replies = None
+    if STATUS_FUNCTION is _fetch_status and server_actions.SEND_FUNCTION is server_actions._live_send:
+        try:
+            replies = MANY_FUNCTION(profile)
+        except Exception as e:
+            print(f"[WARN] ServerMonitor: {result['name']} status failed: {type(e).__name__}")
+            return result
+
+    ## The reply for one of the three reads: from the shared login, or from its own call.
+    def reply_for(index, own_call):
+        if replies is None:
+            return own_call()
+        if isinstance(replies[index], Exception):
+            raise replies[index]
+        return replies[index]
+
     try:
         from features.zgb_portal.data_source import parse_status
-        state = parse_status(STATUS_FUNCTION(profile), profile)
+        state = parse_status(reply_for(0, lambda: STATUS_FUNCTION(profile)), profile)
         result["core"] = state.core_release or state.core_version or "--"
         result["online"] = True
     except Exception as e:
         print(f"[WARN] ServerMonitor: {result['name']} status failed: {type(e).__name__}")
         return result
     try:
-        players = server_actions.SEND_FUNCTION("plys", "PLAYER_CACHE", profile)
+        players = reply_for(1, lambda: server_actions.SEND_FUNCTION("plys", "PLAYER_CACHE", profile))
         rows = [row for row in (players or {}).get("player_list") or [] if isinstance(row, dict)]
         result["players_total"] = len(rows)
         result["players_online"] = sum(1 for row in rows if row.get("status") == "Online")
@@ -60,7 +86,7 @@ def poll_server(profile):
     except Exception as e:
         print(f"[WARN] ServerMonitor: {result['name']} plys failed: {type(e).__name__}")
     try:
-        stats = server_actions.SEND_FUNCTION("api:Request_Dedi_Stats", ("API_RESULT", "ERROR"), profile)
+        stats = reply_for(2, lambda: server_actions.SEND_FUNCTION("api:Request_Dedi_Stats", ("API_RESULT", "ERROR"), profile))
         data = (stats or {}).get("data") or {}
         for key in ("fps", "mem", "uptime"):
             if isinstance(data.get(key), (int, float)):

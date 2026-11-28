@@ -459,11 +459,12 @@ class PlayersPage(QWidget):
             if not server_actions.bridge_is_connected(self):
                 self.lbl_players_empty.setText("Connect to the server to see players.")
                 return
-            server_actions.read_bridge("plys", "PLAYER_CACHE", self._on_players_read,
-                                       lambda message: print(f"[ERROR] PlayersPage: plys failed: {message}"))
-            server_actions.read_bridge('api:Request_Get_Factions {"id":1}', ("API_RESULT", "ERROR"),
-                                       self._on_factions_read,
-                                       lambda message: print(f"[ERROR] PlayersPage: Factions read failed: {message}"))
+            server_actions.read_bridge_many([
+                ("plys", "PLAYER_CACHE", self._on_players_read,
+                 lambda message: print(f"[ERROR] PlayersPage: plys failed: {message}")),
+                ('api:Request_Get_Factions {"id":1}', ("API_RESULT", "ERROR"),
+                 self._on_factions_read,
+                 lambda message: print(f"[ERROR] PlayersPage: Factions read failed: {message}"))])
         except Exception as e:
             print(f"[ERROR] PlayersPage: Refresh failed: {e}")
 
@@ -629,10 +630,11 @@ class PlayersPage(QWidget):
             entity_id = self._entity_id()
             if entity_id is None or not server_actions.bridge_is_connected(self):
                 return
-            server_actions.read_bridge(f'api:Request_Player_Info {{"id":{entity_id}}}', ("API_RESULT", "ERROR"),
-                                       self._on_info_read, lambda message: None)
-            server_actions.read_bridge(f'api:Request_Player_GetInventory {{"id":{entity_id}}}', ("API_RESULT", "ERROR"),
-                                       self._on_inventory_read, lambda message: None)
+            server_actions.read_bridge_many([
+                (f'api:Request_Player_Info {{"id":{entity_id}}}', ("API_RESULT", "ERROR"),
+                 self._on_info_read, lambda message: None),
+                (f'api:Request_Player_GetInventory {{"id":{entity_id}}}', ("API_RESULT", "ERROR"),
+                 self._on_inventory_read, lambda message: None)])
         except Exception as e:
             print(f"[ERROR] PlayersPage: Could not show the player: {e}")
 

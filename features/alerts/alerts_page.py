@@ -221,10 +221,11 @@ class AlertsPage(QWidget):
             if not server_actions.bridge_is_connected(self):
                 self.lbl_queue_empty.setText("Connect to the server to see alerts.")
                 return
-            server_actions.read_bridge("plys", "PLAYER_CACHE", self._on_players_read,
-                                       lambda message: print(f"[ERROR] AlertsPage: plys failed: {message}"))
-            server_actions.read_bridge('chat:recent:{"since":%d}' % chat_store.LAST_SEQ["value"], ("CHAT_LOG", "ERROR", "RESPONSE"),
-                                       self._on_chat_read, lambda message: None)
+            server_actions.read_bridge_many([
+                ("plys", "PLAYER_CACHE", self._on_players_read,
+                 lambda message: print(f"[ERROR] AlertsPage: plys failed: {message}")),
+                ('chat:recent:{"since":%d}' % chat_store.LAST_SEQ["value"], ("CHAT_LOG", "ERROR", "RESPONSE"),
+                 self._on_chat_read, lambda message: None)])
         except Exception as e:
             print(f"[ERROR] AlertsPage: Refresh failed: {e}")
 
