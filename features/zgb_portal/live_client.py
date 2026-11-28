@@ -20,8 +20,12 @@ import json
 import socket
 import time
 import uuid
+from typing import Any
 
-from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
+from PyQt6.QtCore import QObject, QRunnable, pyqtSignal
+
+## Qt calls that may return None, wrapped once.
+from features.shared.qt_types import global_thread_pool
 
 from .bridge_session import (
     BridgeAuthError,
@@ -44,7 +48,7 @@ class PortalBridgeError(Exception):
         super().__init__(message)
 
 
-def profile_endpoint(profile: dict) -> tuple[str, int]:
+def profile_endpoint(profile: dict | None) -> tuple[str, int]:
     host = str((profile or {}).get("input_ip", "")).strip()
     try:
         port = int(bridge_port_of(profile))
@@ -60,7 +64,7 @@ def _scrub(text: str, token: str) -> str:
     return text
 
 
-def bridge_request(profile: dict, command: str, want_type: str, req_id: str | None = None,
+def bridge_request(profile: dict | None, command: str, want_type: str, req_id: str | None = None,
                    timeout: float = DEFAULT_TIMEOUT) -> dict:
     """
     Opens a session, authenticates, sends `command`, and returns the first JSON
@@ -104,7 +108,7 @@ def bridge_request(profile: dict, command: str, want_type: str, req_id: str | No
             except (ValueError, UnicodeDecodeError):
                 continue
             # want_type may also be a tuple, e.g. ("API_RESULT", "ERROR"), so a refusal is returned, not waited out.
-            wanted = want_type if isinstance(want_type, tuple) else (want_type,)
+            wanted: Any = want_type if isinstance(want_type, tuple) else (want_type,)
             if not isinstance(payload, dict) or payload.get("type") not in wanted:
                 continue
             if req_id is not None and payload.get("req_id") not in (None, req_id):
@@ -119,7 +123,7 @@ def bridge_request(profile: dict, command: str, want_type: str, req_id: str | No
         close_short_socket(sock)
 
 
-def bridge_request_many(profile: dict, requests: list, timeout: float = DEFAULT_TIMEOUT) -> list:
+def bridge_request_many(profile: dict | None, requests: list, timeout: float = DEFAULT_TIMEOUT) -> list:
     """
     Several commands over ONE authenticated session. requests is a list of
     (command, want_type) or (command, want_type, req_id), asked one after the other.
@@ -224,7 +228,7 @@ def fetch_status(profile: dict) -> dict:
     return hot_request(profile, "status")
 
 
-def fetch_players(profile: dict) -> dict:
+def fetch_players(profile: dict | None) -> dict:
     return bridge_request(profile, "plys", "PLAYER_CACHE")
 
 
@@ -323,9 +327,9 @@ def run_async(fn, on_ok, on_error) -> None:
     signals.succeeded.connect(lambda *_: _IN_FLIGHT.discard(signals))
     signals.failed.connect(lambda *_: _IN_FLIGHT.discard(signals))
     _IN_FLIGHT.add(signals)
-    QThreadPool.globalInstance().start(_BridgeTask(fn, signals))
+    global_thread_pool().start(_BridgeTask(fn, signals))
 
 
 def wait_for_tasks(timeout_ms: int = 15000) -> bool:
     """Tests and shutdown: wait for in-flight portal requests."""
-    return QThreadPool.globalInstance().waitForDone(timeout_ms)
+    return global_thread_pool().waitForDone(timeout_ms)

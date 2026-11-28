@@ -15,6 +15,7 @@ import json
 import socket
 import time
 import uuid
+from typing import Any
 
 from features.zgb_portal.bridge_session import (
     BridgeAuthError,
@@ -72,7 +73,7 @@ class ServerFilesSession:
     def __init__(self, profile):
         self.profile = profile if isinstance(profile, dict) else {}
         self.sock = None
-        self.reader = None
+        self.reader: Any = None
         self.last_send_time = 0.0
         ## Text used in messages. The port is not secret; the password is never stored here.
         self.label = ""

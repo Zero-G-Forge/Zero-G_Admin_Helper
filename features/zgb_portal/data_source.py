@@ -20,6 +20,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from features.paths import APP_ROOT
@@ -126,7 +127,9 @@ class SampleDataSource(PortalDataSource):
             except (OSError, ValueError) as exc:
                 print(f"[WARNING] ZGB Portal: could not read {path}: {exc}")
                 self._loader_raw = {}
-        return self._loader_raw
+
+        ## Never None here: it was just read, or set to {} above.
+        return cast(dict, self._loader_raw)
 
     def loader_state(self) -> LoaderState:
         raw = self._loader_json()

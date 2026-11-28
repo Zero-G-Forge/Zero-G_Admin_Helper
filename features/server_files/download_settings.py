@@ -10,6 +10,7 @@
 
 import json
 import os
+from typing import TypeGuard
 
 # endregion
 
@@ -45,7 +46,7 @@ PREFERRED_SAVE = "Zero-G Server - Season 4"
 
 ## Same rules as the bridge's IsPlainFolderName: no separators, no ".." or ".", no control
 ## characters, no Windows reserved punctuation. Spaces inside the name are allowed.
-def is_plain_folder_name(name):
+def is_plain_folder_name(name) -> TypeGuard[str]:
     if not isinstance(name, str):
         return False
     text = name.strip()
@@ -112,7 +113,7 @@ def load_download_settings():
         for name, row in servers.items():
             if not isinstance(name, str) or not name.strip() or not isinstance(row, dict):
                 continue
-            entry = {"types": types_from_saved(row.get("types"))}
+            entry: dict = {"types": types_from_saved(row.get("types"))}
             scenario = row.get("scenario")
             save = row.get("save")
             if is_plain_folder_name(scenario):

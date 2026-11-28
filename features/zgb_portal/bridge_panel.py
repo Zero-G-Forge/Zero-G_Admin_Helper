@@ -653,7 +653,9 @@ class BridgePanel(QWidget):
         if source is None:
             from .data_source import SampleDataSource
             source = SampleDataSource()
-        self.source = source
+
+        ## Any: the live-only calls (fetch_state, server_label and so on) only run after an is_live check.
+        self.source: Any = source
         self.setObjectName("HotReloadCanvas")
         self.capture_mode = capture_mode
         self.catalog = build_catalog()
@@ -822,8 +824,12 @@ class BridgePanel(QWidget):
             # locate the item
             for i in range(self.tree.topLevelItemCount()):
                 cat = self.tree.topLevelItem(i)
+                if cat is None:
+                    continue
                 for j in range(cat.childCount()):
                     child = cat.child(j)
+                    if child is None:
+                        continue
                     if child.data(0, Qt.ItemDataRole.UserRole) == (category, name):
                         self.tree.setCurrentItem(child)
                         break

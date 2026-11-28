@@ -14,6 +14,7 @@ import json
 import os
 import re
 from datetime import datetime
+from typing import Any
 
 from features.paths import DATA_DIR
 
@@ -86,7 +87,7 @@ def local_target_path(base_folder, relative_path):
 # region Manifest
 
 ## Reads the manifest of one scenario folder. A missing or damaged file gives an empty manifest.
-def load_manifest(folder):
+def load_manifest(folder) -> dict[str, Any]:
     try:
         with open(os.path.join(folder, MANIFEST_NAME), "r", encoding="utf-8") as file_handle:
             manifest = json.load(file_handle)

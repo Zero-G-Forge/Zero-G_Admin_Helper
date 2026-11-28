@@ -23,6 +23,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from PyQt6 import sip
@@ -43,6 +44,7 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QStyle,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -681,7 +683,9 @@ class HotReloadPanel(QWidget):
     def __init__(self, capture_mode: bool = False, parent=None, embedded: bool = False,
                  source: PortalDataSource | None = None):
         super().__init__(parent)
-        self.source = source or SampleDataSource()
+
+        ## Any: the live-only calls (reload, rollback, profile and so on) only run after an is_live check.
+        self.source: Any = source or SampleDataSource()
         self.state = self.source.loader_state()
         self.capture_mode = capture_mode
         self.embedded = embedded
@@ -689,7 +693,7 @@ class HotReloadPanel(QWidget):
         self._mid_captured = False
         self._capture_dir = HERE
         self._pending_finish = None
-        self._shot_target = None  # set by the parent window so tab chrome is included
+        self._shot_target: QWidget | None = None  # set by the parent window so tab chrome is included
         self._live_inflight = False   # a status read is running
         self._live_action = False     # a confirmed reload/rollback is running
         self._last_conn = None        # last live connection state written to the log
@@ -1689,7 +1693,9 @@ class _FitScrollArea(QScrollArea):
         need = w.minimumSizeHint()
         vp = self.maximumViewportSize()
         width, height = vp.width(), vp.height()
-        sb = self.style().pixelMetric(self.style().PixelMetric.PM_ScrollBarExtent)
+        ## style() is never None for a shown widget; cast tells the type checker so.
+        style = cast(QStyle, self.style())
+        sb = style.pixelMetric(style.PixelMetric.PM_ScrollBarExtent)
         if need.height() > height:
             width -= sb
         if need.width() > width:
@@ -1714,7 +1720,9 @@ class HotReloadWindow(QWidget):
                  profile_provider=None):
         super().__init__(parent)
         self.capture_mode = capture_mode
-        self.source = source or SampleDataSource()
+
+        ## Any: same reason as in HotReloadPanel (live-only calls follow an is_live check).
+        self.source: Any = source or SampleDataSource()
         if self.source.is_live:
             self._live_source = self.source
         else:
